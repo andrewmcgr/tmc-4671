@@ -4,7 +4,6 @@ from . import bus, tmc
 # If this is a number, it's just the address
 # If a tuple, it's the address followed by a value to put in the next higher address to select that sub-register.
 
-
 Registers = {
     "CHIPINFO_DATA": 0x00, # R,Test
     "CHIPINFO_ADDR": 0x01, # RW,Test
@@ -19,10 +18,10 @@ Registers = {
     "ADC_RAW_DATA": 0x02, # R,Monitor
     "ADC_RAW_ADDR": 0x03, # RW,Monitor
 
-	"ADC_I1_RAW_ADC_I0_RAW": (0x02, 0),
-	"ADC_AGPI_A_RAW_ADC_VM_RAW": (0x02, 1),
-	"ADC_AENC_UX_RAW_ADC_AGPI_B_RAW": (0x02, 2),
-	"ADC_AENC_WY_RAW_ADC_AENC_VN_RAW": (0x02, 3),
+    "ADC_I1_RAW_ADC_I0_RAW": (0x02, 0),
+    "ADC_AGPI_A_RAW_ADC_VM_RAW": (0x02, 1),
+    "ADC_AENC_UX_RAW_ADC_AGPI_B_RAW": (0x02, 2),
+    "ADC_AENC_WY_RAW_ADC_AENC_VN_RAW": (0x02, 3),
 
     "dsADC_MCFG_B_MCFG_A": 0x04, # RW,Init
     "dsADC_MCLK_A": 0x05, # RW,Init
@@ -200,6 +199,7 @@ Registers = {
     "STATUS_MASK": 0x7D, # RW,Monitor
 }
 
+# These are read-only
 ReadRegisters = [
     "CHIPINFO_DATA", "ADC_RAW_DATA", "ADC_IWY_IUX", "ADC_IV", "AENC_WY_UX",
     "AENC_VN", "ABN_DECODER_PHI_E_PHI_M", "ABN_2_DECODER_PHI_M",
@@ -209,3 +209,33 @@ ReadRegisters = [
     "TMC4671_INPUTS_RAW", "TMC4671_OUTPUTS_RAW",
     ]
 
+Fields = {}
+
+Fields["ADC_I1_RAW_ADC_I0_RAW"] = {
+    "ADC_I0_RAW": 0xffff, "ADC_I1_RAW": 0xffff << 16
+}
+Fields["ADC_AGPI_A_RAW_ADC_VM_RAW"] = {
+    "ADC_AGPI_A_RAW": 0xffff, "ADC_VM_RAW": 0xffff << 16
+}
+Fields["ADC_AENC_UX_RAW_ADC_AGPI_B_RAW"] = {
+    "ADC_AENC_UX_RAW": 0xffff, "ADC_AGPI_B_RAW": 0xffff << 16
+}
+Fields["ADC_AENC_WY_RAW_ADC_AENC_VN_RAW"] = {
+    "ADC_AENC_WY_RAW": 0xffff, "ADC_AENC_VN_RAW": 0xffff << 16
+}
+
+Fields["dsADC_MCFG_B_MCFG_A"] = {
+    "cfg_dsmodulator_a": 3,
+    "mclk_polarity_a": 1 << 2,
+    "mdat_polarity_a": 1 << 3,
+    "sel_nclk_mclk_i_a": 1 << 4,
+    "cfg_dsmodulator_b": 3 <<16,
+    "mclk_polarity_b": 1 << 18,
+    "mdat_polarity_b": 1 << 19,
+    "sel_nclk_mclk_i_b": 1 << 20
+}
+
+Fields["dsADC_MDEC_B_MDEC_A"] = {
+    "dsADC_MDEC_A": 0xffff,
+    "dsADC_MDEC_B": 0xffff << 16
+}
