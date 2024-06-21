@@ -313,3 +313,103 @@ Fields["AENC_VN"] = {
     "AENC_VN": 0xffff,
 }
 
+Fields["PWM_POLARITIES"] = {
+    "PWM_POLARITIES_0": 1,
+    "PWM_POLARITIES_1": 1 << 1,
+}
+
+Fields["PWM_BBM_H_BBM_L"] = {
+    "PWM_BBM_L": 0xff,
+    "PWM_BBM_H": 0xff << 8,
+}
+
+Fields["PWM_SV_CHOP"] = {
+    "PWM_CHOP": 0xff,
+    "PWM_SV": 1 << 8,
+}
+
+Fields["MOTOR_TYPE_N_POLE_PAIRS"] = {
+    "N_POLE_PAIRS": 0xffff,
+    "MOTOR_TYPE": 0xff << 16,
+}
+
+Fields["OPENLOOP_MODE"] = {
+    "OPENLOOP_PHI_DIRECTION": 0x1 << 12,
+}
+
+Fields["UQ_UD_EXT"] = {
+    "UD_EXT": 0xffff,
+    "UQ_EXT": 0xffff << 16
+}
+
+Fields["ABN_DECODER_MODE" = {
+    "apol": 1,
+    "bpol": 1 << 1,
+    "npol": 1 << 2,
+    "use_abn_as_n": 1 <<3,
+    "cln": 1 << 8,
+    "direction": 1 << 12,
+}
+
+Fields["ABN_DECODER_PHI_E_PHI_M_OFFSET"] = {
+    "ABN_DECODER_PHI_M_OFFSET": 0xffff,
+    "ABN_DECODER_PHI_E_OFFSET": 0xffff << 16
+}
+
+Fields["ABN_DECODER_PHI_E_PHI_M"] = {
+    "ABN_DECODER_PHI_M": 0xffff,
+    "ABN_DECODER_PHI_E": 0xffff << 16
+}
+
+Fields["ABN_2_DECODER_MODE" = {
+    "apol": 1,
+    "bpol": 1 << 1,
+    "npol": 1 << 2,
+    "use_abn_as_n": 1 <<3,
+    "cln": 1 << 8,
+    "direction": 1 << 12,
+}
+
+Fields["ABN_2_DECODER_PHI_E_PHI_M_OFFSET"] = {
+    "ABN_2_DECODER_PHI_M_OFFSET": 0xffff,
+    "ABN_2_DECODER_PHI_E_OFFSET": 0xffff << 16
+}
+
+Fields["ABN_2_DECODER_PHI_E_PHI_M"] = {
+    "ABN_2_DECODER_PHI_M": 0xffff,
+    "ABN_2_DECODER_PHI_E": 0xffff << 16
+}
+
+Fields["HALL_MODE"] = {
+    "polarity": 1,
+    "sync": 1 << 4,
+    "interp": 1 << 8,
+    "dir": 1 << 12,
+    "HALL_BLANK": 0xfff << 16,
+}
+
+Fields["HALL_POSITION_060_000"] = {
+    "HALL_POSITION_000": 0xffff,
+    "HALL_POSITION_060": 0xffff << 16
+}
+
+Fields["HALL_POSITION_180_120"] = {
+    "HALL_POSITION_120": 0xffff,
+    "HALL_POSITION_180": 0xffff << 16
+}
+
+Fields["HALL_POSITION_300_240"] = {
+    "HALL_POSITION_240": 0xffff,
+    "HALL_POSITION_300": 0xffff << 16
+}
+
+Fields["HALL_PHI_E_PHI_M_OFFSET"] = {
+    "HALL_PHI_M_OFFSET": 0xffff,
+    "HALL_PHI_E_OFFSET": 0xffff << 16
+}
+
+Fields["HALL_PHI_E_INTERPOLATED_PHI_E"] = {
+    "HALL_PHI_E": 0xffff,
+    "HALL_PHI_E_INTERPOLATED": 0xffff << 16
+}
+
