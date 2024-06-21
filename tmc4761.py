@@ -413,3 +413,19 @@ Fields["HALL_PHI_E_INTERPOLATED_PHI_E"] = {
     "HALL_PHI_E_INTERPOLATED": 0xffff << 16
 }
 
+Fields["AENC_DECODER_MODE"] = {
+    "deg": 1,
+    "dir": 1 << 12,
+}
+
+Fields["AENC_DECODER_PHI_E_PHI_M_OFFSET"] = {
+    "AENC_DECODER_PHI_M_OFFSET": 0xffff,
+    "AENC_DECODER_PHI_E_OFFSET": 0xffff << 16
+}
+
+Fields["AENC_DECODER_PHI_E_PHI_M"] = {
+    "AENC_DECODER_PHI_M": 0xffff,
+    "AENC_DECODER_PHI_E": 0xffff << 16
+}
+
+# TODO: CONFIG_DATA
