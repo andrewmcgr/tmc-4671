@@ -239,3 +239,77 @@ Fields["dsADC_MDEC_B_MDEC_A"] = {
     "dsADC_MDEC_A": 0xffff,
     "dsADC_MDEC_B": 0xffff << 16
 }
+
+Fields["ADC_I1_SCALE_OFFSET"] = {
+    "ADC_I1_OFFSET": 0xffff,
+    "ADC_I1_SCALE": 0xffff << 16
+}
+
+Fields["ADC_I0_SCALE_OFFSET"] = {
+    "ADC_I0_OFFSET": 0xffff,
+    "ADC_I0_SCALE": 0xffff << 16
+}
+
+Fields["ADC_I_SELECT"] = {
+    "ADC_I0_SELECT": 0xff,
+    "ADC_I_UX_SELECT": 0xff << 8,
+    "ADC_I_V_SELECT": 0xff << 16,
+    "ADC_I_WY_SELECT": 0xff << 24,
+}
+
+Fields["ADC_I1_I0_EXT"] = {
+    "ADC_I0_EXT": 0xffff,
+    "ADC_I1_EXT": 0xffff << 16
+}
+
+
+Fields["DS_ANALOG_INPUT_STAGE_CFG"] = {
+    "ADC_I0": 0xf,
+    "ADC_I1": 0xf << 4,
+    "ADC_VM": 0xf << 8,
+    "ADC_AGPI_A": 0xf << 12,
+    "ADC_AGPI_B": 0xf << 16,
+    "ADC_AENC_UX": 0xf << 20,
+    "ADC_AENC_VN": 0xf << 24,
+    "ADC_AENC_WY": 0xf << 28,
+}
+
+Fields["AENC_0_SCALE_OFFSET"] = {
+    "AENC_0_OFFSET": 0xffff,
+    "AENC_0_SCALE": 0xffff << 16
+}
+
+Fields["AENC_1_SCALE_OFFSET"] = {
+    "AENC_1_OFFSET": 0xffff,
+    "AENC_1_SCALE": 0xffff << 16
+}
+
+Fields["AENC_2_SCALE_OFFSET"] = {
+    "AENC_2_OFFSET": 0xffff,
+    "AENC_2_SCALE": 0xffff << 16
+}
+
+Fields["AENC_SELECT"] = {
+    "AENC_0_SELECT": 0xff,
+    "AENC_1_SELECT": 0xff << 8,
+    "AENC_2_SELECT": 0xff << 16,
+}
+
+Fields["ADC_IWY_IUX"] = {
+    "ADC_IUX": 0xffff,
+    "ADC_IWY": 0xffff << 16
+}
+
+Fields["ADC_IV"] = {
+    "ADC_IV": 0xffff,
+}
+
+Fields["AENC_WY_UX"] = {
+    "AENC_UX": 0xffff,
+    "AENC_WY": 0xffff << 16
+}
+
+Fields["AENC_VN"] = {
+    "AENC_VN": 0xffff,
+}
+
