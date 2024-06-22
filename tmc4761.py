@@ -429,3 +429,83 @@ Fields["AENC_DECODER_PHI_E_PHI_M"] = {
 }
 
 # TODO: CONFIG_DATA
+# CONFIG_DATA changes layout depending on the selected address
+
+Fields["VELOCITY_SELECTION"] = {
+    "VELOCITY_SELECTION": 0xff,
+    "VELOCITY_METER_SELECTION": 0xff << 8,
+}
+
+Fields["PID_FLUX_P_FLUX_I"] = {
+    "PID_FLUX_I": 0xffff,
+    "PID_FLUX_P": 0xffff << 16
+}
+
+Fields["PID_TORQUE_P_TORQUE_I"] = {
+    "PID_TORQUE_I": 0xffff,
+    "PID_TORQUE_P": 0xffff << 16
+}
+
+Fields["PID_VELOCITY_P_VELOCITY_I"] = {
+    "PID_VELOCITY_I": 0xffff,
+    "PID_VELOCITY_P": 0xffff << 16
+}
+
+Fields["PID_POSITION_P_POSITION_I"] = {
+    "PID_POSITION_I": 0xffff,
+    "PID_POSITION_P": 0xffff << 16
+}
+
+Fields["MODE_RAMP_MODE_MOTION"] = {
+    "MODE_MOTION": 0xff,
+    "MODE_PID_SMPL": 0x7f << 24,
+    "MODE_PID_TYPE": 1 << 31
+}
+
+Fields["PID_TORQUE_FLUX_OFFSET"] = {
+    "PID_FLUX_OFFSET": 0xffff,
+    "PID_TORQUE_OFFSET": 0xffff << 16
+}
+
+Fields["PID_TORQUE_FLUX_ACTUAL"] = {
+    "PID_FLUX_ACTUAL": 0xffff,
+    "PID_TORQUE_ACTUAL": 0xffff << 16
+}
+
+# TODO: if necessary, INTERIM_DATA
+
+Fields["ADC_VM_LIMITS"] = {
+    "ADC_VM_LIMIT_LOW": 0xffff,
+    "ADC_VM_LIMIT_HIGH": 0xffff << 16
+}
+
+# TODO: if necessary, TMC467_*_RAW
+# TODO: if necessary, GPIO_dsADCI_CONFIG
+
+Fields["STATUS_FLAGS"] = {
+    "pid_x_target_limit": 1 << 0,
+    "pid_x_errsum_limit": 1 << 2,
+    "pid_x_output_limit": 1 << 3,
+    "pid_v_target_limit": 1 << 4,
+    "pid_v_errsum_limit": 1 << 6,
+    "pid_v_output_limit": 1 << 7,
+    "pid_id_target_limit": 1 << 8,
+    "pid_id_errsum_limit": 1 << 10,
+    "pid_id_output_limit": 1 << 11,
+    "pid_iq_target_limit": 1 << 12,
+    "pid_iq_errsum_limit": 1 << 14,
+    "pid_iq_output_limit": 1 << 15,
+    "ipark_cirlim_limit_u_d": 1 << 16,
+    "ipark_cirlim_limit_u_q": 1 << 17,
+    "ipark_cirlim_limit_u_r": 1 << 18,
+    "ref_sw_r": 1 << 20,
+    "ref_sw_h": 1 << 21,
+    "ref_sw_l": 1 << 22,
+    "pwm_min": 1 << 24,
+    "pwm_max": 1 << 25,
+    "adc_i_clipped": 1 << 26,
+    "aenc_clipped": 1 << 27,
+    "enc_n": 1 << 28,
+    "enc_2_n": 1 << 29,
+    "aenc_n": 1 << 30,
+}
