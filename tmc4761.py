@@ -342,7 +342,7 @@ Fields["UQ_UD_EXT"] = {
     "UQ_EXT": 0xffff << 16
 }
 
-Fields["ABN_DECODER_MODE" = {
+Fields["ABN_DECODER_MODE"] = {
     "apol": 1,
     "bpol": 1 << 1,
     "npol": 1 << 2,
@@ -361,7 +361,7 @@ Fields["ABN_DECODER_PHI_E_PHI_M"] = {
     "ABN_DECODER_PHI_E": 0xffff << 16
 }
 
-Fields["ABN_2_DECODER_MODE" = {
+Fields["ABN_2_DECODER_MODE"] = {
     "apol": 1,
     "bpol": 1 << 1,
     "npol": 1 << 2,
