@@ -1,7 +1,7 @@
 # TMC4671 configuration
 from . import bus, tmc
 
-TMC_FREQUENCY=20000000.
+TMC_FREQUENCY=25000000.
 
 # Tuple is the address followed by a value to put in the next higher address to select that sub-register, or none to just go straight there.
 
