@@ -534,7 +534,8 @@ class MCU_TMC_SPI_simple:
             return val
         write_cmd = self._build_cmd(data, chain_pos)
         dummy_read = self._build_cmd([0x00, 0x00, 0x00, 0x00, 0x00], chain_pos)
-        params = self.spi.spi_transfer_with_preface(data, [0x00, 0x00, 0x00, 0x00, 0x00],
+        params = self.spi.spi_transfer_with_preface(data,
+                                                   [0x00, 0x00, 0x00, 0x00, 0x00],
                                                    minclock=minclock)
         pr = bytearray(params['response'])
         return (pr[1] << 24) | (pr[2] << 16) | (pr[3] << 8) | pr[4]
