@@ -1,8 +1,9 @@
 # TMC4671 configuration
 from . import bus, tmc
 
-# If this is a number, it's just the address
-# If a tuple, it's the address followed by a value to put in the next higher address to select that sub-register.
+TMC_FREQUENCY=20000000.
+
+# Tuple is the address followed by a value to put in the next higher address to select that sub-register, or none to just go straight there.
 
 Registers = {
     "CHIPINFO_DATA": (0x00, None) # R,Test
@@ -200,14 +201,14 @@ Registers = {
 }
 
 # These are read-only
-ReadRegisters = [
+ReadOnlyRegisters = {
     "CHIPINFO_DATA", "ADC_RAW_DATA", "ADC_IWY_IUX", "ADC_IV", "AENC_WY_UX",
     "AENC_VN", "ABN_DECODER_PHI_E_PHI_M", "ABN_2_DECODER_PHI_M",
     "HALL_PHI_E_INTERPOLATED_PHI_E", "HALL_PHI_M", "AENC_DECODER_PHI_A_RAW",
     "AENC_DECODER_PHI_A", "AENC_DECODER_PHI_E_PHI_M", "PHI_E",
     "PID_TORQUE_FLUX_ACTUAL", "PID_VELOCITY_ACTUAL", "PID_ERROR_DATA",
     "TMC4671_INPUTS_RAW", "TMC4671_OUTPUTS_RAW",
-    ]
+    }
 
 Fields = {}
 
@@ -510,6 +511,10 @@ Fields["STATUS_FLAGS"] = {
     "aenc_n": 1 << 30,
 }
 
+SignedFields = []
+
+FieldFormatters = []
+
 # 4671 does not support chaining, so that's removed
 class MCU_TMC_SPI_simple:
     def __init__(self, config):
@@ -556,25 +561,33 @@ class MCU_TMC_SPI:
     def get_register(self, reg_name):
         reg, addr = self.name_to_reg[reg_name]
         with self.mutex:
-			if addr is not None:
-				self.tmc_spi.reg_write(reg+1, addr)
-			read = self.tmc_spi.reg_read(reg)
+            if addr is not None:
+                self.tmc_spi.reg_write(reg+1, addr)
+            read = self.tmc_spi.reg_read(reg)
         return read
     def set_register(self, reg_name, val, print_time=None):
         reg, addr = self.name_to_reg[reg_name]
         with self.mutex:
-			if addr is not None:
-				for retry in range(5):
-					v = self.tmc_spi.reg_write(reg+1, addr, print_time)
-					if v == val:
-						break
-			if v == val:
-				for retry in range(5):
-					v = self.tmc_spi.reg_write(reg, val, self.chain_pos, print_time)
-					if v == val:
-						return
+            if addr is not None:
+                for retry in range(5):
+                    v = self.tmc_spi.reg_write(reg+1, addr, print_time)
+                    if v == val:
+                        break
+            if v == val:
+                for retry in range(5):
+                    v = self.tmc_spi.reg_write(reg, val, print_time)
+                    if v == val:
+                        return
         raise self.printer.command_error(
             "Unable to write tmc spi '%s' register %s" % (self.name, reg_name))
     def get_tmc_frequency(self):
         return self.tmc_frequency
 
+class TMC4761:
+    def __init__(self, config):
+        self.fields=FieldHelper(Fields, SignedFields, FieldFormatters)
+        self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
+                                   TMC_FREQUENCY)
+
+def load_config_prefix(config):
+    return TMC4671(config)
