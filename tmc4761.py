@@ -6,8 +6,8 @@ TMC_FREQUENCY=25000000.
 # Tuple is the address followed by a value to put in the next higher address to select that sub-register, or none to just go straight there.
 
 Registers = {
-    "CHIPINFO_DATA": (0x00, None) # R,Test
-    "CHIPINFO_ADDR": (0x01, None) # RW,Test
+    "CHIPINFO_DATA": (0x00, None), # R,Test
+    "CHIPINFO_ADDR": (0x01, None), # RW,Test
 
     "CHIPINFO_SI_TYPE": (0x00, 0),
     "CHIPINFO_SI_VERSION": (0x00, 1),
@@ -16,75 +16,75 @@ Registers = {
     "CHIPINFO_SI_VARIANT": (0x00, 4),
     "CHIPINFO_SI_BUILD": (0x00, 5),
 
-    "ADC_RAW_DATA": (0x02, None) # R,Monitor
-    "ADC_RAW_ADDR": (0x03, None) # RW,Monitor
+    "ADC_RAW_DATA": (0x02, None), # R,Monitor
+    "ADC_RAW_ADDR": (0x03, None), # RW,Monitor
 
     "ADC_I1_RAW_ADC_I0_RAW": (0x02, 0),
     "ADC_AGPI_A_RAW_ADC_VM_RAW": (0x02, 1),
     "ADC_AENC_UX_RAW_ADC_AGPI_B_RAW": (0x02, 2),
     "ADC_AENC_WY_RAW_ADC_AENC_VN_RAW": (0x02, 3),
 
-    "dsADC_MCFG_B_MCFG_A": (0x04, None) # RW,Init
-    "dsADC_MCLK_A": (0x05, None) # RW,Init
-    "dsADC_MCLK_B": (0x06, None) # RW,Init
-    "dsADC_MDEC_B_MDEC_A": (0x07, None) # RW,Init
-    "ADC_I1_SCALE_OFFSET": (0x08, None) # RW,Init
-    "ADC_I0_SCALE_OFFSET": (0x09, None) # RW,Init
-    "ADC_I_SELECT": (0x0A, None) # RW,Init
-    "ADC_I1_I0_EXT": (0x0B, None) # RW,Test
-    "DS_ANALOG_INPUT_STAGE_CFG": (0x0C, None) # RW,Test
-    "AENC_0_SCALE_OFFSET": (0x0D, None) # RW,Init
-    "AENC_1_SCALE_OFFSET": (0x0E, None) # RW,Init
-    "AENC_2_SCALE_OFFSET": (0x0F, None) # RW,Init
-    "AENC_SELECT": (0x11, None) # RW,Init
-    "ADC_IWY_IUX": (0x12, None) # R,Monitor
-    "ADC_IV": (0x13, None) # R,Monitor
-    "AENC_WY_UX": (0x15, None) # R,Monitor
-    "AENC_VN": (0x16, None) # R,Monitor
-    "PWM_POLARITIES": (0x17, None) # RW,Init
-    "PWM_MAXCNT": (0x18, None) # RW,Init
-    "PWM_BBM_H_BBM_L": (0x19, None) # RW,Init
-    "PWM_SV_CHOP": (0x1A, None) # RW,Init
-    "MOTOR_TYPE_N_POLE_PAIRS": (0x1B, None) # RW,Init
-    "PHI_E_EXT": (0x1C, None) # RW,Test
-    "OPENLOOP_MODE": (0x1F, None) # RW,Init
-    "OPENLOOP_ACCELERATION": (0x20, None) # RW,Init
-    "OPENLOOP_VELOCITY_TARGET": (0x21, None) # RW,Init
-    "OPENLOOP_VELOCITY_ACTUAL": (0x22, None) # RW,Monitor
-    "OPENLOOP_PHI": (0x23, None) # RW,Monitor/Test
-    "UQ_UD_EXT": (0x24, None) # RW,Init/Test
-    "ABN_DECODER_MODE": (0x25, None) # RW,Init
-    "ABN_DECODER_PPR": (0x26, None) # RW,Init
-    "ABN_DECODER_COUNT": (0x27, None) # RW,Init/Test/Monitor
-    "ABN_DECODER_COUNT_N": (0x28, None) # RW,Init/Test/Monitor
-    "ABN_DECODER_PHI_E_PHI_M_OFFSET": (0x29, None) # RW,Init
-    "ABN_DECODER_PHI_E_PHI_M": (0x2A, None) # R,Monitor
-    "ABN_2_DECODER_MODE": (0x2C, None) # RW,Init
-    "ABN_2_DECODER_PPR": (0x2D, None) # RW,Init
-    "ABN_2_DECODER_COUNT": (0x2E, None) # RW,Init/Test/Monitor
-    "ABN_2_DECODER_COUNT_N": (0x2F, None) # RW,Init/Test/Monitor
-    "ABN_2_DECODER_PHI_M_OFFSET": (0x30, None) # RW,Init
-    "ABN_2_DECODER_PHI_M": (0x31, None) # R,Monitor
-    "HALL_MODE": (0x33, None) # RW,Init
-    "HALL_POSITION_060_000": (0x34, None) # RW,Init
-    "HALL_POSITION_180_120": (0x35, None) # RW,Init
-    "HALL_POSITION_300_240": (0x36, None) # RW,Init
-    "HALL_PHI_E_PHI_M_OFFSET": (0x37, None) # RW,Init
-    "HALL_DPHI_MAX": (0x38, None) # RW,Init
-    "HALL_PHI_E_INTERPOLATED_PHI_E": (0x39, None) # R,Monitor
-    "HALL_PHI_M": (0x3A, None) # R,Monitor
-    "AENC_DECODER_MODE": (0x3B, None) # RW,Init
-    "AENC_DECODER_N_THRESHOLD": (0x3C, None) # RW,Init
-    "AENC_DECODER_PHI_A_RAW": (0x3D, None) # R,Monitor
-    "AENC_DECODER_PHI_A_OFFSET": (0x3E, None) # RW,Init
-    "AENC_DECODER_PHI_A": (0x3F, None) # R,Monitor
-    "AENC_DECODER_PPR": (0x40, None) # RW,Init
-    "AENC_DECODER_COUNT": (0x41, None) # RW,Monitor
-    "AENC_DECODER_COUNT_N": (0x42, None) # RW,Monitor/Init
-    "AENC_DECODER_PHI_E_PHI_M_OFFSET": (0x45, None) # RW,Init
-    "AENC_DECODER_PHI_E_PHI_M": (0x46, None) # R,Monitor
-    "CONFIG_DATA": (0x4D, None) # RW,Init
-    "CONFIG_ADDR": (0x4E, None) # RW,Init
+    "dsADC_MCFG_B_MCFG_A": (0x04, None), # RW,Init
+    "dsADC_MCLK_A": (0x05, None), # RW,Init
+    "dsADC_MCLK_B": (0x06, None), # RW,Init
+    "dsADC_MDEC_B_MDEC_A": (0x07, None), # RW,Init
+    "ADC_I1_SCALE_OFFSET": (0x08, None), # RW,Init
+    "ADC_I0_SCALE_OFFSET": (0x09, None), # RW,Init
+    "ADC_I_SELECT": (0x0A, None), # RW,Init
+    "ADC_I1_I0_EXT": (0x0B, None), # RW,Test
+    "DS_ANALOG_INPUT_STAGE_CFG": (0x0C, None), # RW,Test
+    "AENC_0_SCALE_OFFSET": (0x0D, None), # RW,Init
+    "AENC_1_SCALE_OFFSET": (0x0E, None), # RW,Init
+    "AENC_2_SCALE_OFFSET": (0x0F, None), # RW,Init
+    "AENC_SELECT": (0x11, None), # RW,Init
+    "ADC_IWY_IUX": (0x12, None), # R,Monitor
+    "ADC_IV": (0x13, None), # R,Monitor
+    "AENC_WY_UX": (0x15, None), # R,Monitor
+    "AENC_VN": (0x16, None), # R,Monitor
+    "PWM_POLARITIES": (0x17, None), # RW,Init
+    "PWM_MAXCNT": (0x18, None), # RW,Init
+    "PWM_BBM_H_BBM_L": (0x19, None), # RW,Init
+    "PWM_SV_CHOP": (0x1A, None), # RW,Init
+    "MOTOR_TYPE_N_POLE_PAIRS": (0x1B, None), # RW,Init
+    "PHI_E_EXT": (0x1C, None), # RW,Test
+    "OPENLOOP_MODE": (0x1F, None), # RW,Init
+    "OPENLOOP_ACCELERATION": (0x20, None), # RW,Init
+    "OPENLOOP_VELOCITY_TARGET": (0x21, None), # RW,Init
+    "OPENLOOP_VELOCITY_ACTUAL": (0x22, None), # RW,Monitor
+    "OPENLOOP_PHI": (0x23, None), # RW,Monitor/Test
+    "UQ_UD_EXT": (0x24, None), # RW,Init/Test
+    "ABN_DECODER_MODE": (0x25, None), # RW,Init
+    "ABN_DECODER_PPR": (0x26, None), # RW,Init
+    "ABN_DECODER_COUNT": (0x27, None), # RW,Init/Test/Monitor
+    "ABN_DECODER_COUNT_N": (0x28, None), # RW,Init/Test/Monitor
+    "ABN_DECODER_PHI_E_PHI_M_OFFSET": (0x29, None), # RW,Init
+    "ABN_DECODER_PHI_E_PHI_M": (0x2A, None), # R,Monitor
+    "ABN_2_DECODER_MODE": (0x2C, None), # RW,Init
+    "ABN_2_DECODER_PPR": (0x2D, None), # RW,Init
+    "ABN_2_DECODER_COUNT": (0x2E, None), # RW,Init/Test/Monitor
+    "ABN_2_DECODER_COUNT_N": (0x2F, None), # RW,Init/Test/Monitor
+    "ABN_2_DECODER_PHI_M_OFFSET": (0x30, None), # RW,Init
+    "ABN_2_DECODER_PHI_M": (0x31, None), # R,Monitor
+    "HALL_MODE": (0x33, None), # RW,Init
+    "HALL_POSITION_060_000": (0x34, None), # RW,Init
+    "HALL_POSITION_180_120": (0x35, None), # RW,Init
+    "HALL_POSITION_300_240": (0x36, None), # RW,Init
+    "HALL_PHI_E_PHI_M_OFFSET": (0x37, None), # RW,Init
+    "HALL_DPHI_MAX": (0x38, None), # RW,Init
+    "HALL_PHI_E_INTERPOLATED_PHI_E": (0x39, None), # R,Monitor
+    "HALL_PHI_M": (0x3A, None), # R,Monitor
+    "AENC_DECODER_MODE": (0x3B, None), # RW,Init
+    "AENC_DECODER_N_THRESHOLD": (0x3C, None), # RW,Init
+    "AENC_DECODER_PHI_A_RAW": (0x3D, None), # R,Monitor
+    "AENC_DECODER_PHI_A_OFFSET": (0x3E, None), # RW,Init
+    "AENC_DECODER_PHI_A": (0x3F, None), # R,Monitor
+    "AENC_DECODER_PPR": (0x40, None), # RW,Init
+    "AENC_DECODER_COUNT": (0x41, None), # RW,Monitor
+    "AENC_DECODER_COUNT_N": (0x42, None), # RW,Monitor/Init
+    "AENC_DECODER_PHI_E_PHI_M_OFFSET": (0x45, None), # RW,Init
+    "AENC_DECODER_PHI_E_PHI_M": (0x46, None), # R,Monitor
+    "CONFIG_DATA": (0x4D, None), # RW,Init
+    "CONFIG_ADDR": (0x4E, None), # RW,Init
 
     "CONFIG_biquad_x_a_1": (0x4D, 1),
     "CONFIG_biquad_x_a_2": (0x4D, 2),
@@ -115,30 +115,30 @@ Registers = {
     "CONFIG_SINGLE_PIN_IF_SCALE_OFFSET": (0x4D, 61),
     "CONFIG_ADVANCED_PI_REPRESENT": (0x4D, 62),
 
-    "VELOCITY_SELECTION": (0x50, None) # RW,Init
-    "POSITION_SELECTION": (0x51, None) # RW,Init
-    "PHI_E_SELECTION": (0x52, None) # RW,Init
-    "PHI_E": (0x53, None) # R,Monitor
-    "PID_FLUX_P_FLUX_I": (0x54, None) # RW,Init
-    "PID_TORQUE_P_TORQUE_I": (0x56, None) # RW,Init
-    "PID_VELOCITY_P_VELOCITY_I": (0x58, None) # RW,Init
-    "PID_POSITION_P_POSITION_I": (0x5A, None) # RW,Init
-    "PIDOUT_UQ_UD_LIMITS": (0x5D, None) # RW,Init
-    "PID_TORQUE_FLUX_LIMITS": (0x5E, None) # RW,Init
-    "PID_VELOCITY_LIMIT": (0x60, None) # RW,Init
-    "PID_POSITION_LIMIT_LOW": (0x61, None) # RW,Init
-    "PID_POSITION_LIMIT_HIGH": (0x62, None) # RW,Init
-    "MODE_RAMP_MODE_MOTION": (0x63, None) # RW,Init
-    "PID_TORQUE_FLUX_TARGET": (0x64, None) # RW,Control
-    "PID_TORQUE_FLUX_OFFSET": (0x65, None) # RW,Control
-    "PID_VELOCITY_TARGET": (0x66, None) # RW,Control
-    "PID_VELOCITY_OFFSET": (0x67, None) # RW,Control
-    "PID_POSITION_TARGET": (0x68, None) # RW,Control
-    "PID_TORQUE_FLUX_ACTUAL": (0x69, None) # R,Monitor
-    "PID_VELOCITY_ACTUAL": (0x6A, None) # R,Monitor
-    "PID_POSITION_ACTUAL": (0x6B, None) # RW,Monitor/Init
-    "PID_ERROR_DATA": (0x6C, None) # R,Test
-    "PID_ERROR_ADDR": (0x6D, None) # RW,Test
+    "VELOCITY_SELECTION": (0x50, None), # RW,Init
+    "POSITION_SELECTION": (0x51, None), # RW,Init
+    "PHI_E_SELECTION": (0x52, None), # RW,Init
+    "PHI_E": (0x53, None), # R,Monitor
+    "PID_FLUX_P_FLUX_I": (0x54, None), # RW,Init
+    "PID_TORQUE_P_TORQUE_I": (0x56, None), # RW,Init
+    "PID_VELOCITY_P_VELOCITY_I": (0x58, None), # RW,Init
+    "PID_POSITION_P_POSITION_I": (0x5A, None), # RW,Init
+    "PIDOUT_UQ_UD_LIMITS": (0x5D, None), # RW,Init
+    "PID_TORQUE_FLUX_LIMITS": (0x5E, None), # RW,Init
+    "PID_VELOCITY_LIMIT": (0x60, None), # RW,Init
+    "PID_POSITION_LIMIT_LOW": (0x61, None), # RW,Init
+    "PID_POSITION_LIMIT_HIGH": (0x62, None), # RW,Init
+    "MODE_RAMP_MODE_MOTION": (0x63, None), # RW,Init
+    "PID_TORQUE_FLUX_TARGET": (0x64, None), # RW,Control
+    "PID_TORQUE_FLUX_OFFSET": (0x65, None), # RW,Control
+    "PID_VELOCITY_TARGET": (0x66, None), # RW,Control
+    "PID_VELOCITY_OFFSET": (0x67, None), # RW,Control
+    "PID_POSITION_TARGET": (0x68, None), # RW,Control
+    "PID_TORQUE_FLUX_ACTUAL": (0x69, None), # R,Monitor
+    "PID_VELOCITY_ACTUAL": (0x6A, None), # R,Monitor
+    "PID_POSITION_ACTUAL": (0x6B, None), # RW,Monitor/Init
+    "PID_ERROR_DATA": (0x6C, None), # R,Test
+    "PID_ERROR_ADDR": (0x6D, None), # RW,Test
 
     "PID_ERROR_PID_TORQUE_ERROR": (0x6C, 0),
     "PID_ERROR_PID_FLUX_ERROR": (0x6C, 1),
@@ -149,8 +149,8 @@ Registers = {
     "PID_ERROR_PID_VELOCITY_ERROR_SUM": (0x6C, 6),
     "PID_ERROR_PID_POSITION_ERROR_SUM": (0x6C, 7),
 
-    "INTERIM_DATA": (0x6E, None) # RW,Monitor
-    "INTERIM_ADDR": (0x6F, None) # RW,Monitor
+    "INTERIM_DATA": (0x6E, None), # RW,Monitor
+    "INTERIM_ADDR": (0x6F, None), # RW,Monitor
 
     "INTERIM_PIDIN_TARGET_TORQUE": (0x6E, 0),
     "INTERIM_PIDIN_TARGET_FLUX": (0x6E, 1),
@@ -190,14 +190,14 @@ Registers = {
     "INTERIM_SINGLE_PIN_IF_VELOCITY_TARGET": (0x6E, 43),
     "INTERIM_SINGLE_PIN_IF_POSITION_TARGET": (0x6E, 44),
 
-    "ADC_VM_LIMITS": (0x75, None) # RW,Init
-    "TMC4671_INPUTS_RAW": (0x76, None) # R,Test/Monitor
-    "TMC4671_OUTPUTS_RAW": (0x77, None) # R,Test/Monitor
-    "STEP_WIDTH": (0x78, None) # RW,Init
-    "UART_BPS": (0x79, None) # RW,Init
-    "GPIO_dsADCI_CONFIG": (0x7B, None) # RW,Init
-    "STATUS_FLAGS": (0x7C, None) # RW,Monitor
-    "STATUS_MASK": (0x7D, None) # RW,Monitor
+    "ADC_VM_LIMITS": (0x75, None), # RW,Init
+    "TMC4671_INPUTS_RAW": (0x76, None), # R,Test/Monitor
+    "TMC4671_OUTPUTS_RAW": (0x77, None), # R,Test/Monitor
+    "STEP_WIDTH": (0x78, None), # RW,Init
+    "UART_BPS": (0x79, None), # RW,Init
+    "GPIO_dsADCI_CONFIG": (0x7B, None), # RW,Init
+    "STATUS_FLAGS": (0x7C, None), # RW,Monitor
+    "STATUS_MASK": (0x7D, None), # RW,Monitor
 }
 
 # These are read-only
@@ -515,14 +515,36 @@ SignedFields = []
 
 FieldFormatters = []
 
+# TODO: actually make this do something
+MAX_CURRENT = 10.000
+
+class TMCCurrentHelper:
+    def __init__(self, config, mcu_tmc):
+        self.printer = config.get_printer()
+        self.name = config.get_name().split()[-1]
+        self.mcu_tmc = mcu_tmc
+        self.fields = mcu_tmc.get_fields()
+        self.run_current = config.getfloat('run_current',
+                                      above=0., maxval=MAX_CURRENT)
+        self.hold_current = config.getfloat('hold_current', MAX_CURRENT,
+                                       above=0., maxval=MAX_CURRENT)
+        self.req_hold_current = hold_current
+    def get_current(self):
+        return self.run_current, self.hold_current, self.req_hold_current, MAX_CURRENT
+    def set_current(self, run_current, hold_current, print_time):
+        self.run_current = run_current
+        self.hold_current = hold_current
+        self.req_hold_current = hold_current
+
+
 # 4671 does not support chaining, so that's removed
 class MCU_TMC_SPI_simple:
     def __init__(self, config):
-		self.printer = config.get_printer()
+        self.printer = config.get_printer()
         self.mutex = self.printer.get_reactor().mutex()
-		self.spi = bus.MCU_SPI_from_config(config, 3, default_speed=4000000)
+        self.spi = bus.MCU_SPI_from_config(config, 3, default_speed=4000000)
     def reg_read(self, reg):
-		self.spi.spi_send([reg, 0x00, 0x00, 0x00, 0x00])
+        self.spi.spi_send([reg, 0x00, 0x00, 0x00, 0x00])
         if self.printer.get_start_args().get('debugoutput') is not None:
             return 0
         params = self.spi.spi_transfer(cmd)
@@ -583,11 +605,18 @@ class MCU_TMC_SPI:
     def get_tmc_frequency(self):
         return self.tmc_frequency
 
-class TMC4761:
+class TMC4671:
     def __init__(self, config):
+        self.printer = config.get_printer()
         self.fields=FieldHelper(Fields, SignedFields, FieldFormatters)
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
                                    TMC_FREQUENCY)
+        # Register commands
+        #current_helper = TMCCurrentHelper(config, self.mcu_tmc)
+        #cmdhelper = tmc.TMCCommandHelper(config, self.mcu_tmc, current_helper)
+        #cmdhelper.setup_register_dump(ReadRegisters)
+        # Allow other registers to be set from the config
+        #set_config_field = self.fields.set_config_field
 
 def load_config_prefix(config):
     return TMC4671(config)
