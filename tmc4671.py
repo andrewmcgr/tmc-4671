@@ -1,4 +1,5 @@
 # TMC4671 configuration
+import logging, collections
 from . import bus, tmc
 
 TMC_FREQUENCY=25000000.
@@ -513,7 +514,7 @@ Fields["STATUS_FLAGS"] = {
 
 SignedFields = []
 
-FieldFormatters = []
+FieldFormatters = {}
 
 # TODO: actually make this do something
 MAX_CURRENT = 10.000
@@ -528,7 +529,7 @@ class TMCCurrentHelper:
                                       above=0., maxval=MAX_CURRENT)
         self.hold_current = config.getfloat('hold_current', MAX_CURRENT,
                                        above=0., maxval=MAX_CURRENT)
-        self.req_hold_current = hold_current
+        self.req_hold_current = self.hold_current
     def get_current(self):
         return self.run_current, self.hold_current, self.req_hold_current, MAX_CURRENT
     def set_current(self, run_current, hold_current, print_time):
@@ -544,7 +545,8 @@ class MCU_TMC_SPI_simple:
         self.mutex = self.printer.get_reactor().mutex()
         self.spi = bus.MCU_SPI_from_config(config, 3, default_speed=4000000)
     def reg_read(self, reg):
-        self.spi.spi_send([reg, 0x00, 0x00, 0x00, 0x00])
+        cmd = [reg, 0x00, 0x00, 0x00, 0x00]
+        self.spi.spi_send(cmd)
         if self.printer.get_start_args().get('debugoutput') is not None:
             return 0
         params = self.spi.spi_transfer(cmd)
@@ -559,8 +561,6 @@ class MCU_TMC_SPI_simple:
         if self.printer.get_start_args().get('debugoutput') is not None:
             self.spi.spi_send(data, minclock)
             return val
-        write_cmd = self._build_cmd(data, chain_pos)
-        dummy_read = self._build_cmd([0x00, 0x00, 0x00, 0x00, 0x00], chain_pos)
         params = self.spi.spi_transfer_with_preface(data,
                                                    [0x00, 0x00, 0x00, 0x00, 0x00],
                                                    minclock=minclock)
@@ -608,15 +608,42 @@ class MCU_TMC_SPI:
 class TMC4671:
     def __init__(self, config):
         self.printer = config.get_printer()
-        self.fields=FieldHelper(Fields, SignedFields, FieldFormatters)
+        self.name = config.get_name().split()[-1]
+        self.fields = tmc.FieldHelper(Fields, SignedFields, FieldFormatters)
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
                                    TMC_FREQUENCY)
+        self.read_translate = None
+        self.read_registers = Registers.keys()
         # Register commands
-        #current_helper = TMCCurrentHelper(config, self.mcu_tmc)
-        #cmdhelper = tmc.TMCCommandHelper(config, self.mcu_tmc, current_helper)
-        #cmdhelper.setup_register_dump(ReadRegisters)
+        current_helper = TMCCurrentHelper(config, self.mcu_tmc)
+        gcode = self.printer.lookup_object("gcode")
+        gcode.register_mux_command("DUMP_TMC", "STEPPER", self.name,
+                                   self.cmd_DUMP_TMC,
+                                   desc=self.cmd_DUMP_TMC_help)
         # Allow other registers to be set from the config
-        #set_config_field = self.fields.set_config_field
+        set_config_field = self.fields.set_config_field
+    cmd_DUMP_TMC_help = "Read and display TMC stepper driver registers"
+    def cmd_DUMP_TMC(self, gcmd):
+        logging.info("DUMP_TMC %s", self.name)
+        reg_name = gcmd.get('REGISTER', None)
+        if reg_name is not None:
+            reg_name = reg_name.upper()
+            val = self.fields.registers.get(reg_name)
+            if reg_name in self.read_registers:
+                # readable register
+                val = self.mcu_tmc.get_register(reg_name)
+                if self.read_translate is not None:
+                    reg_name, val = self.read_translate(reg_name, val)
+                gcmd.respond_info(self.fields.pretty_format(reg_name, val))
+            else:
+                raise gcmd.error("Unknown register name '%s'" % (reg_name))
+        else:
+            gcmd.respond_info("========== Queried registers ==========")
+            for reg_name in self.read_registers:
+                val = self.mcu_tmc.get_register(reg_name)
+                if self.read_translate is not None:
+                    reg_name, val = self.read_translate(reg_name, val)
+                gcmd.respond_info(self.fields.pretty_format(reg_name, val))
 
 def load_config_prefix(config):
     return TMC4671(config)
