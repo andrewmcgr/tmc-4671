@@ -25,10 +25,10 @@ Registers = {
     "ADC_AENC_UX_RAW_ADC_AGPI_B_RAW": (0x02, 2),
     "ADC_AENC_WY_RAW_ADC_AENC_VN_RAW": (0x02, 3),
 
-    "dsADC_MCFG_B_MCFG_A": (0x04, None), # RW,Init
-    "dsADC_MCLK_A": (0x05, None), # RW,Init
-    "dsADC_MCLK_B": (0x06, None), # RW,Init
-    "dsADC_MDEC_B_MDEC_A": (0x07, None), # RW,Init
+    "DSADC_MCFG_B_MCFG_A": (0x04, None), # RW,Init
+    "DSADC_MCLK_A": (0x05, None), # RW,Init
+    "DSADC_MCLK_B": (0x06, None), # RW,Init
+    "DSADC_MDEC_B_MDEC_A": (0x07, None), # RW,Init
     "ADC_I1_SCALE_OFFSET": (0x08, None), # RW,Init
     "ADC_I0_SCALE_OFFSET": (0x09, None), # RW,Init
     "ADC_I_SELECT": (0x0A, None), # RW,Init
@@ -87,31 +87,31 @@ Registers = {
     "CONFIG_DATA": (0x4D, None), # RW,Init
     "CONFIG_ADDR": (0x4E, None), # RW,Init
 
-    "CONFIG_biquad_x_a_1": (0x4D, 1),
-    "CONFIG_biquad_x_a_2": (0x4D, 2),
-    "CONFIG_biquad_x_b_0": (0x4D, 4),
-    "CONFIG_biquad_x_b_1": (0x4D, 5),
-    "CONFIG_biquad_x_b_2": (0x4D, 6),
-    "CONFIG_biquad_x_enable": (0x4D, 7),
-    "CONFIG_biquad_v_a_1": (0x4D, 9),
-    "CONFIG_biquad_v_a_2": (0x4D, 10),
-    "CONFIG_biquad_v_b_0": (0x4D, 12),
-    "CONFIG_biquad_v_b_1": (0x4D, 13),
-    "CONFIG_biquad_v_b_2": (0x4D, 14),
-    "CONFIG_biquad_v_enable": (0x4D, 15),
-    "CONFIG_biquad_t_a_1": (0x4D, 17),
-    "CONFIG_biquad_t_a_2": (0x4D, 18),
-    "CONFIG_biquad_t_b_0": (0x4D, 20),
-    "CONFIG_biquad_t_b_1": (0x4D, 21),
-    "CONFIG_biquad_t_b_2": (0x4D, 22),
-    "CONFIG_biquad_t_enable": (0x4D, 23),
-    "CONFIG_biquad_f_a_1": (0x4D, 25),
-    "CONFIG_biquad_f_a_2": (0x4D, 26),
-    "CONFIG_biquad_f_b_0": (0x4D, 28),
-    "CONFIG_biquad_f_b_1": (0x4D, 29),
-    "CONFIG_biquad_f_b_2": (0x4D, 30),
-    "CONFIG_biquad_f_enable": (0x4D, 31),
-    "CONFIG_ref_switch_config": (0x4D, 51),
+    "CONFIG_BIQUAD_X_A_1": (0x4D, 1),
+    "CONFIG_BIQUAD_X_A_2": (0x4D, 2),
+    "CONFIG_BIQUAD_X_B_0": (0x4D, 4),
+    "CONFIG_BIQUAD_X_B_1": (0x4D, 5),
+    "CONFIG_BIQUAD_X_B_2": (0x4D, 6),
+    "CONFIG_BIQUAD_X_ENABLE": (0x4D, 7),
+    "CONFIG_BIQUAD_V_A_1": (0x4D, 9),
+    "CONFIG_BIQUAD_V_A_2": (0x4D, 10),
+    "CONFIG_BIQUAD_V_B_0": (0x4D, 12),
+    "CONFIG_BIQUAD_V_B_1": (0x4D, 13),
+    "CONFIG_BIQUAD_V_B_2": (0x4D, 14),
+    "CONFIG_BIQUAD_V_ENABLE": (0x4D, 15),
+    "CONFIG_BIQUAD_T_A_1": (0x4D, 17),
+    "CONFIG_BIQUAD_T_A_2": (0x4D, 18),
+    "CONFIG_BIQUAD_T_B_0": (0x4D, 20),
+    "CONFIG_BIQUAD_T_B_1": (0x4D, 21),
+    "CONFIG_BIQUAD_T_B_2": (0x4D, 22),
+    "CONFIG_BIQUAD_T_ENABLE": (0x4D, 23),
+    "CONFIG_BIQUAD_F_A_1": (0x4D, 25),
+    "CONFIG_BIQUAD_F_A_2": (0x4D, 26),
+    "CONFIG_BIQUAD_F_B_0": (0x4D, 28),
+    "CONFIG_BIQUAD_F_B_1": (0x4D, 29),
+    "CONFIG_BIQUAD_F_B_2": (0x4D, 30),
+    "CONFIG_BIQUAD_F_ENABLE": (0x4D, 31),
+    "CONFIG_REF_SWITCH_CONFIG": (0x4D, 51),
     "CONFIG_SINGLE_PIN_IF_STATUS_CFG": (0x4D, 60),
     "CONFIG_SINGLE_PIN_IF_SCALE_OFFSET": (0x4D, 61),
     "CONFIG_ADVANCED_PI_REPRESENT": (0x4D, 62),
@@ -196,7 +196,7 @@ Registers = {
     "TMC4671_OUTPUTS_RAW": (0x77, None), # R,Test/Monitor
     "STEP_WIDTH": (0x78, None), # RW,Init
     "UART_BPS": (0x79, None), # RW,Init
-    "GPIO_dsADCI_CONFIG": (0x7B, None), # RW,Init
+    "GPIO_DSADCI_CONFIG": (0x7B, None), # RW,Init
     "STATUS_FLAGS": (0x7C, None), # RW,Monitor
     "STATUS_MASK": (0x7D, None), # RW,Monitor
 }
@@ -226,20 +226,20 @@ Fields["ADC_AENC_WY_RAW_ADC_AENC_VN_RAW"] = {
     "ADC_AENC_WY_RAW": 0xffff, "ADC_AENC_VN_RAW": 0xffff << 16
 }
 
-Fields["dsADC_MCFG_B_MCFG_A"] = {
-    "cfg_dsmodulator_a": 3,
-    "mclk_polarity_a": 1 << 2,
-    "mdat_polarity_a": 1 << 3,
-    "sel_nclk_mclk_i_a": 1 << 4,
-    "cfg_dsmodulator_b": 3 <<16,
-    "mclk_polarity_b": 1 << 18,
-    "mdat_polarity_b": 1 << 19,
-    "sel_nclk_mclk_i_b": 1 << 20
+Fields["DSADC_MCFG_B_MCFG_A"] = {
+    "CFG_DSMODULATOR_A": 3,
+    "MCLK_POLARITY_A": 1 << 2,
+    "MDAT_POLARITY_A": 1 << 3,
+    "SEL_NCLK_MCLK_I_A": 1 << 4,
+    "CFG_DSMODULATOR_B": 3 <<16,
+    "MCLK_POLARITY_B": 1 << 18,
+    "MDAT_POLARITY_B": 1 << 19,
+    "SEL_NCLK_MCLK_I_B": 1 << 20
 }
 
-Fields["dsADC_MDEC_B_MDEC_A"] = {
-    "dsADC_MDEC_A": 0xffff,
-    "dsADC_MDEC_B": 0xffff << 16
+Fields["DSADC_MDEC_B_MDEC_A"] = {
+    "DSADC_MDEC_A": 0xffff,
+    "DSADC_MDEC_B": 0xffff << 16
 }
 
 Fields["ADC_I1_SCALE_OFFSET"] = {
@@ -345,12 +345,12 @@ Fields["UQ_UD_EXT"] = {
 }
 
 Fields["ABN_DECODER_MODE"] = {
-    "apol": 1,
-    "bpol": 1 << 1,
-    "npol": 1 << 2,
-    "use_abn_as_n": 1 <<3,
-    "cln": 1 << 8,
-    "direction": 1 << 12,
+    "ABN_APOL": 1,
+    "ABN_BPOL": 1 << 1,
+    "ABN_NPOL": 1 << 2,
+    "ABN_USE_ABN_AS_N": 1 <<3,
+    "ABN_CLN": 1 << 8,
+    "ABN_DIRECTION": 1 << 12,
 }
 
 Fields["ABN_DECODER_PHI_E_PHI_M_OFFSET"] = {
@@ -364,12 +364,12 @@ Fields["ABN_DECODER_PHI_E_PHI_M"] = {
 }
 
 Fields["ABN_2_DECODER_MODE"] = {
-    "apol": 1,
-    "bpol": 1 << 1,
-    "npol": 1 << 2,
-    "use_abn_as_n": 1 <<3,
-    "cln": 1 << 8,
-    "direction": 1 << 12,
+    "ABN_2_APOL": 1,
+    "ABN_2_BPOL": 1 << 1,
+    "ABN_2_NPOL": 1 << 2,
+    "ABN_2_USE_ABN_AS_N": 1 <<3,
+    "ABN_2_CLN": 1 << 8,
+    "ABN_2_DIRECTION": 1 << 12,
 }
 
 Fields["ABN_2_DECODER_PHI_E_PHI_M_OFFSET"] = {
@@ -383,10 +383,10 @@ Fields["ABN_2_DECODER_PHI_E_PHI_M"] = {
 }
 
 Fields["HALL_MODE"] = {
-    "polarity": 1,
-    "sync": 1 << 4,
-    "interp": 1 << 8,
-    "dir": 1 << 12,
+    "HALL_POLARITY": 1,
+    "HALL_SYNC": 1 << 4,
+    "HALL_INTERP": 1 << 8,
+    "HALL_DIR": 1 << 12,
     "HALL_BLANK": 0xfff << 16,
 }
 
@@ -416,8 +416,12 @@ Fields["HALL_PHI_E_INTERPOLATED_PHI_E"] = {
 }
 
 Fields["AENC_DECODER_MODE"] = {
-    "deg": 1,
-    "dir": 1 << 12,
+    "AENC_DEG": 1,
+    "AENC_DIR": 1 << 12,
+}
+
+Fields["AENC_DECODER_PPR"] = {
+    "AENC_PPR": 0xffff,
 }
 
 Fields["AENC_DECODER_PHI_E_PHI_M_OFFSET"] = {
@@ -485,36 +489,145 @@ Fields["ADC_VM_LIMITS"] = {
 # TODO: if necessary, GPIO_dsADCI_CONFIG
 
 Fields["STATUS_FLAGS"] = {
-    "pid_x_target_limit": 1 << 0,
-    "pid_x_errsum_limit": 1 << 2,
-    "pid_x_output_limit": 1 << 3,
-    "pid_v_target_limit": 1 << 4,
-    "pid_v_errsum_limit": 1 << 6,
-    "pid_v_output_limit": 1 << 7,
-    "pid_id_target_limit": 1 << 8,
-    "pid_id_errsum_limit": 1 << 10,
-    "pid_id_output_limit": 1 << 11,
-    "pid_iq_target_limit": 1 << 12,
-    "pid_iq_errsum_limit": 1 << 14,
-    "pid_iq_output_limit": 1 << 15,
-    "ipark_cirlim_limit_u_d": 1 << 16,
-    "ipark_cirlim_limit_u_q": 1 << 17,
-    "ipark_cirlim_limit_u_r": 1 << 18,
-    "ref_sw_r": 1 << 20,
-    "ref_sw_h": 1 << 21,
-    "ref_sw_l": 1 << 22,
-    "pwm_min": 1 << 24,
-    "pwm_max": 1 << 25,
-    "adc_i_clipped": 1 << 26,
-    "aenc_clipped": 1 << 27,
-    "enc_n": 1 << 28,
-    "enc_2_n": 1 << 29,
-    "aenc_n": 1 << 30,
+    "PID_X_TARGET_LIMIT": 1 << 0,
+    "PID_X_ERRSUM_LIMIT": 1 << 2,
+    "PID_X_OUTPUT_LIMIT": 1 << 3,
+    "PID_V_TARGET_LIMIT": 1 << 4,
+    "PID_V_ERRSUM_LIMIT": 1 << 6,
+    "PID_V_OUTPUT_LIMIT": 1 << 7,
+    "PID_ID_TARGET_LIMIT": 1 << 8,
+    "PID_ID_ERRSUM_LIMIT": 1 << 10,
+    "PID_ID_OUTPUT_LIMIT": 1 << 11,
+    "PID_IQ_TARGET_LIMIT": 1 << 12,
+    "PID_IQ_ERRSUM_LIMIT": 1 << 14,
+    "PID_IQ_OUTPUT_LIMIT": 1 << 15,
+    "IPARK_CIRLIM_LIMIT_U_D": 1 << 16,
+    "IPARK_CIRLIM_LIMIT_U_Q": 1 << 17,
+    "IPARK_CIRLIM_LIMIT_U_R": 1 << 18,
+    "REF_SW_R": 1 << 20,
+    "REF_SW_H": 1 << 21,
+    "REF_SW_L": 1 << 22,
+    "PWM_MIN": 1 << 24,
+    "PWM_MAX": 1 << 25,
+    "ADC_I_CLIPPED": 1 << 26,
+    "AENC_CLIPPED": 1 << 27,
+    "ENC_N": 1 << 28,
+    "ENC_2_N": 1 << 29,
+    "AENC_N": 1 << 30,
 }
 
-SignedFields = []
+# TODO: interim data fields
+SignedFields = {"ADC_I1_SCALE", "ADC_I0_SCALE", "AENC_0_SCALE", "AENC_1_SCALE",
+                "AENC_2_SCALE", "ADC_IUX", "ADC_IWY", "ADC_IV", "AENC_UX",
+                "AENC_WY", "AENC_VN", "PHI_E_EXT", "OPENLOOP_VELOCITY_TARGET",
+                "OPENLOOP_VELOCITY_ACTUAL", "OPENLOOP_PHI", "UD_EXT", "UQ_EXT",
+                "ABN_DECODER_PHI_M_OFFSET", "ABN_DECODER_PHI_E_OFFSET",
+                "ABN_DECODER_PHI_M", "ABN_DECODER_PHI_E",
+                "ABN_2_DECODER_PHI_M_OFFSET", "ABN_2_DECODER_PHI_M",
+                "HALL_POSITION_000", "HALL_POSITION_060", "HALL_POSITION_120",
+                "HALL_POSITION_180", "HALL_POSITION_240", "HALL_POSITION_300",
+                "HALL_PHI_M_OFFSET", "HALL_PHI_E_OFFSET", "HALL_PHI_E",
+                "HALL_PHI_E_INTERPOLATED", "HALL_PHI_M",
+                "AENC_DECODER_PHI_A_RAW", "AENC_DECODER_PHI_A_OFFSET",
+                "AENC_DECODER_PHI_A", "AENC_DECODER_PPR", "AENC_DECODER_COUNT",
+                "AENC_DECODER_COUNT_N", "AENC_DECODER_PHI_M_OFFSET",
+                "AENC_DECODER_PHI_E_OFFSET", "AENC_DECODER_PHI_M",
+                "AENC_DECODER_PHI_E", "PHI_E", "PID_FLUX_I", "PID_FLUX_P",
+                "PID_TORQUE_I", "PID_TORQUE_P", "PID_VELOCITY_I",
+                "PID_VELOCITY_P", "PID_POSITION_I", "PID_POSITION_P",
+                "PIDOUT_UQ_UD_LIMITS", "PID_POSITION_LIMIT_LOW",
+                "PID_POSITION_LIMIT_HIGH", "PID_FLUX_TARGET",
+                "PID_TORQUE_TARGET", "PID_FLUX_OFFSET", "PID_TORQUE_OFFSET",
+                "PID_VELOCITY_TARGET", "PID_VELOCITY_OFFSET",
+                "PID_POSITION_TARGET", "PID_FLUX_ACTUAL", "PID_TORQUE_ACTUAL",
+                "PID_VELOCITY_ACTUAL", "PID_POSITION_ACTUAL",
+                "PID_TORQUE_ERROR", "PID_FLUX_ERROR", "PID_VELOCITY_ERROR",
+                "PID_POSITION_ERROR", "PID_TORQUE_ERROR_SUM",
+                "PID_FLUX_ERROR_SUM", "PID_VELOCITY_ERROR_SUM",
+                "PID_POSITION_ERROR_SUM", "STEP_WIDTH"}
 
 FieldFormatters = {}
+
+DumpGroups = {
+    "Default": ["CHIPINFO_SI_TYPE", "CHIPINFO_SI_VERSION",
+                "STATUS_FLAGS",
+                "ADC_I1_RAW_ADC_I0_RAW", "ADC_AGPI_A_RAW_ADC_VM_RAW",
+                "ADC_AENC_UX_RAW_ADC_AGPI_B_RAW", "ADC_AENC_WY_RAW_ADC_AENC_VN_RAW", "AENC_DECODER_PHI_A_RAW"],
+}
+
+# Return the position of the first bit set in a mask
+def ffs(mask):
+    return (mask & -mask).bit_length() - 1
+
+class FieldHelper:
+    def __init__(self, all_fields, signed_fields=[], field_formatters={},
+                 registers=None):
+        self.all_fields = all_fields
+        self.signed_fields = {sf: 1 for sf in signed_fields}
+        self.field_formatters = field_formatters
+        self.registers = registers
+        if self.registers is None:
+            self.registers = collections.OrderedDict()
+        self.field_to_register = { f: r for r, fields in self.all_fields.items()
+                                   for f in fields }
+    def lookup_register(self, field_name, default=None):
+        if field_name in Registers:
+            return field_name
+        return self.field_to_register.get(field_name, default)
+    def get_field(self, field_name, reg_value=None, reg_name=None):
+        # Returns value of the register field
+        if reg_name is None:
+            reg_name = self.field_to_register[field_name]
+        if reg_value is None:
+            reg_value = self.registers.get(reg_name, 0)
+        mask = self.all_fields[reg_name][field_name]
+        field_value = (reg_value & mask) >> ffs(mask)
+        if field_name in self.signed_fields and ((reg_value & mask)<<1) > mask:
+            field_value -= (1 << field_value.bit_length())
+        return field_value
+    def set_field(self, field_name, field_value, reg_value=None, reg_name=None):
+        # Returns register value with field bits filled with supplied value
+        if reg_name is None:
+            reg_name = self.field_to_register[field_name]
+        if reg_value is None:
+            reg_value = self.registers.get(reg_name, 0)
+        mask = self.all_fields[reg_name][field_name]
+        new_value = (reg_value & ~mask) | ((field_value << ffs(mask)) & mask)
+        self.registers[reg_name] = new_value
+        return new_value
+    def set_config_field(self, config, field_name, default):
+        # Allow a field to be set from the config file
+        config_name = "driver_" + field_name
+        reg_name = self.lookup_register(field_name)
+        if reg_name == field_name:
+            mask = 0xffffffff
+        else:
+            mask = self.all_fields[reg_name][field_name]
+        maxval = mask >> ffs(mask)
+        if maxval == 1:
+            val = config.getboolean(config_name, default)
+        elif field_name in self.signed_fields:
+            val = config.getint(config_name, default,
+                                minval=-(maxval//2 + 1), maxval=maxval//2)
+        else:
+            val = config.getint(config_name, default, minval=0, maxval=maxval)
+        return self.set_field(field_name, val, reg_name=reg_name)
+    def pretty_format(self, reg_name, reg_value):
+        # Provide a string description of a register
+        reg_fields = self.all_fields.get(reg_name, {})
+        reg_fields = sorted([(mask, name) for name, mask in reg_fields.items()])
+        fields = []
+        for mask, field_name in reg_fields:
+            field_value = self.get_field(field_name, reg_value, reg_name)
+            sval = self.field_formatters.get(field_name, str)(field_value)
+            if sval and sval != "0":
+                fields.append(" %s=%s" % (field_name, sval))
+        return "%-11s %08x%s" % (reg_name + ":", reg_value, "".join(fields))
+    def get_reg_fields(self, reg_name, reg_value):
+        # Provide fields found in a register
+        reg_fields = self.all_fields.get(reg_name, {})
+        return {field_name: self.get_field(field_name, reg_value, reg_name)
+                for field_name, mask in reg_fields.items()}
 
 # TODO: actually make this do something
 MAX_CURRENT = 10.000
@@ -539,16 +652,16 @@ class TMCCurrentHelper:
 
 
 # 4671 does not support chaining, so that's removed
+# default speed is 1 MHz, conservative for the device.
+# would need timing control if going faster than 2 MHz.
 class MCU_TMC_SPI_simple:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.mutex = self.printer.get_reactor().mutex()
-        self.spi = bus.MCU_SPI_from_config(config, 3, default_speed=4000000)
+        self.spi = bus.MCU_SPI_from_config(config, 3, default_speed=1000000)
     def reg_read(self, reg):
         cmd = [reg, 0x00, 0x00, 0x00, 0x00]
         self.spi.spi_send(cmd)
-        if self.printer.get_start_args().get('debugoutput') is not None:
-            return 0
         params = self.spi.spi_transfer(cmd)
         pr = bytearray(params['response'])
         return (pr[1] << 24) | (pr[2] << 16) | (pr[3] << 8) | pr[4]
@@ -558,14 +671,8 @@ class MCU_TMC_SPI_simple:
             minclock = self.spi.get_mcu().print_time_to_clock(print_time)
         data = [(reg | 0x80) & 0xff, (val >> 24) & 0xff, (val >> 16) & 0xff,
                 (val >> 8) & 0xff, val & 0xff]
-        if self.printer.get_start_args().get('debugoutput') is not None:
-            self.spi.spi_send(data, minclock)
-            return val
-        params = self.spi.spi_transfer_with_preface(data,
-                                                   [0x00, 0x00, 0x00, 0x00, 0x00],
-                                                   minclock=minclock)
-        pr = bytearray(params['response'])
-        return (pr[1] << 24) | (pr[2] << 16) | (pr[3] << 8) | pr[4]
+        self.spi.spi_send(data, minclock)
+        return self.reg_read(reg)
 
 # Helper code for working with TMC devices via SPI
 # 4671 does have overlay registers, so support those
@@ -584,7 +691,13 @@ class MCU_TMC_SPI:
         reg, addr = self.name_to_reg[reg_name]
         with self.mutex:
             if addr is not None:
-                self.tmc_spi.reg_write(reg+1, addr)
+                for retry in range(5):
+                    v = self.tmc_spi.reg_write(reg+1, addr)
+                    if v == addr:
+                        break
+                else:
+                    raise self.printer.command_error(
+                        "Unable to write tmc spi '%s' address register %s" % (self.name, reg_name))
             read = self.tmc_spi.reg_read(reg)
         return read
     def set_register(self, reg_name, val, print_time=None):
@@ -593,13 +706,15 @@ class MCU_TMC_SPI:
             if addr is not None:
                 for retry in range(5):
                     v = self.tmc_spi.reg_write(reg+1, addr, print_time)
-                    if v == val:
+                    if v == addr:
                         break
-            if v == val:
-                for retry in range(5):
-                    v = self.tmc_spi.reg_write(reg, val, print_time)
-                    if v == val:
-                        return
+                else:
+                    raise self.printer.command_error(
+                        "Unable to write tmc spi '%s' address register %s" % (self.name, reg_name))
+            for retry in range(5):
+                v = self.tmc_spi.reg_write(reg, val, print_time)
+                if v == val:
+                    return
         raise self.printer.command_error(
             "Unable to write tmc spi '%s' register %s" % (self.name, reg_name))
     def get_tmc_frequency(self):
@@ -609,26 +724,67 @@ class TMC4671:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.name = config.get_name().split()[-1]
-        self.fields = tmc.FieldHelper(Fields, SignedFields, FieldFormatters)
+        self.fields = FieldHelper(Fields, SignedFields, FieldFormatters)
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
                                    TMC_FREQUENCY)
         self.read_translate = None
         self.read_registers = Registers.keys()
+        self.printer.register_event_handler("klippy:connect",
+                                            self._handle_connect)
         # Register commands
         current_helper = TMCCurrentHelper(config, self.mcu_tmc)
         gcode = self.printer.lookup_object("gcode")
+        gcode.register_mux_command("SET_TMC_FIELD", "STEPPER", self.name,
+                                   self.cmd_SET_TMC_FIELD,
+                                   desc=self.cmd_SET_TMC_FIELD_help)
         gcode.register_mux_command("DUMP_TMC", "STEPPER", self.name,
                                    self.cmd_DUMP_TMC,
                                    desc=self.cmd_DUMP_TMC_help)
+        gcode.register_mux_command("INIT_TMC", "STEPPER", self.name,
+                                   self.cmd_INIT_TMC,
+                                   desc=self.cmd_INIT_TMC_help)
         # Allow other registers to be set from the config
         set_config_field = self.fields.set_config_field
+        set_config_field(config, "MOTOR_TYPE", 3)
+        set_config_field(config, "N_POLE_PAIRS", 4)
+        set_config_field(config, "AENC_DEG", 1)            # 120 degree analog hall
+        set_config_field(config, "AENC_PPR", 1)    # 120 degree analog hall
+
+    def _handle_connect(self):
+        # Check if using step on both edges optimization
+        #pulse_duration, step_both_edge = self.stepper.get_pulse_duration()
+        #if step_both_edge:
+        #    self.fields.set_field("dedge", 1)
+        # Send init
+        try:
+            self._init_registers()
+        except self.printer.command_error as e:
+            logging.info("TMC %s failed to init: %s", self.name, str(e))
+
+    def _init_registers(self, print_time=None):
+        # Send registers
+        for reg_name in list(self.fields.registers.keys()):
+            val = self.fields.registers[reg_name] # Val may change during loop
+            self.mcu_tmc.set_register(reg_name, val, print_time)
+
+    cmd_INIT_TMC_help = "Initialize TMC stepper driver registers"
+    def cmd_INIT_TMC(self, gcmd):
+        logging.info("INIT_TMC %s", self.name)
+        print_time = self.printer.lookup_object('toolhead').get_last_move_time()
+        self._init_registers(print_time)
+
     cmd_DUMP_TMC_help = "Read and display TMC stepper driver registers"
     def cmd_DUMP_TMC(self, gcmd):
         logging.info("DUMP_TMC %s", self.name)
-        reg_name = gcmd.get('REGISTER', None)
+        field_name = gcmd.get('FIELD', None)
+        if field_name is not None:
+            reg_name = self.fields.lookup_register(field_name.upper())
+            if reg_name is None:
+                reg_name = field_name
+        else:
+            reg_name = gcmd.get('REGISTER', None)
         if reg_name is not None:
             reg_name = reg_name.upper()
-            val = self.fields.registers.get(reg_name)
             if reg_name in self.read_registers:
                 # readable register
                 val = self.mcu_tmc.get_register(reg_name)
@@ -638,12 +794,32 @@ class TMC4671:
             else:
                 raise gcmd.error("Unknown register name '%s'" % (reg_name))
         else:
+            group = gcmd.get('GROUP', 'Default')
             gcmd.respond_info("========== Queried registers ==========")
-            for reg_name in self.read_registers:
+            for reg_name in DumpGroups[group]:
                 val = self.mcu_tmc.get_register(reg_name)
                 if self.read_translate is not None:
                     reg_name, val = self.read_translate(reg_name, val)
                 gcmd.respond_info(self.fields.pretty_format(reg_name, val))
+    cmd_SET_TMC_FIELD_help = "Set a register field of a TMC driver"
+    def cmd_SET_TMC_FIELD(self, gcmd):
+        field_name = gcmd.get('FIELD').upper()
+        reg_name = self.fields.lookup_register(field_name, None)
+        if reg_name is None:
+            raise gcmd.error("Unknown field name '%s'" % (field_name,))
+        value = gcmd.get_int('VALUE', None)
+        velocity = gcmd.get_float('VELOCITY', None, minval=0.)
+        if (value is None) == (velocity is None):
+            raise gcmd.error("Specify either VALUE or VELOCITY")
+        if velocity is not None:
+            if self.mcu_tmc.get_tmc_frequency() is None:
+                raise gcmd.error(
+                    "VELOCITY parameter not supported by this driver")
+            value = TMCtstepHelper(self.mcu_tmc, velocity,
+                                   pstepper=self.stepper)
+        reg_val = self.fields.set_field(field_name, value)
+        print_time = self.printer.lookup_object('toolhead').get_last_move_time()
+        self.mcu_tmc.set_register(reg_name, reg_val, print_time)
 
 def load_config_prefix(config):
     return TMC4671(config)
