@@ -551,6 +551,8 @@ FieldFormatters = {}
 DumpGroups = {
     "Default": ["CHIPINFO_SI_TYPE", "CHIPINFO_SI_VERSION",
                 "STATUS_FLAGS",
+                "AENC_DECODER_MODE",
+                "AENC_DECODER_PPR",
                 "ADC_I1_RAW_ADC_I0_RAW", "ADC_AGPI_A_RAW_ADC_VM_RAW",
                 "ADC_AENC_UX_RAW_ADC_AGPI_B_RAW", "ADC_AENC_WY_RAW_ADC_AENC_VN_RAW", "AENC_DECODER_PHI_A_RAW"],
 }
@@ -577,7 +579,7 @@ class FieldHelper:
     def get_field(self, field_name, reg_value=None, reg_name=None):
         # Returns value of the register field
         if reg_name is None:
-            reg_name = self.field_to_register[field_name]
+            reg_name = self.lookup_register(field_name)
         if reg_value is None:
             reg_value = self.registers.get(reg_name, 0)
         mask = self.all_fields[reg_name][field_name]
@@ -588,7 +590,7 @@ class FieldHelper:
     def set_field(self, field_name, field_value, reg_value=None, reg_name=None):
         # Returns register value with field bits filled with supplied value
         if reg_name is None:
-            reg_name = self.field_to_register[field_name]
+            reg_name = self.lookup_register(field_name)
         if reg_value is None:
             reg_value = self.registers.get(reg_name, 0)
         mask = self.all_fields[reg_name][field_name]
