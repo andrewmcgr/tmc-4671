@@ -654,13 +654,14 @@ class TMCCurrentHelper:
 
 
 # 4671 does not support chaining, so that's removed
+# 4671 protocol does not require dummy reads
 # default speed is 1 MHz, conservative for the device.
 # would need timing control if going faster than 2 MHz.
 class MCU_TMC_SPI_simple:
-    def __init__(self, config):
+    def __init__(self, config, pin_option="cs_pin"):
         self.printer = config.get_printer()
         self.mutex = self.printer.get_reactor().mutex()
-        self.spi = bus.MCU_SPI_from_config(config, 3, default_speed=1000000)
+        self.spi = bus.MCU_SPI_from_config(config, 3, default_speed=1000000, pin_option=pin_option)
     def reg_read(self, reg):
         cmd = [reg, 0x00, 0x00, 0x00, 0x00]
         self.spi.spi_send(cmd)
@@ -683,6 +684,7 @@ class MCU_TMC_SPI:
         self.printer = config.get_printer()
         self.name = config.get_name().split()[-1]
         self.tmc_spi = MCU_TMC_SPI_simple(config)
+        self.drv_spi = MCU_TMC_SPI_simple(config, pin_option="drv_cs_pin")
         self.mutex = self.tmc_spi.mutex
         self.name_to_reg = name_to_reg
         self.fields = fields
@@ -699,7 +701,7 @@ class MCU_TMC_SPI:
                         break
                 else:
                     raise self.printer.command_error(
-                        "Unable to write tmc spi '%s' address register %s" % (self.name, reg_name))
+                        "Unable to write tmc spi '%s' address register %s (last read %x)" % (self.name, reg_name, v))
             read = self.tmc_spi.reg_read(reg)
         return read
     def set_register(self, reg_name, val, print_time=None):
@@ -712,7 +714,7 @@ class MCU_TMC_SPI:
                         break
                 else:
                     raise self.printer.command_error(
-                        "Unable to write tmc spi '%s' address register %s" % (self.name, reg_name))
+                        "Unable to write tmc spi '%s' address register %s (last read %x)" % (self.name, reg_name, v))
             for retry in range(5):
                 v = self.tmc_spi.reg_write(reg, val, print_time)
                 if v == val:
