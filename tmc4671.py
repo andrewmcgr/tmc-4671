@@ -6,6 +6,66 @@ TMC_FREQUENCY=25000000.
 
 # Tuple is the address followed by a value to put in the next higher address to select that sub-register, or none to just go straight there.
 
+# Register map for the 6100 companion chip
+Registers6100 = {
+    "GCONF": (0x00, None),
+    "GSTAT": (0x01, None),
+    "IOIN": (0x04, None),
+    "SHORT_CONF": (0x09, None),
+    "DRV_CONF": (0x0A, None)
+}
+
+Fields6100 = {}
+
+Fields6100["GCONF"] = {
+    "disable": 0x1, "singleline": 0x1 << 1,
+    "faultdirect": 0x1 << 2, "normal": 0x1 <<6,
+}
+
+Fields6100["GSTAT"] = {
+    "reset": 0x01,
+    "drv_otpw": 0x01 << 1,
+    "drv_ot": 0x01 << 2,
+    "uv_cp": 0x01 << 3,
+    "shortdet_u": 0x01 << 4,
+    "s2gu": 0x01 << 5,
+    "s2vsu": 0x01 << 6,
+    "shortdet_u": 0x01 << 8,
+    "s2gu": 0x01 << 9,
+    "s2vsu": 0x01 << 10,
+    "shortdet_u": 0x01 << 12,
+    "s2gu": 0x01 << 13,
+    "s2vsu": 0x01 << 14,
+}
+
+Fields6100["IOIN"] = {
+    "UL": 0x01,
+    "UH": 0x01 << 1,
+    "VL": 0x01 << 2,
+    "VH": 0x01 << 3,
+    "WL": 0x01 << 4,
+    "WH": 0x01 << 5,
+    "DRV_EN": 0x01 << 6,
+    "OTPW": 0x01 << 8,
+    "OT136C": 0x01 << 9,
+    "OT143C": 0x01 << 10,
+    "OT150C": 0x01 << 11,
+    "VERSION": 0xFF << 24,
+}
+
+# TODO: SHORT_CONF (defaults are reasonable)
+
+Fields6100["DRV_CONF"] = {
+    "BBMCLKS": 0x0F,
+    "OTSELECT": 0x03 << 16,
+    "DRVSTRENGTH": 0x03 << 19,
+}
+
+DumpGroups6100 = {
+    "Default": ["GCONF", "GSTAT", "IOIN", "SHORT_CONF", "DRV_CONF",],
+}
+
+# Register map for the 4671 itself
 Registers = {
     "CHIPINFO_DATA": (0x00, None), # R,Test
     "CHIPINFO_ADDR": (0x01, None), # RW,Test
@@ -563,7 +623,7 @@ def ffs(mask):
 
 class FieldHelper:
     def __init__(self, all_fields, signed_fields=[], field_formatters={},
-                 registers=None):
+                 registers=None, prefix="driver_"):
         self.all_fields = all_fields
         self.signed_fields = {sf: 1 for sf in signed_fields}
         self.field_formatters = field_formatters
@@ -572,6 +632,7 @@ class FieldHelper:
             self.registers = collections.OrderedDict()
         self.field_to_register = { f: r for r, fields in self.all_fields.items()
                                    for f in fields }
+        self.prefix = prefix
     def lookup_register(self, field_name, default=None):
         if field_name in Registers:
             return field_name
@@ -599,7 +660,7 @@ class FieldHelper:
         return new_value
     def set_config_field(self, config, field_name, default):
         # Allow a field to be set from the config file
-        config_name = "driver_" + field_name
+        config_name = self.prefix + field_name
         reg_name = self.lookup_register(field_name)
         if reg_name == field_name:
             mask = 0xffffffff
@@ -680,11 +741,10 @@ class MCU_TMC_SPI_simple:
 # Helper code for working with TMC devices via SPI
 # 4671 does have overlay registers, so support those
 class MCU_TMC_SPI:
-    def __init__(self, config, name_to_reg, fields, tmc_frequency):
+    def __init__(self, config, name_to_reg, fields, tmc_frequency, pin_option):
         self.printer = config.get_printer()
         self.name = config.get_name().split()[-1]
-        self.tmc_spi = MCU_TMC_SPI_simple(config)
-        self.drv_spi = MCU_TMC_SPI_simple(config, pin_option="drv_cs_pin")
+        self.tmc_spi = MCU_TMC_SPI_simple(config, pin_option=pin_option)
         self.mutex = self.tmc_spi.mutex
         self.name_to_reg = name_to_reg
         self.fields = fields
@@ -728,9 +788,13 @@ class TMC4671:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.name = config.get_name().split()[-1]
-        self.fields = FieldHelper(Fields, SignedFields, FieldFormatters)
+        self.fields = FieldHelper(Fields, SignedFields, FieldFormatters, prefix="foc_")
+        # TODO: make 6100 optional for boards without one.
+        self.fields6100 = FieldHelper(Fields6100, prefix="drv_")
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
-                                   TMC_FREQUENCY)
+                                   TMC_FREQUENCY, pin_option="cs_pin")
+        self.mcu_tmc6100 = MCU_TMC_SPI(config, Registers6100, self.fields6100,
+                                       12e6, pin_option="drv_cs_pin")
         self.read_translate = None
         self.read_registers = Registers.keys()
         self.printer.register_event_handler("klippy:connect",
@@ -744,11 +808,18 @@ class TMC4671:
         gcode.register_mux_command("DUMP_TMC", "STEPPER", self.name,
                                    self.cmd_DUMP_TMC,
                                    desc=self.cmd_DUMP_TMC_help)
+        gcode.register_mux_command("DUMP_TMC6100", "STEPPER", self.name,
+                                   self.cmd_DUMP_TMC6100,
+                                   desc=self.cmd_DUMP_TMC6100_help)
         gcode.register_mux_command("INIT_TMC", "STEPPER", self.name,
                                    self.cmd_INIT_TMC,
                                    desc=self.cmd_INIT_TMC_help)
         # Allow other registers to be set from the config
         set_config_field = self.fields.set_config_field
+        set_config6100_field = self.fields6100.set_config_field
+        # defaults as per 4671+6100 BOB datasheet
+        set_config6100_field(config, "DRVSTRENGTH", 0)
+        set_config6100_field(config, "BBMCLKS", 10)
         set_config_field(config, "MOTOR_TYPE", 3)
         set_config_field(config, "N_POLE_PAIRS", 4)
         set_config_field(config, "AENC_DEG", 1)            # 120 degree analog hall
@@ -766,7 +837,10 @@ class TMC4671:
             logging.info("TMC %s failed to init: %s", self.name, str(e))
 
     def _init_registers(self, print_time=None):
-        # Send registers
+        # Send registers, 6100 first then 4671
+        for reg_name in list(self.fields6100.registers.keys()):
+            val = self.fields6100.registers[reg_name] # Val may change during loop
+            self.mcu_tmc6100.set_register(reg_name, val, print_time)
         for reg_name in list(self.fields.registers.keys()):
             val = self.fields.registers[reg_name] # Val may change during loop
             self.mcu_tmc.set_register(reg_name, val, print_time)
@@ -776,6 +850,35 @@ class TMC4671:
         logging.info("INIT_TMC %s", self.name)
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         self._init_registers(print_time)
+
+    cmd_DUMP_TMC6100_help = "Read and display TMC6100 stepper driver registers"
+    def cmd_DUMP_TMC6100(self, gcmd):
+        logging.info("DUMP_TMC6100 %s", self.name)
+        field_name = gcmd.get('FIELD', None)
+        if field_name is not None:
+            reg_name = self.fields6100.lookup_register(field_name.upper())
+            if reg_name is None:
+                reg_name = field_name
+        else:
+            reg_name = gcmd.get('REGISTER', None)
+        if reg_name is not None:
+            reg_name = reg_name.upper()
+            if reg_name in self.read_registers:
+                # readable register
+                val = self.mcu_tmc6100.get_register(reg_name)
+                if self.read_translate is not None:
+                    reg_name, val = self.read_translate(reg_name, val)
+                gcmd.respond_info(self.fields6100.pretty_format(reg_name, val))
+            else:
+                raise gcmd.error("Unknown register name '%s'" % (reg_name))
+        else:
+            group = gcmd.get('GROUP', 'Default')
+            gcmd.respond_info("========== Queried registers ==========")
+            for reg_name in DumpGroups6100[group]:
+                val = self.mcu_tmc6100.get_register(reg_name)
+                if self.read_translate is not None:
+                    reg_name, val = self.read_translate(reg_name, val)
+                gcmd.respond_info(self.fields6100.pretty_format(reg_name, val))
 
     cmd_DUMP_TMC_help = "Read and display TMC stepper driver registers"
     def cmd_DUMP_TMC(self, gcmd):
@@ -805,6 +908,7 @@ class TMC4671:
                 if self.read_translate is not None:
                     reg_name, val = self.read_translate(reg_name, val)
                 gcmd.respond_info(self.fields.pretty_format(reg_name, val))
+
     cmd_SET_TMC_FIELD_help = "Set a register field of a TMC driver"
     def cmd_SET_TMC_FIELD(self, gcmd):
         field_name = gcmd.get('FIELD').upper()
