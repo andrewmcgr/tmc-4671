@@ -651,7 +651,10 @@ class FieldHelper:
             reg_name = self.lookup_register(field_name)
         if reg_value is None:
             reg_value = self.registers.get(reg_name, 0)
-        mask = self.all_fields[reg_name][field_name]
+        if reg_name == field_name:
+            mask = 0xffffffff
+        else:
+            mask = self.all_fields[reg_name][field_name]
         field_value = (reg_value & mask) >> ffs(mask)
         if field_name in self.signed_fields and ((reg_value & mask)<<1) > mask:
             field_value -= (1 << field_value.bit_length())
@@ -714,15 +717,25 @@ class CurrentHelper:
         self.fields = mcu_tmc.get_fields()
         self.run_current = config.getfloat('run_current',
                                       above=0., maxval=MAX_CURRENT)
-        self.hold_current = config.getfloat('hold_current', MAX_CURRENT,
-                                       above=0., maxval=MAX_CURRENT)
-        self.req_hold_current = self.hold_current
+        self.current_scale = config.getfloat('current_scale_ma_lsb', 1.272e-3,
+                                       above=0., maxval=10e-3)
+        self.flux_limit = self._calc_flux_limit(self.run_current)
+        self.fields.set_field("PID_TORQUE_FLUX_LIMITS", self.flux_limit)
+    def _calc_flux_limit(self, current):
+        flux_limit = int(current // self.current_scale)
+        if flux_limit > 0xffff:
+            return 0xffff
+        return flux_limit
+    def convert_adc_current(self, adc):
+        return adc * self.current_scale
     def get_current(self):
-        return self.run_current, self.hold_current, self.req_hold_current, MAX_CURRENT
-    def set_current(self, run_current, hold_current, print_time):
+        c = self.convert_adc_current(self.fields.get_field("PID_TORQUE_FLUX_LIMITS"))
+        return c, MAX_CURRENT
+    def set_current(self, run_current):
         self.run_current = run_current
-        self.hold_current = hold_current
-        self.req_hold_current = hold_current
+        self.flux_limit = self._calc_flux_limit(self.run_current)
+        self.fields.set_field("PID_TORQUE_FLUX_LIMITS", self.flux_limit)
+        return self.flux_limit
 
 # Helper to configure the microstep settings
 def StepHelper(config, mcu_tmc):
@@ -829,8 +842,8 @@ class TMC4671:
         self.printer.register_event_handler("klippy:connect",
                                             self._handle_connect)
         # Register commands
-        step_helper = StepHelper(config, self.mcu_tmc)
-        current_helper = CurrentHelper(config, self.mcu_tmc)
+        self.step_helper = StepHelper(config, self.mcu_tmc)
+        self.current_helper = CurrentHelper(config, self.mcu_tmc)
         gcode = self.printer.lookup_object("gcode")
         gcode.register_mux_command("SET_TMC_FIELD", "STEPPER", self.name,
                                    self.cmd_SET_TMC_FIELD,
@@ -844,6 +857,9 @@ class TMC4671:
         gcode.register_mux_command("INIT_TMC", "STEPPER", self.name,
                                    self.cmd_INIT_TMC,
                                    desc=self.cmd_INIT_TMC_help)
+        gcode.register_mux_command("SET_TMC_CURRENT", "STEPPER", self.name,
+                                   self.cmd_SET_TMC_CURRENT,
+                                   desc=self.cmd_SET_TMC_CURRENT_help)
         # Allow other registers to be set from the config
         set_config_field = self.fields.set_config_field
         set_config6100_field = self.fields6100.set_config_field
@@ -861,8 +877,8 @@ class TMC4671:
         set_config_field(config, "HALL_INTERP", 1)
         set_config_field(config, "HALL_BLANK", 8)
         set_config_field(config, "PHI_E_SELECTION", 5) # digital hall PHI_E
-        set_config_field(config, "POSITION_SELECTION", 5) # digital hall PHI_E
-        set_config_field(config, "VELOCITY_SELECTION", 5) # digital hall PHI_E
+        set_config_field(config, "POSITION_SELECTION", 12) # digital hall PHI_M
+        set_config_field(config, "VELOCITY_SELECTION", 12) # digital hall PHI_M
 
     def _handle_connect(self):
         # Check if using step on both edges optimization
@@ -977,6 +993,19 @@ class TMC4671:
         reg_val = self.fields.set_field(field_name, value)
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         self.mcu_tmc.set_register(reg_name, reg_val, print_time)
+
+    cmd_SET_TMC_CURRENT_help = "Set the current of a TMC driver"
+    def cmd_SET_TMC_CURRENT(self, gcmd):
+        ch = self.current_helper
+        prev_cur, max_cur = ch.get_current()
+        run_current = gcmd.get_float('CURRENT', None, minval=0., maxval=max_cur)
+        if run_current is not None:
+            reg_val = ch.set_current(run_current)
+            prev_cur, max_cur = ch.get_current()
+            print_time = self.printer.lookup_object('toolhead').get_last_move_time()
+            self.mcu_tmc.set_register("PID_TORQUE_FLUX_LIMITS", reg_val, print_time)
+        gcmd.respond_info("Run Current: %0.2fA" % (prev_cur,))
+
 
 def load_config_prefix(config):
     return TMC4671(config)
