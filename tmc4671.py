@@ -610,12 +610,19 @@ FieldFormatters = {}
 
 DumpGroups = {
     "Default": ["CHIPINFO_SI_TYPE", "CHIPINFO_SI_VERSION",
-                "STATUS_FLAGS",
-                "AENC_DECODER_MODE",
-                "AENC_DECODER_PPR",
-                "ADC_I1_RAW_ADC_I0_RAW", "ADC_AGPI_A_RAW_ADC_VM_RAW",
-                "ADC_AENC_UX_RAW_ADC_AGPI_B_RAW", "ADC_AENC_WY_RAW_ADC_AENC_VN_RAW", "AENC_DECODER_PHI_A_RAW"],
-    "PWM": ["PWM_POLARITIES", "PWM_MAXCNT", "PWM_BBM_H_BBM_L", "PWM_SV_CHOP", "MOTOR_TYPE_N_POLE_PAIRS"],
+                "STATUS_FLAGS", "PHI_E"],
+    "HALL": ["HALL_MODE", "HALL_POSITION_060_000", "HALL_POSITION_180_120",
+             "HALL_POSITION_300_240", "HALL_PHI_E_INTERPOLATED_PHI_E",
+             "HALL_PHI_E_PHI_M_OFFSET", "HALL_PHI_M",
+             "HALL_PHI_E_INTERPOLATED_PHI_E",],
+    "AENC": ["AENC_DECODER_MODE",
+             "AENC_DECODER_PPR", "ADC_I1_RAW_ADC_I0_RAW",
+             "ADC_AGPI_A_RAW_ADC_VM_RAW", "ADC_AENC_UX_RAW_ADC_AGPI_B_RAW",
+             "ADC_AENC_WY_RAW_ADC_AENC_VN_RAW", "AENC_DECODER_PHI_A_RAW"],
+    "PWM": ["PWM_POLARITIES", "PWM_MAXCNT", "PWM_BBM_H_BBM_L", "PWM_SV_CHOP",
+            "MOTOR_TYPE_N_POLE_PAIRS"],
+    "STEP": ["STEP_WIDTH", "PHI_E", "MODE_RAMP_MODE_MOTION", "STATUS_FLAGS",
+             "PID_POSITION_TARGET"],
 }
 
 # Return the position of the first bit set in a mask
@@ -655,7 +662,10 @@ class FieldHelper:
             reg_name = self.lookup_register(field_name)
         if reg_value is None:
             reg_value = self.registers.get(reg_name, 0)
-        mask = self.all_fields[reg_name][field_name]
+        if reg_name == field_name:
+            mask = 0xffffffff
+        else:
+            mask = self.all_fields[reg_name][field_name]
         new_value = (reg_value & ~mask) | ((field_value << ffs(mask)) & mask)
         self.registers[reg_name] = new_value
         return new_value
@@ -696,7 +706,7 @@ class FieldHelper:
 # TODO: actually make this do something
 MAX_CURRENT = 10.000
 
-class TMCCurrentHelper:
+class CurrentHelper:
     def __init__(self, config, mcu_tmc):
         self.printer = config.get_printer()
         self.name = config.get_name().split()[-1]
@@ -714,6 +724,24 @@ class TMCCurrentHelper:
         self.hold_current = hold_current
         self.req_hold_current = hold_current
 
+# Helper to configure the microstep settings
+def StepHelper(config, mcu_tmc):
+    fields = mcu_tmc.get_fields()
+    stepper_name = " ".join(config.get_name().split()[1:])
+    if not config.has_section(stepper_name):
+        raise config.error(
+            "Could not find config section '[%s]' required by tmc4671 driver"
+            % (stepper_name,))
+    sconfig = config.getsection(stepper_name)
+    steps = {1<<i: 1<<i for i in range(0, 16)}
+    res = sconfig.getchoice('full_steps_per_rotation', steps, default=8)
+    mres = sconfig.getchoice('microsteps', steps, default=256)
+    if res * mres > 65536:
+        raise config.error(
+            "Product of res and mres must be less than 65536 for [%s]"
+            % (stepper_name,))
+    step_width = 65536 // (res * mres)
+    fields.set_field("STEP_WIDTH", step_width)
 
 # 4671 does not support chaining, so that's removed
 # 4671 protocol does not require dummy reads
@@ -801,7 +829,8 @@ class TMC4671:
         self.printer.register_event_handler("klippy:connect",
                                             self._handle_connect)
         # Register commands
-        current_helper = TMCCurrentHelper(config, self.mcu_tmc)
+        step_helper = StepHelper(config, self.mcu_tmc)
+        current_helper = CurrentHelper(config, self.mcu_tmc)
         gcode = self.printer.lookup_object("gcode")
         gcode.register_mux_command("SET_TMC_FIELD", "STEPPER", self.name,
                                    self.cmd_SET_TMC_FIELD,
@@ -829,6 +858,11 @@ class TMC4671:
         set_config_field(config, "N_POLE_PAIRS", 4)
         set_config_field(config, "AENC_DEG", 1)    # 120 degree analog hall
         set_config_field(config, "AENC_PPR", 1)    # 120 degree analog hall
+        set_config_field(config, "HALL_INTERP", 1)
+        set_config_field(config, "HALL_BLANK", 8)
+        set_config_field(config, "PHI_E_SELECTION", 5) # digital hall PHI_E
+        set_config_field(config, "POSITION_SELECTION", 5) # digital hall PHI_E
+        set_config_field(config, "VELOCITY_SELECTION", 5) # digital hall PHI_E
 
     def _handle_connect(self):
         # Check if using step on both edges optimization
