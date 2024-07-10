@@ -615,6 +615,7 @@ DumpGroups = {
                 "AENC_DECODER_PPR",
                 "ADC_I1_RAW_ADC_I0_RAW", "ADC_AGPI_A_RAW_ADC_VM_RAW",
                 "ADC_AENC_UX_RAW_ADC_AGPI_B_RAW", "ADC_AENC_WY_RAW_ADC_AENC_VN_RAW", "AENC_DECODER_PHI_A_RAW"],
+    "PWM": ["PWM_POLARITIES", "PWM_MAXCNT", "PWM_BBM_H_BBM_L", "PWM_SV_CHOP", "MOTOR_TYPE_N_POLE_PAIRS"],
 }
 
 # Return the position of the first bit set in a mask
@@ -818,11 +819,15 @@ class TMC4671:
         set_config_field = self.fields.set_config_field
         set_config6100_field = self.fields6100.set_config_field
         # defaults as per 4671+6100 BOB datasheet
+        set_config6100_field(config, "singleline", 0)
+        set_config6100_field(config, "normal", 1)
         set_config6100_field(config, "DRVSTRENGTH", 0)
         set_config6100_field(config, "BBMCLKS", 10)
+        set_config_field(config, "PWM_BBM_L", 10)
+        set_config_field(config, "PWM_BBM_H", 10)
         set_config_field(config, "MOTOR_TYPE", 3)
         set_config_field(config, "N_POLE_PAIRS", 4)
-        set_config_field(config, "AENC_DEG", 1)            # 120 degree analog hall
+        set_config_field(config, "AENC_DEG", 1)    # 120 degree analog hall
         set_config_field(config, "AENC_PPR", 1)    # 120 degree analog hall
 
     def _handle_connect(self):
@@ -837,6 +842,8 @@ class TMC4671:
             logging.info("TMC %s failed to init: %s", self.name, str(e))
 
     def _init_registers(self, print_time=None):
+        if print_time is None:
+            print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         # Send registers, 6100 first then 4671
         for reg_name in list(self.fields6100.registers.keys()):
             val = self.fields6100.registers[reg_name] # Val may change during loop
@@ -844,6 +851,10 @@ class TMC4671:
         for reg_name in list(self.fields.registers.keys()):
             val = self.fields.registers[reg_name] # Val may change during loop
             self.mcu_tmc.set_register(reg_name, val, print_time)
+        # Now enable 6100
+        self.mcu_tmc6100.set_register("GCONF",
+                                      self.fields6100.set_field("disable", 0),
+                                      print_time)
 
     cmd_INIT_TMC_help = "Initialize TMC stepper driver registers"
     def cmd_INIT_TMC(self, gcmd):
@@ -873,6 +884,8 @@ class TMC4671:
                 raise gcmd.error("Unknown register name '%s'" % (reg_name))
         else:
             group = gcmd.get('GROUP', 'Default')
+            if group not in DumpGroups6100:
+                raise gcmd.error("Unknown group name '%s'" % (group))
             gcmd.respond_info("========== Queried registers ==========")
             for reg_name in DumpGroups6100[group]:
                 val = self.mcu_tmc6100.get_register(reg_name)
@@ -902,6 +915,8 @@ class TMC4671:
                 raise gcmd.error("Unknown register name '%s'" % (reg_name))
         else:
             group = gcmd.get('GROUP', 'Default')
+            if group not in DumpGroups:
+                raise gcmd.error("Unknown group name '%s'" % (group))
             gcmd.respond_info("========== Queried registers ==========")
             for reg_name in DumpGroups[group]:
                 val = self.mcu_tmc.get_register(reg_name)
