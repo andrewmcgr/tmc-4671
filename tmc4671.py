@@ -908,8 +908,8 @@ class TMC4671:
         self.mcu_tmc.set_register("ADC_I_SELECT",
                                   self.fields.set_field("ADC_I1_SELECT", 1),
                                   print_time)
-        self.fields.set_field("ADC_I1_SCALE", 1),
-        self.fields.set_field("ADC_I0_SCALE", 1),
+        self.fields.set_field("ADC_I1_SCALE", 256),
+        self.fields.set_field("ADC_I0_SCALE", 256),
         reg, addr = self.mcu_tmc.name_to_reg["ADC_I1_RAW_ADC_I0_RAW"]
         self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
         i1sum = 0
