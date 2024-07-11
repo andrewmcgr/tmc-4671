@@ -1,5 +1,6 @@
 # TMC4671 configuration
 import logging, collections
+import math
 from . import bus, tmc
 
 TMC_FREQUENCY=25000000.
@@ -630,6 +631,35 @@ DumpGroups = {
     "STEP": ["STEP_WIDTH", "PHI_E", "MODE_RAMP_MODE_MOTION", "STATUS_FLAGS",
              "PID_POSITION_TARGET"],
 }
+
+# Design a biquad low pass filter in canonical form
+def biquad_lpf(fs, f, Q):
+    w0 = 2.0 * math.pi * f / fs
+    cw0 = math.cos(w0)
+    sw0 = math.sin(w0)
+    alpha = 0.5 * sw0 / Q
+    b1 = 1.0 - cw0
+    b0 = b2 = b1 / 2.0
+    a0 = 1 + alpha
+    a1 = - 2.0 * cw0
+    a2 = 1 - alpha
+    return b0, b1, b2, a0, a1, a2
+
+# Z-transform and normalise a biquad filter
+def biquad_tmc(T, b0, b1, b2, a0, a1, a2):
+    den = (T**2 - 2*a1 + 4*a2)
+    b2z = (b0*T**2 + 2*b1*T + 4*b2) / den
+    b1z = (2*b0*T**2 - 8*b2) / den
+    b0z = (b0*T**2 - 2*b1*T + 4*b2) / den
+    a2z = (T**2 + 2*a1*T + 4*a2) / den
+    a1z = (2*T**2 - 8*a2) / den
+    e29 = 2**29
+    b0 = round(b0z * e29)
+    b1 = round(b1z * e29)
+    b2 = round(b2z * e29)
+    a1 = round(-a1z * e29)
+    a2 = round(-a2z * e29)
+    return b0, b1, b2, a1, a2
 
 # Return the position of the first bit set in a mask
 def ffs(mask):
