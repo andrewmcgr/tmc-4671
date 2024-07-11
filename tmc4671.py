@@ -314,9 +314,10 @@ Fields["ADC_I0_SCALE_OFFSET"] = {
 
 Fields["ADC_I_SELECT"] = {
     "ADC_I0_SELECT": 0xff,
-    "ADC_I_UX_SELECT": 0xff << 8,
-    "ADC_I_V_SELECT": 0xff << 16,
-    "ADC_I_WY_SELECT": 0xff << 24,
+    "ADC_I1_SELECT": 0xff << 8,
+    "ADC_I_UX_SELECT": 0x3 << 24,
+    "ADC_I_V_SELECT": 0x3 << 26,
+    "ADC_I_WY_SELECT": 0x3 << 28,
 }
 
 Fields["ADC_I1_I0_EXT"] = {
@@ -526,6 +527,11 @@ Fields["MODE_RAMP_MODE_MOTION"] = {
     "MODE_MOTION": 0xff,
     "MODE_PID_SMPL": 0x7f << 24,
     "MODE_PID_TYPE": 1 << 31
+}
+
+Fields["PID_TORQUE_FLUX_TARGET"] = {
+    "PID_FLUX_TARGET": 0xffff,
+    "PID_TORQUE_TARGET": 0xffff << 16
 }
 
 Fields["PID_TORQUE_FLUX_OFFSET"] = {
@@ -868,8 +874,11 @@ class TMC4671:
         set_config6100_field(config, "normal", 1)
         set_config6100_field(config, "DRVSTRENGTH", 0)
         set_config6100_field(config, "BBMCLKS", 10)
+        set_config_field(config, "PWM_MAXCNT", 0xF9F) # 25 kHz
         set_config_field(config, "PWM_BBM_L", 10)
         set_config_field(config, "PWM_BBM_H", 10)
+        set_config_field(config, "PWM_CHOP", 7)
+        set_config_field(config, "PWM_SV", 1)
         set_config_field(config, "MOTOR_TYPE", 3)
         set_config_field(config, "N_POLE_PAIRS", 4)
         set_config_field(config, "AENC_DEG", 1)    # 120 degree analog hall
@@ -891,9 +900,55 @@ class TMC4671:
         except self.printer.command_error as e:
             logging.info("TMC %s failed to init: %s", self.name, str(e))
 
+    def _calibrate_adc(self, print_time):
+        self.fields.set_field("ADC_I_UX_SELECT", 0)
+        self.fields.set_field("ADC_I_V_SELECT", 1)
+        self.fields.set_field("ADC_I_WY_SELECT", 2)
+        self.fields.set_field("ADC_I0_SELECT", 0)
+        self.mcu_tmc.set_register("ADC_I_SELECT",
+                                  self.fields.set_field("ADC_I1_SELECT", 1),
+                                  print_time)
+        self.fields.set_field("ADC_I1_SCALE", 1),
+        self.fields.set_field("ADC_I0_SCALE", 1),
+        reg, addr = self.mcu_tmc.name_to_reg["ADC_I1_RAW_ADC_I0_RAW"]
+        self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
+        i1sum = 0
+        i0sum = 0
+        n = 50
+        for i in range(n):
+            v = self.fields.get_reg_fields("ADC_I1_RAW_ADC_I0_RAW",
+                                           self.mcu_tmc.tmc_spi.reg_read(reg))
+            i1sum += v["ADC_I1_RAW"]
+            i0sum += v["ADC_I0_RAW"]
+            self.printer.lookup_object('toolhead').dwell(0.005)
+        i1_off = i1sum // n
+        i0_off = i0sum // n
+        self.mcu_tmc.set_register("ADC_I1_SCALE_OFFSET",
+                                  self.fields.set_field("ADC_I1_OFFSET", i1_off),
+                                  print_time)
+        self.mcu_tmc.set_register("ADC_I0_SCALE_OFFSET",
+                                  self.fields.set_field("ADC_I0_OFFSET", i0_off),
+                                  print_time)
+        logging.info("TMC 4671 %s ADC offsets I0=%d I1=%d", self.name, i0_off, i1_off)
+
     def _init_registers(self, print_time=None):
         if print_time is None:
             print_time = self.printer.lookup_object('toolhead').get_last_move_time()
+        ping = self.mcu_tmc.get_register("CHIPINFO_SI_TYPE")
+        if ping != 0x34363731:
+            raise self.printer.command_error(
+                "TMC 4671 not identified, identification register returned %x" % (ping,))
+        # Disable 6100
+        self.mcu_tmc6100.set_register("GCONF",
+                                      self.fields6100.set_field("disable", 0),
+                                      print_time)
+        # Set torque and current in 4671 to zero
+        self.mcu_tmc.set_register("PID_TORQUE_FLUX_TARGET",
+                                  self.fields.set_field("PID_TORQUE_TARGET", 0),
+                                  print_time)
+        self.mcu_tmc.set_register("PID_TORQUE_FLUX_TARGET",
+                                  self.fields.set_field("PID_FLUX_TARGET", 0),
+                                  print_time)
         # Send registers, 6100 first then 4671
         for reg_name in list(self.fields6100.registers.keys()):
             val = self.fields6100.registers[reg_name] # Val may change during loop
@@ -901,6 +956,7 @@ class TMC4671:
         for reg_name in list(self.fields.registers.keys()):
             val = self.fields.registers[reg_name] # Val may change during loop
             self.mcu_tmc.set_register(reg_name, val, print_time)
+        self._calibrate_adc(print_time)
         # Now enable 6100
         self.mcu_tmc6100.set_register("GCONF",
                                       self.fields6100.set_field("disable", 0),
