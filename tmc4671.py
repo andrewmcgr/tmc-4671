@@ -613,7 +613,31 @@ SignedFields = {"ADC_I1_SCALE", "ADC_I0_SCALE", "AENC_0_SCALE", "AENC_1_SCALE",
                 "PID_FLUX_ERROR_SUM", "PID_VELOCITY_ERROR_SUM",
                 "PID_POSITION_ERROR_SUM", "STEP_WIDTH"}
 
-FieldFormatters = {}
+def format_q3_29(val):
+    return "%11.9f" % (val * 2**-29)
+
+FieldFormatters = {
+    "CONFIG_BIQUAD_X_A_1": format_q3_29,
+    "CONFIG_BIQUAD_X_A_2": format_q3_29,
+    "CONFIG_BIQUAD_X_B_0": format_q3_29,
+    "CONFIG_BIQUAD_X_B_1": format_q3_29,
+    "CONFIG_BIQUAD_X_B_2": format_q3_29,
+    "CONFIG_BIQUAD_V_A_1": format_q3_29,
+    "CONFIG_BIQUAD_V_A_2": format_q3_29,
+    "CONFIG_BIQUAD_V_B_0": format_q3_29,
+    "CONFIG_BIQUAD_V_B_1": format_q3_29,
+    "CONFIG_BIQUAD_V_B_2": format_q3_29,
+    "CONFIG_BIQUAD_T_A_1": format_q3_29,
+    "CONFIG_BIQUAD_T_A_2": format_q3_29,
+    "CONFIG_BIQUAD_T_B_0": format_q3_29,
+    "CONFIG_BIQUAD_T_B_1": format_q3_29,
+    "CONFIG_BIQUAD_T_B_2": format_q3_29,
+    "CONFIG_BIQUAD_F_A_1": format_q3_29,
+    "CONFIG_BIQUAD_F_A_2": format_q3_29,
+    "CONFIG_BIQUAD_F_B_0": format_q3_29,
+    "CONFIG_BIQUAD_F_B_1": format_q3_29,
+    "CONFIG_BIQUAD_F_B_2": format_q3_29,
+}
 
 DumpGroups = {
     "Default": ["CHIPINFO_SI_TYPE", "CHIPINFO_SI_VERSION",
@@ -630,7 +654,21 @@ DumpGroups = {
             "MOTOR_TYPE_N_POLE_PAIRS"],
     "STEP": ["STEP_WIDTH", "PHI_E", "MODE_RAMP_MODE_MOTION", "STATUS_FLAGS",
              "PID_POSITION_TARGET"],
+    "FILTERS": [ "CONFIG_BIQUAD_X_A_1", "CONFIG_BIQUAD_X_A_2",
+                "CONFIG_BIQUAD_X_B_0", "CONFIG_BIQUAD_X_B_1",
+                "CONFIG_BIQUAD_X_B_2", "CONFIG_BIQUAD_X_ENABLE",
+                "CONFIG_BIQUAD_V_A_1", "CONFIG_BIQUAD_V_A_2",
+                "CONFIG_BIQUAD_V_B_0", "CONFIG_BIQUAD_V_B_1",
+                "CONFIG_BIQUAD_V_B_2", "CONFIG_BIQUAD_V_ENABLE",
+                "CONFIG_BIQUAD_T_A_1", "CONFIG_BIQUAD_T_A_2",
+                "CONFIG_BIQUAD_T_B_0", "CONFIG_BIQUAD_T_B_1",
+                "CONFIG_BIQUAD_T_B_2", "CONFIG_BIQUAD_T_ENABLE",
+                "CONFIG_BIQUAD_F_A_1", "CONFIG_BIQUAD_F_A_2",
+                "CONFIG_BIQUAD_F_B_0", "CONFIG_BIQUAD_F_B_1",
+                "CONFIG_BIQUAD_F_B_2", "CONFIG_BIQUAD_F_ENABLE",],
 }
+
+# Filter design formulae from https://www.w3.org/TR/audio-eq-cookbook/
 
 # Design a biquad low pass filter in canonical form
 def biquad_lpf(fs, f, Q):
@@ -645,7 +683,20 @@ def biquad_lpf(fs, f, Q):
     a2 = 1 - alpha
     return b0, b1, b2, a0, a1, a2
 
-# Z-transform and normalise a biquad filter
+# Design a biquad notch filter in canonical form
+def biquad_notch(fs, f, Q):
+    w0 = 2.0 * math.pi * f / fs
+    cw0 = math.cos(w0)
+    sw0 = math.sin(w0)
+    alpha = 0.5 * sw0 / Q
+    b1 = - 2.0 * cw0
+    b0 = b2 = 1.0
+    a0 = 1 + alpha
+    a1 = - 2.0 * cw0
+    a2 = 1 - alpha
+    return b0, b1, b2, a0, a1, a2
+
+# Z-transform and normalise a biquad filter, according to TMC
 def biquad_tmc(T, b0, b1, b2, a0, a1, a2):
     den = (T**2 - 2*a1 + 4*a2)
     b2z = (b0*T**2 + 2*b1*T + 4*b2) / den
@@ -659,7 +710,8 @@ def biquad_tmc(T, b0, b1, b2, a0, a1, a2):
     b2 = round(b2z * e29)
     a1 = round(-a1z * e29)
     a2 = round(-a2z * e29)
-    return b0, b1, b2, a1, a2
+    # return in the same order as the config registers
+    return a1, a2, b0, b1, b2
 
 # Return the position of the first bit set in a mask
 def ffs(mask):
@@ -727,7 +779,7 @@ class FieldHelper:
         return self.set_field(field_name, val, reg_name=reg_name)
     def pretty_format(self, reg_name, reg_value):
         # Provide a string description of a register
-        reg_fields = self.all_fields.get(reg_name, {})
+        reg_fields = self.all_fields.get(reg_name, {reg_name: 0xffffffff})
         reg_fields = sorted([(mask, name) for name, mask in reg_fields.items()])
         fields = []
         for mask, field_name in reg_fields:
@@ -866,7 +918,10 @@ class TMC4671:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.name = config.get_name().split()[-1]
-        self.fields = FieldHelper(Fields, SignedFields, FieldFormatters, prefix="foc_")
+        self.fields = FieldHelper(Fields,
+                                  signed_fields=SignedFields,
+                                  field_formatters=FieldFormatters,
+                                  prefix="foc_")
         # TODO: make 6100 optional for boards without one.
         self.fields6100 = FieldHelper(Fields6100, prefix="drv_")
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
@@ -904,7 +959,12 @@ class TMC4671:
         set_config6100_field(config, "normal", 1)
         set_config6100_field(config, "DRVSTRENGTH", 0)
         set_config6100_field(config, "BBMCLKS", 10)
+        # This should not really be set to anything else
+        # therefore not providing convenience interface
         set_config_field(config, "PWM_MAXCNT", 0xF9F) # 25 kHz
+        # These are used later by filter definitions
+        self.pwmfreq = 4.0 * TMC_FREQUENCY / (self.fields.get_field("PWM_MAXCNT") + 1)
+        self.pwmT = 1.0 / self.pwmfreq
         set_config_field(config, "PWM_BBM_L", 10)
         set_config_field(config, "PWM_BBM_H", 10)
         set_config_field(config, "PWM_CHOP", 7)
@@ -918,6 +978,21 @@ class TMC4671:
         set_config_field(config, "PHI_E_SELECTION", 5) # digital hall PHI_E
         set_config_field(config, "POSITION_SELECTION", 12) # digital hall PHI_M
         set_config_field(config, "VELOCITY_SELECTION", 12) # digital hall PHI_M
+
+    # Intended to be called, e.g. like this:
+    # self.enable_biquad("CONFIG_BIQUAD_X_ENABLE", *biquad_tmc(self.pwmT, *biquad_lpf(self.pwmfreq, 5e3, 0.7)))
+    def enable_biquad(self, enable_field, *biquad):
+        reg, addr = self.mcu_tmc.name_to_reg[enable_field]
+        for o,i in enumerate(biquad):
+            self.mcu_tmc.tmc_spi.reg_write(reg+1, addr-6+o)
+            self.mcu_tmc.tmc_spi.reg_write(reg, i)
+        self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
+        self.mcu_tmc.tmc_spi.reg_write(reg, 1)
+
+    def disable_biquad(self, enable_field):
+        reg, addr = self.mcu_tmc.name_to_reg[enable_field]
+        self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
+        self.mcu_tmc.tmc_spi.reg_write(reg, 0)
 
     def _handle_connect(self):
         # Check if using step on both edges optimization
@@ -987,6 +1062,10 @@ class TMC4671:
             val = self.fields.registers[reg_name] # Val may change during loop
             self.mcu_tmc.set_register(reg_name, val, print_time)
         self._calibrate_adc(print_time)
+        # setup filters
+        self.enable_biquad("CONFIG_BIQUAD_X_ENABLE",
+                           *biquad_tmc(self.pwmT,
+                                       *biquad_lpf(self.pwmfreq, 5e3, 2**-0.5)))
         # Now enable 6100
         self.mcu_tmc6100.set_register("GCONF",
                                       self.fields6100.set_field("disable", 0),
