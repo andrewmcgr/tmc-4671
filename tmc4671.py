@@ -1,9 +1,18 @@
 # TMC4671 configuration
 import logging, collections
 import math
+from enum import IntEnum
 from . import bus, tmc
 
 TMC_FREQUENCY=25000000.
+
+# Some magic numbers for the driver
+
+class MotionMode(IntEnum):
+    stopped_mode = 0
+    torque_mode = 1
+    velocity_mode = 2
+    position_mode = 3
 
 # Tuple is the address followed by a value to put in the next higher address to select that sub-register, or none to just go straight there.
 
@@ -978,6 +987,9 @@ class TMC4671:
         gcode.register_mux_command("DUMP_TMC6100", "STEPPER", self.name,
                                    self.cmd_DUMP_TMC6100,
                                    desc=self.cmd_DUMP_TMC6100_help)
+        gcode.register_mux_command("TMC_TUNE_PID", "STEPPER", self.name,
+                                   self.cmd_TMC_TUNE_PID,
+                                   desc=self.cmd_TMC_TUNE_PID_help)
         gcode.register_mux_command("INIT_TMC", "STEPPER", self.name,
                                    self.cmd_INIT_TMC,
                                    desc=self.cmd_INIT_TMC_help)
@@ -1006,11 +1018,12 @@ class TMC4671:
         set_config_field(config, "N_POLE_PAIRS", 4)
         set_config_field(config, "AENC_DEG", 1)    # 120 degree analog hall
         set_config_field(config, "AENC_PPR", 1)    # 120 degree analog hall
-        set_config_field(config, "HALL_INTERP", 1)
+        set_config_field(config, "HALL_INTERP", 0)
         set_config_field(config, "HALL_BLANK", 8)
         set_config_field(config, "PHI_E_SELECTION", 5) # digital hall PHI_E
         set_config_field(config, "POSITION_SELECTION", 12) # digital hall PHI_M
         set_config_field(config, "VELOCITY_SELECTION", 12) # digital hall PHI_M
+        set_config_field(config, "VELOCITY_METER_SELECTION", 1) # PWM frequency velocity meter
         set_config_field(config, "CURRENT_I_n", 1) # q4.12
         set_config_field(config, "CURRENT_P_n", 1) # q4.12
         set_config_field(config, "VELOCITY_I_n", 1) # q4.12
@@ -1019,6 +1032,20 @@ class TMC4671:
         set_config_field(config, "POSITION_P_n", 1) # q4.12
         set_config_field(config, "MODE_PID_SMPL", 1) # Advanced PID samples position at fPWM
         set_config_field(config, "MODE_PID_TYPE", 1) # Advanced PID mode
+
+    def _read_field(self, field):
+        reg_name = self.fields.lookup_register(field)
+        reg_value = self.mcu_tmc.get_register(reg_name)
+        return self.fields.get_field(field, reg_value=reg_value,
+                                     reg_name=reg_name)
+
+    def _write_field(self, field, val):
+        reg_name = self.fields.lookup_register(field)
+        reg_value = self.mcu_tmc.get_register(reg_name)
+        self.mcu_tmc.set_register(reg_name,
+                                  self.fields.set_field(field, val,
+                                                        reg_value=reg_value,
+                                                        reg_name=reg_name))
 
     # Intended to be called, e.g. like this:
     # self.enable_biquad("CONFIG_BIQUAD_X_ENABLE", *biquad_tmc(self.pwmT, *biquad_lpf(self.pwmfreq, 5e3, 0.7)))
@@ -1077,6 +1104,15 @@ class TMC4671:
                                   print_time)
         logging.info("TMC 4671 %s ADC offsets I0=%d I1=%d", self.name, i0_off, i1_off)
 
+    def _tune_pid(self, print_time):
+        self._write_field("CONFIG_BIQUAD_X_ENABLE", 0)
+        old_phi_e_selection = self._read_field("PHI_E_SELECTION")
+        self._write_field("PHI_E_SELECTION", 1) # external mode, so it won't change.
+        self._write_field("MODE_MOTION", MotionMode.torque_mode)
+        # TODO: actually do the tuning experiment
+        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+        self._write_field("PHI_E_SELECTION", old_phi_e_selection) # restore it
+
     def _init_registers(self, print_time=None):
         if print_time is None:
             print_time = self.printer.lookup_object('toolhead').get_last_move_time()
@@ -1117,6 +1153,12 @@ class TMC4671:
         logging.info("INIT_TMC %s", self.name)
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         self._init_registers(print_time)
+
+    cmd_TMC_TUNE_PID_help = "Initialize TMC stepper driver registers"
+    def cmd_TMC_TUNE_PID(self, gcmd):
+        logging.info("TMC_TUNE_PID %s", self.name)
+        print_time = self.printer.lookup_object('toolhead').get_last_move_time()
+        self._tune_pid(print_time)
 
     cmd_DUMP_TMC6100_help = "Read and display TMC6100 stepper driver registers"
     def cmd_DUMP_TMC6100(self, gcmd):
