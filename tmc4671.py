@@ -498,6 +498,14 @@ Fields["AENC_DECODER_PHI_E_PHI_M"] = {
 
 # TODO: CONFIG_DATA
 # CONFIG_DATA changes layout depending on the selected address
+Fields["CONFIG_ADVANCED_PI_REPRESENT"] = {
+    "CURRENT_I_n": 1 << 0,
+    "CURRENT_P_n": 1 << 1,
+    "VELOCITY_I_n": 1 << 2,
+    "VELOCITY_P_n": 1 << 3,
+    "POSITION_I_n": 1 << 4,
+    "POSITION_P_n": 1 << 5,
+}
 
 Fields["VELOCITY_SELECTION"] = {
     "VELOCITY_SELECTION": 0xff,
@@ -613,8 +621,23 @@ SignedFields = {"ADC_I1_SCALE", "ADC_I0_SCALE", "AENC_0_SCALE", "AENC_1_SCALE",
                 "PID_FLUX_ERROR_SUM", "PID_VELOCITY_ERROR_SUM",
                 "PID_POSITION_ERROR_SUM", "STEP_WIDTH"}
 
+def format_phi(val):
+    phi = (val * 360.0 / 65536.0)
+    if phi < 0.0:
+        phi += 360
+    return "%.3f" % (phi)
+
+def format_q4_12(val):
+    return "%.4f" % (val * 2**-15)
+
+def format_q0_15(val):
+    return "%.7f" % (val * 2**-15)
+
+def format_q8_8(val):
+    return "%.3f" % (val * 2**-8)
+
 def format_q3_29(val):
-    return "%11.9f" % (val * 2**-29)
+    return "%.9f" % (val * 2**-29)
 
 FieldFormatters = {
     "CONFIG_BIQUAD_X_A_1": format_q3_29,
@@ -637,6 +660,17 @@ FieldFormatters = {
     "CONFIG_BIQUAD_F_B_0": format_q3_29,
     "CONFIG_BIQUAD_F_B_1": format_q3_29,
     "CONFIG_BIQUAD_F_B_2": format_q3_29,
+    "HALL_POSITION_000": format_phi,
+    "HALL_POSITION_120": format_phi,
+    "HALL_POSITION_240": format_phi,
+    "HALL_POSITION_060": format_phi,
+    "HALL_POSITION_180": format_phi,
+    "HALL_POSITION_300": format_phi,
+    "HALL_PHI_E": format_phi,
+    "HALL_PHI_E_INTERPOLATED": format_phi,
+    "HALL_PHI_E_PHI_M_OFFSET": format_phi,
+    "HALL_PHI_M": format_phi,
+    "PHI_E": format_phi,
 }
 
 DumpGroups = {
@@ -644,8 +678,7 @@ DumpGroups = {
                 "STATUS_FLAGS", "PHI_E"],
     "HALL": ["HALL_MODE", "HALL_POSITION_060_000", "HALL_POSITION_180_120",
              "HALL_POSITION_300_240", "HALL_PHI_E_INTERPOLATED_PHI_E",
-             "HALL_PHI_E_PHI_M_OFFSET", "HALL_PHI_M",
-             "HALL_PHI_E_INTERPOLATED_PHI_E",],
+             "HALL_PHI_E_PHI_M_OFFSET", "HALL_PHI_M",],
     "AENC": ["AENC_DECODER_MODE",
              "AENC_DECODER_PPR", "ADC_I1_RAW_ADC_I0_RAW",
              "ADC_AGPI_A_RAW_ADC_VM_RAW", "ADC_AENC_UX_RAW_ADC_AGPI_B_RAW",
@@ -978,6 +1011,14 @@ class TMC4671:
         set_config_field(config, "PHI_E_SELECTION", 5) # digital hall PHI_E
         set_config_field(config, "POSITION_SELECTION", 12) # digital hall PHI_M
         set_config_field(config, "VELOCITY_SELECTION", 12) # digital hall PHI_M
+        set_config_field(config, "CURRENT_I_n", 1) # q4.12
+        set_config_field(config, "CURRENT_P_n", 1) # q4.12
+        set_config_field(config, "VELOCITY_I_n", 1) # q4.12
+        set_config_field(config, "VELOCITY_P_n", 1) # q4.12
+        set_config_field(config, "POSITION_I_n", 1) # q4.12
+        set_config_field(config, "POSITION_P_n", 1) # q4.12
+        set_config_field(config, "MODE_PID_SMPL", 1) # Advanced PID samples position at fPWM
+        set_config_field(config, "MODE_PID_TYPE", 1) # Advanced PID mode
 
     # Intended to be called, e.g. like this:
     # self.enable_biquad("CONFIG_BIQUAD_X_ENABLE", *biquad_tmc(self.pwmT, *biquad_lpf(self.pwmfreq, 5e3, 0.7)))
