@@ -14,6 +14,7 @@ class MotionMode(IntEnum):
     torque_mode = 1
     velocity_mode = 2
     position_mode = 3
+    uq_ud_ext_mode = 8
 
 # Tuple is the address followed by a value to put in the next higher address to select that sub-register, or none to just go straight there.
 
@@ -1040,7 +1041,7 @@ class TMC4671:
         set_config_field(config, "HALL_BLANK", 8)
         set_config_field(config, "PHI_E_SELECTION", 5) # digital hall PHI_E
         set_config_field(config, "POSITION_SELECTION", 12) # digital hall PHI_M
-        set_config_field(config, "VELOCITY_SELECTION", 12) # digital hall PHI_M
+        set_config_field(config, "VELOCITY_SELECTION", 5) # digital hall PHI_E
         set_config_field(config, "VELOCITY_METER_SELECTION", 0) # Default velocity meter
         #set_config_field(config, "VELOCITY_METER_SELECTION", 1) # PWM frequency velocity meter
         set_config_field(config, "CURRENT_I_n", 0) # q8.8
@@ -1056,6 +1057,10 @@ class TMC4671:
         set_config_field(config, "PID_POSITION_LIMIT_LOW", -0x7fffffff)
         set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x7fffffff)
         set_config_field(config, "PID_VELOCITY_LIMIT", 0x7fffffff)
+        set_config_field(config, "PID_FLUX_P", to_q8_8(2.305))
+        set_config_field(config, "PID_FLUX_I", to_q8_8(5.919))
+        set_config_field(config, "PID_TORQUE_P", to_q8_8(2.305))
+        set_config_field(config, "PID_TORQUE_I", to_q8_8(5.919))
         set_config_field(config, "PID_VELOCITY_P", to_q8_8(1.0))
         set_config_field(config, "PID_VELOCITY_I", 0)
         set_config_field(config, "PID_POSITION_P", to_q8_8(0.5))
@@ -1143,8 +1148,8 @@ class TMC4671:
         not_done = True
         old_cur = self._read_field("PID_FLUX_ACTUAL")
         self._write_field("PWM_CHOP", 7)
-        self._write_field("PID_FLUX_P", to_q4_12(0.75))
-        self._write_field("PID_FLUX_I", to_q4_12(0.0))
+        self._write_field("PID_FLUX_P", to_q8_8(7.5))
+        self._write_field("PID_FLUX_I", to_q8_8(0.0))
         self._write_field("PID_FLUX_TARGET", 0)
         logging.info("test_cur = %d"%test_cur)
         n = 25
@@ -1162,21 +1167,23 @@ class TMC4671:
         self._write_field("PWM_CHOP", 0)
         self._write_field("PHI_E_SELECTION", old_phi_e_selection) # restore it
         # Analysis and logging
-        #for i in range(2*n):
-        #    logging.info(",".join(map(str, c[i])))
+        for i in range(2*n):
+            logging.info(",".join(map(str, c[i])))
         # At this point we can determine system model
         yinf = sum(a[1] for a in c[3*n//2:2*n])/float(2*n - 3*n//2) - sum(a[1] for a in c[0:n])/float(n)
+        logging.info("yinf = %g"%yinf)
         k = 1.0/(0.75*abs((1.0*test_cur-yinf)/yinf))
         theta = 1.0/25e3
         # TODO: calculate this from motor constants
-        tau1 = 700e-6
+        tau1 = 2e-3
         logging.info("TMC 4671 %s Flux system model k=%g, theta=%g, tau1=%g"%(self.name, k, theta, tau1,))
-        Kc, taui = simc(k, theta, tau1, theta)
-        logging.info("TMC 4671 %s Flux PID coefficients Kc=%g, Ti=%g"%(self.name, Kc, taui))
+        Kc, taui = simc(k, theta, tau1, 1.0/8e3)
+        Ki = 1.0/(taui*256.0)
+        logging.info("TMC 4671 %s Flux PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, Kc, taui, Ki))
         self._write_field("PID_FLUX_P", to_q8_8(Kc))
-        self._write_field("PID_FLUX_I", to_q8_8(Kc/taui))
+        self._write_field("PID_FLUX_I", to_q8_8(Ki))
         self._write_field("PID_TORQUE_P", to_q8_8(Kc))
-        self._write_field("PID_TORQUE_I", to_q8_8(Kc/taui))
+        self._write_field("PID_TORQUE_I", to_q8_8(Ki))
 
     def _init_registers(self, print_time=None):
         if print_time is None:
@@ -1204,7 +1211,7 @@ class TMC4671:
             val = self.fields.registers[reg_name] # Val may change during loop
             self.mcu_tmc.set_register(reg_name, val, print_time)
         self._calibrate_adc(print_time)
-        self._tune_flux_pid(print_time)
+        # self._tune_flux_pid(print_time)
         # setup filters
         self.enable_biquad("CONFIG_BIQUAD_X_ENABLE",
                            *biquad_tmc(self.pwmT,
@@ -1230,9 +1237,12 @@ class TMC4671:
     def cmd_TMC_DEBUG_MOVE(self, gcmd):
         logging.info("TMC_DEBUG_MOVE %s", self.name)
         velocity = gcmd.get_int('VELOCITY', None)
+        open_loop_velocity = gcmd.get_int('OPENVEL', None)
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         if velocity is not None:
             self._debug_velocity_motion(velocity, print_time)
+        elif open_loop_velocity is not None:
+            self._debug_openloop_velocity_motion(open_loop_velocity, print_time)
 
     def _debug_velocity_motion(self, velocity, print_time):
         self._write_field("PWM_CHOP", 7)
@@ -1241,6 +1251,26 @@ class TMC4671:
         self.printer.lookup_object('toolhead').dwell(5.)
         self._write_field("PID_VELOCITY_TARGET", 0)
         self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+        self._write_field("PWM_CHOP", 0)
+
+    def _debug_openloop_velocity_motion(self, velocity, print_time):
+        self._write_field("PWM_CHOP", 7)
+        self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
+        limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
+        self._write_field("UD_EXT", limit_cur)
+        self._write_field("UQ_EXT", 0)
+        old_phi_e_sel = self._read_field("PHI_E_SELECTION")
+        self._write_field("PHI_E_SELECTION", 5)
+        phi_e = self._read_field("PHI_E")
+        self._write_field("OPENLOOP_PHI", phi_e)
+        self._write_field("OPENLOOP_VELOCITY_TARGET", velocity)
+        self._write_field("OPENLOOP_ACCELERATION", 1000)
+        self.printer.lookup_object('toolhead').dwell(5.)
+        self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
+        self._write_field("OPENLOOP_ACCELERATION", 0)
+        self.printer.lookup_object('toolhead').dwell(0.2)
+        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+        self._write_field("PHI_E_SELECTION", old_phi_e_sel)
         self._write_field("PWM_CHOP", 0)
 
     cmd_DUMP_TMC6100_help = "Read and display TMC6100 stepper driver registers"
