@@ -1000,6 +1000,9 @@ class TMC4671:
         gcode.register_mux_command("DUMP_TMC6100", "STEPPER", self.name,
                                    self.cmd_DUMP_TMC6100,
                                    desc=self.cmd_DUMP_TMC6100_help)
+        gcode.register_mux_command("TMC_DEBUG_MOVE", "STEPPER", self.name,
+                                   self.cmd_TMC_DEBUG_MOVE,
+                                   desc=self.cmd_TMC_DEBUG_MOVE_help)
         gcode.register_mux_command("TMC_TUNE_PID", "STEPPER", self.name,
                                    self.cmd_TMC_TUNE_PID,
                                    desc=self.cmd_TMC_TUNE_PID_help)
@@ -1032,20 +1035,31 @@ class TMC4671:
         set_config_field(config, "AENC_DEG", 1)    # 120 degree analog hall
         set_config_field(config, "AENC_PPR", 1)    # 120 degree analog hall
         set_config_field(config, "HALL_INTERP", 0)
+        set_config_field(config, "HALL_SYNC", 1)
+        set_config_field(config, "HALL_DIR", 1)
         set_config_field(config, "HALL_BLANK", 8)
         set_config_field(config, "PHI_E_SELECTION", 5) # digital hall PHI_E
         set_config_field(config, "POSITION_SELECTION", 12) # digital hall PHI_M
         set_config_field(config, "VELOCITY_SELECTION", 12) # digital hall PHI_M
-        set_config_field(config, "VELOCITY_METER_SELECTION", 1) # PWM frequency velocity meter
+        set_config_field(config, "VELOCITY_METER_SELECTION", 0) # Default velocity meter
+        #set_config_field(config, "VELOCITY_METER_SELECTION", 1) # PWM frequency velocity meter
         set_config_field(config, "CURRENT_I_n", 0) # q8.8
         set_config_field(config, "CURRENT_P_n", 0) # q8.8
-        set_config_field(config, "VELOCITY_I_n", 1) # q4.12
-        set_config_field(config, "VELOCITY_P_n", 1) # q4.12
-        set_config_field(config, "POSITION_I_n", 1) # q4.12
-        set_config_field(config, "POSITION_P_n", 1) # q4.12
-        set_config_field(config, "MODE_PID_SMPL", 1) # Advanced PID samples position at fPWM
+        set_config_field(config, "VELOCITY_I_n", 0) # q8.8
+        set_config_field(config, "VELOCITY_P_n", 0) # q8.8
+        set_config_field(config, "POSITION_I_n", 0) # q8.8
+        set_config_field(config, "POSITION_P_n", 0) # q8.8
+        set_config_field(config, "MODE_PID_SMPL", 0) # Advanced PID samples position at fPWM
         set_config_field(config, "MODE_PID_TYPE", 1) # Advanced PID mode
         set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 30000) # Voltage limit, 32768 = Vm
+        #set_config_field(config, "PID_TORQUE_FLUX_LIMITS", 0x7fff)
+        set_config_field(config, "PID_POSITION_LIMIT_LOW", -0x7fffffff)
+        set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x7fffffff)
+        set_config_field(config, "PID_VELOCITY_LIMIT", 0x7fffffff)
+        set_config_field(config, "PID_VELOCITY_P", to_q8_8(1.0))
+        set_config_field(config, "PID_VELOCITY_I", 0)
+        set_config_field(config, "PID_POSITION_P", to_q8_8(0.5))
+        set_config_field(config, "PID_POSITION_I", 0)
 
     def _read_field(self, field):
         reg_name = self.fields.lookup_register(field)
@@ -1161,6 +1175,8 @@ class TMC4671:
         logging.info("TMC 4671 %s Flux PID coefficients Kc=%g, Ti=%g"%(self.name, Kc, taui))
         self._write_field("PID_FLUX_P", to_q8_8(Kc))
         self._write_field("PID_FLUX_I", to_q8_8(Kc/taui))
+        self._write_field("PID_TORQUE_P", to_q8_8(Kc))
+        self._write_field("PID_TORQUE_I", to_q8_8(Kc/taui))
 
     def _init_registers(self, print_time=None):
         if print_time is None:
@@ -1204,11 +1220,28 @@ class TMC4671:
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         self._init_registers(print_time)
 
-    cmd_TMC_TUNE_PID_help = "Initialize TMC stepper driver registers"
+    cmd_TMC_TUNE_PID_help = "Tune the current and torque PID coefficients"
     def cmd_TMC_TUNE_PID(self, gcmd):
         logging.info("TMC_TUNE_PID %s", self.name)
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         self._tune_flux_pid(print_time)
+
+    cmd_TMC_DEBUG_MOVE_help = "Test TMC motion mode (motor must be free to move)"
+    def cmd_TMC_DEBUG_MOVE(self, gcmd):
+        logging.info("TMC_DEBUG_MOVE %s", self.name)
+        velocity = gcmd.get_int('VELOCITY', None)
+        print_time = self.printer.lookup_object('toolhead').get_last_move_time()
+        if velocity is not None:
+            self._debug_velocity_motion(velocity, print_time)
+
+    def _debug_velocity_motion(self, velocity, print_time):
+        self._write_field("PWM_CHOP", 7)
+        self._write_field("MODE_MOTION", MotionMode.velocity_mode)
+        self._write_field("PID_VELOCITY_TARGET", velocity)
+        self.printer.lookup_object('toolhead').dwell(5.)
+        self._write_field("PID_VELOCITY_TARGET", 0)
+        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+        self._write_field("PWM_CHOP", 0)
 
     cmd_DUMP_TMC6100_help = "Read and display TMC6100 stepper driver registers"
     def cmd_DUMP_TMC6100(self, gcmd):
