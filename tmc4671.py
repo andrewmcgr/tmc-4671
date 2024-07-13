@@ -1,6 +1,7 @@
 # TMC4671 configuration
 import logging, collections
 import math
+from time import monotonic_ns
 from enum import IntEnum
 from . import bus, tmc
 
@@ -637,13 +638,19 @@ def format_phi(val):
     return "%.3f" % (phi)
 
 def format_q4_12(val):
-    return "%.4f" % (val * 2**-15)
+    return "%.4f" % (val * 2**-12)
+
+def to_q4_12(val):
+    return round(val * 2**12) & 0xffff
 
 def format_q0_15(val):
     return "%.7f" % (val * 2**-15)
 
 def format_q8_8(val):
     return "%.3f" % (val * 2**-8)
+
+def to_q8_8(val):
+    return round(val * 2**8) & 0xffff
 
 def format_q3_29(val):
     return "%.9f" % (val * 2**-29)
@@ -754,6 +761,12 @@ def biquad_tmc(T, b0, b1, b2, a0, a1, a2):
     a2 = round(-a2z * e29)
     # return in the same order as the config registers
     return a1, a2, b0, b1, b2
+
+# S-IMC PI controller design
+def simc(k, theta, tau1, tauc):
+    Kc = (1.0/k) * (tau1/(tauc + theta))
+    taui = min(tau1, 4*(tauc + theta))
+    return Kc, taui
 
 # Return the position of the first bit set in a mask
 def ffs(mask):
@@ -1024,14 +1037,15 @@ class TMC4671:
         set_config_field(config, "POSITION_SELECTION", 12) # digital hall PHI_M
         set_config_field(config, "VELOCITY_SELECTION", 12) # digital hall PHI_M
         set_config_field(config, "VELOCITY_METER_SELECTION", 1) # PWM frequency velocity meter
-        set_config_field(config, "CURRENT_I_n", 1) # q4.12
-        set_config_field(config, "CURRENT_P_n", 1) # q4.12
+        set_config_field(config, "CURRENT_I_n", 0) # q8.8
+        set_config_field(config, "CURRENT_P_n", 0) # q8.8
         set_config_field(config, "VELOCITY_I_n", 1) # q4.12
         set_config_field(config, "VELOCITY_P_n", 1) # q4.12
         set_config_field(config, "POSITION_I_n", 1) # q4.12
         set_config_field(config, "POSITION_P_n", 1) # q4.12
         set_config_field(config, "MODE_PID_SMPL", 1) # Advanced PID samples position at fPWM
         set_config_field(config, "MODE_PID_TYPE", 1) # Advanced PID mode
+        set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 30000) # Voltage limit, 32768 = Vm
 
     def _read_field(self, field):
         reg_name = self.fields.lookup_register(field)
@@ -1104,14 +1118,49 @@ class TMC4671:
                                   print_time)
         logging.info("TMC 4671 %s ADC offsets I0=%d I1=%d", self.name, i0_off, i1_off)
 
-    def _tune_pid(self, print_time):
+    def _tune_flux_pid(self, print_time):
+        ch = self.current_helper
         self._write_field("CONFIG_BIQUAD_X_ENABLE", 0)
         old_phi_e_selection = self._read_field("PHI_E_SELECTION")
         self._write_field("PHI_E_SELECTION", 1) # external mode, so it won't change.
         self._write_field("MODE_MOTION", MotionMode.torque_mode)
-        # TODO: actually do the tuning experiment
+        limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
+        test_cur = limit_cur // 2
+        not_done = True
+        old_cur = self._read_field("PID_FLUX_ACTUAL")
+        self._write_field("PWM_CHOP", 7)
+        self._write_field("PID_FLUX_P", to_q4_12(0.75))
+        self._write_field("PID_FLUX_I", to_q4_12(0.0))
+        self._write_field("PID_FLUX_TARGET", 0)
+        logging.info("test_cur = %d"%test_cur)
+        n = 25
+        c = [(0,0)]*(n*2)
+        for i in range(n):
+            cur = self._read_field("PID_FLUX_ACTUAL")
+            c[i]=(monotonic_ns(), cur,)
+        self._write_field("PID_FLUX_TARGET", test_cur)
+        for i in range(n,2*n):
+            cur = self._read_field("PID_FLUX_ACTUAL")
+            c[i]=(monotonic_ns(), cur,)
+        # Experiment over, switch off
+        self._write_field("PID_FLUX_TARGET", 0)
         self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+        self._write_field("PWM_CHOP", 0)
         self._write_field("PHI_E_SELECTION", old_phi_e_selection) # restore it
+        # Analysis and logging
+        #for i in range(2*n):
+        #    logging.info(",".join(map(str, c[i])))
+        # At this point we can determine system model
+        yinf = sum(a[1] for a in c[3*n//2:2*n])/float(2*n - 3*n//2) - sum(a[1] for a in c[0:n])/float(n)
+        k = 1.0/(0.75*abs((1.0*test_cur-yinf)/yinf))
+        theta = 1.0/25e3
+        # TODO: calculate this from motor constants
+        tau1 = 700e-6
+        logging.info("TMC 4671 %s Flux system model k=%g, theta=%g, tau1=%g"%(self.name, k, theta, tau1,))
+        Kc, taui = simc(k, theta, tau1, theta)
+        logging.info("TMC 4671 %s Flux PID coefficients Kc=%g, Ti=%g"%(self.name, Kc, taui))
+        self._write_field("PID_FLUX_P", to_q8_8(Kc))
+        self._write_field("PID_FLUX_I", to_q8_8(Kc/taui))
 
     def _init_registers(self, print_time=None):
         if print_time is None:
@@ -1122,7 +1171,7 @@ class TMC4671:
                 "TMC 4671 not identified, identification register returned %x" % (ping,))
         # Disable 6100
         self.mcu_tmc6100.set_register("GCONF",
-                                      self.fields6100.set_field("disable", 0),
+                                      self.fields6100.set_field("disable", 1),
                                       print_time)
         # Set torque and current in 4671 to zero
         self.mcu_tmc.set_register("PID_TORQUE_FLUX_TARGET",
@@ -1139,6 +1188,7 @@ class TMC4671:
             val = self.fields.registers[reg_name] # Val may change during loop
             self.mcu_tmc.set_register(reg_name, val, print_time)
         self._calibrate_adc(print_time)
+        self._tune_flux_pid(print_time)
         # setup filters
         self.enable_biquad("CONFIG_BIQUAD_X_ENABLE",
                            *biquad_tmc(self.pwmT,
@@ -1158,7 +1208,7 @@ class TMC4671:
     def cmd_TMC_TUNE_PID(self, gcmd):
         logging.info("TMC_TUNE_PID %s", self.name)
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
-        self._tune_pid(print_time)
+        self._tune_flux_pid(print_time)
 
     cmd_DUMP_TMC6100_help = "Read and display TMC6100 stepper driver registers"
     def cmd_DUMP_TMC6100(self, gcmd):
