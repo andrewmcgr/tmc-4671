@@ -1053,6 +1053,11 @@ class TMC4671:
         set_config_field(config, "PWM_SV", 0)
         set_config_field(config, "MOTOR_TYPE", 3)
         set_config_field(config, "N_POLE_PAIRS", 4)
+        set_config_field(config, "ADC_I_UX_SELECT", 0)
+        set_config_field(config, "ADC_I_V_SELECT", 2)
+        set_config_field(config, "ADC_I_WY_SELECT", 1)
+        set_config_field(config, "ADC_I0_SELECT", 0)
+        set_config_field(config, "ADC_I1_SELECT", 1)
         set_config_field(config, "AENC_DEG", 1)    # 120 degree analog hall
         set_config_field(config, "AENC_PPR", 1)    # 120 degree analog hall
         set_config_field(config, "HALL_INTERP", 0)
@@ -1131,11 +1136,6 @@ class TMC4671:
             logging.info("TMC %s failed to init: %s", self.name, str(e))
 
     def _calibrate_adc(self, print_time):
-        self._write_field("ADC_I_UX_SELECT", 0)
-        self._write_field("ADC_I_V_SELECT", 2)
-        self._write_field("ADC_I_WY_SELECT", 1)
-        self._write_field("ADC_I0_SELECT", 0)
-        self._write_field("ADC_I1_SELECT", 1)
         self._write_field("CFG_ADC_I0", 0)
         self._write_field("CFG_ADC_I1", 0)
         i0_off, i1_off = self._sample_adc("ADC_I1_RAW_ADC_I0_RAW")
