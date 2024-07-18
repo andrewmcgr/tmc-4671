@@ -740,13 +740,13 @@ FieldFormatters = {
     "ABN_DECODER_PHI_E": format_phi,
     "ABN_DECODER_PHI_E_OFFSET": format_phi,
     "ABN_DECODER_PHI_M_OFFSET": format_phi,
-    "PID_FLUX_P": format_q8_8,
-    "PID_FLUX_I": format_q8_8,
-    "PID_TORQUE_P": format_q8_8,
-    "PID_TORQUE_I": format_q8_8,
-    "PID_VELOCITY_P": format_q8_8,
-    "PID_VELOCITY_I": format_q8_8,
-    "PID_POSITION_P": format_q8_8,
+    "PID_FLUX_P": format_q4_12,
+    "PID_FLUX_I": format_q4_12,
+    "PID_TORQUE_P": format_q4_12,
+    "PID_TORQUE_I": format_q4_12,
+    "PID_VELOCITY_P": format_q4_12,
+    "PID_VELOCITY_I": format_q4_12,
+    "PID_POSITION_P": format_q4_12,
 }
 
 DumpGroups = {
@@ -755,7 +755,7 @@ DumpGroups = {
     "HALL": ["HALL_MODE", "HALL_POSITION_060_000", "HALL_POSITION_180_120",
              "HALL_POSITION_300_240", "HALL_PHI_E_INTERPOLATED_PHI_E",
              "HALL_PHI_E_PHI_M_OFFSET", "HALL_PHI_M",],
-    "ABN": ["ABN_DECODER_MODE", "ABN_DECODER_PPR",
+    "ABN": ["ABN_DECODER_COUNT", "ABN_DECODER_MODE", "ABN_DECODER_PPR",
             "ABN_DECODER_PHI_E_PHI_M_OFFSET", "ABN_DECODER_PHI_E_PHI_M",
             ],
     "ADC": ["ADC_I1_RAW_ADC_I0_RAW",
@@ -969,7 +969,9 @@ class CurrentHelper:
     def set_current(self, run_current):
         self.run_current = run_current
         self.flux_limit = self._calc_flux_limit(self.run_current)
+        self.fields.set_field("PIDOUT_UQ_UD_LIMITS", self.flux_limit)
         self.fields.set_field("PID_TORQUE_FLUX_LIMITS", self.flux_limit)
+        self.fields.set_field("PID_FLUX_TARGET", self.flux_limit)
         return self.flux_limit
 
 # Helper to configure the microstep settings
@@ -1154,28 +1156,28 @@ class TMC4671:
         set_config_field(config, "VELOCITY_SELECTION", 9) # ABN
         #set_config_field(config, "VELOCITY_METER_SELECTION", 0) # Default velocity meter
         set_config_field(config, "VELOCITY_METER_SELECTION", 1) # PWM frequency velocity meter
-        set_config_field(config, "CURRENT_I_n", 0) # q8.8
-        set_config_field(config, "CURRENT_P_n", 0) # q8.8
-        set_config_field(config, "VELOCITY_I_n", 0) # q8.8
-        set_config_field(config, "VELOCITY_P_n", 0) # q8.8
-        set_config_field(config, "POSITION_I_n", 0) # q8.8
-        set_config_field(config, "POSITION_P_n", 0) # q8.8
+        set_config_field(config, "CURRENT_I_n", 1) # q4.12
+        set_config_field(config, "CURRENT_P_n", 1) # q8.8
+        set_config_field(config, "VELOCITY_I_n", 1) # q4.12
+        set_config_field(config, "VELOCITY_P_n", 1) # q8.8
+        set_config_field(config, "POSITION_I_n", 1) # q4.12
+        set_config_field(config, "POSITION_P_n", 1) # q8.8
         set_config_field(config, "MODE_PID_SMPL", 0) # Advanced PID samples position at fPWM
         set_config_field(config, "MODE_PID_TYPE", 1) # Advanced PID mode
-        set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 30000) # Voltage limit, 32768 = Vm
+        #set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 30000) # Voltage limit, 32768 = Vm
         #set_config_field(config, "PID_TORQUE_FLUX_LIMITS", 0x7fff)
         set_config_field(config, "PID_POSITION_LIMIT_LOW", -0x7fffffff)
         set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x7fffffff)
         #set_config_field(config, "PID_VELOCITY_LIMIT", 0x0fffffff)
-        set_config_field(config, "PID_VELOCITY_LIMIT", 10000)
-        set_config_field(config, "PID_FLUX_OFFSET", -200)
-        set_config_field(config, "PID_FLUX_P", to_q8_8(1.1))
-        set_config_field(config, "PID_FLUX_I", to_q8_8(-0.03))
-        set_config_field(config, "PID_TORQUE_P", to_q8_8(1.1))
-        set_config_field(config, "PID_TORQUE_I", to_q8_8(-0.03))
-        set_config_field(config, "PID_VELOCITY_P", to_q8_8(1.1))
-        set_config_field(config, "PID_VELOCITY_I", to_q8_8(-0.5))
-        set_config_field(config, "PID_POSITION_P", to_q8_8(0.5))
+        set_config_field(config, "PID_VELOCITY_LIMIT", 780000)
+        set_config_field(config, "PID_FLUX_OFFSET", 0)
+        set_config_field(config, "PID_FLUX_P", to_q4_12(2.055))
+        set_config_field(config, "PID_FLUX_I", to_q4_12(0.1240))
+        set_config_field(config, "PID_TORQUE_P", to_q4_12(0.5))
+        set_config_field(config, "PID_TORQUE_I", to_q4_12(0.0))
+        set_config_field(config, "PID_VELOCITY_P", to_q4_12(1.0))
+        set_config_field(config, "PID_VELOCITY_I", to_q4_12(0.0))
+        set_config_field(config, "PID_POSITION_P", to_q4_12(0.5))
         set_config_field(config, "PID_POSITION_I", 0)
 
     def _read_field(self, field):
@@ -1223,16 +1225,18 @@ class TMC4671:
         self._write_field("CFG_ADC_I0", 0)
         self._write_field("CFG_ADC_I1", 0)
         i0_off, i1_off = self._sample_adc("ADC_I1_RAW_ADC_I0_RAW")
-        self._write_field("CFG_ADC_I0", 2)
-        self._write_field("CFG_ADC_I1", 2)
-        i0_l, i1_l = self._sample_adc("ADC_I1_RAW_ADC_I0_RAW")
-        self._write_field("CFG_ADC_I0", 3)
-        self._write_field("CFG_ADC_I1", 3)
-        i0_h, i1_h = self._sample_adc("ADC_I1_RAW_ADC_I0_RAW")
-        self._write_field("CFG_ADC_I0", 0)
-        self._write_field("CFG_ADC_I1", 0)
-        self._write_field("ADC_I1_SCALE", (256*(i1_h-i1_l))//32768)
-        self._write_field("ADC_I0_SCALE", (256*(i0_h-i0_l))//32768)
+        #self._write_field("CFG_ADC_I0", 2)
+        #self._write_field("CFG_ADC_I1", 2)
+        #i0_l, i1_l = self._sample_adc("ADC_I1_RAW_ADC_I0_RAW")
+        #self._write_field("CFG_ADC_I0", 3)
+        #self._write_field("CFG_ADC_I1", 3)
+        #i0_h, i1_h = self._sample_adc("ADC_I1_RAW_ADC_I0_RAW")
+        #self._write_field("CFG_ADC_I0", 0)
+        #self._write_field("CFG_ADC_I1", 0)
+        #self._write_field("ADC_I1_SCALE", (256*(i1_h-i1_l))//32768)
+        #self._write_field("ADC_I0_SCALE", (256*(i0_h-i0_l))//32768)
+        self._write_field("ADC_I1_SCALE", 256)
+        self._write_field("ADC_I0_SCALE", 256)
         self._write_field("ADC_I1_OFFSET", i1_off)
         self._write_field("ADC_I0_OFFSET", i0_off)
         self._write_field("PWM_CHOP", 7)
@@ -1244,13 +1248,13 @@ class TMC4671:
         self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
         i1sum = 0
         i0sum = 0
-        n = 100
+        n = 50
         for i in range(n):
             v = self.fields.get_reg_fields(reg_name,
                                            self.mcu_tmc.tmc_spi.reg_read(reg))
             i1sum += v["ADC_I1_RAW"]
             i0sum += v["ADC_I0_RAW"]
-            self.printer.lookup_object('toolhead').dwell(0.005)
+            self.printer.lookup_object('toolhead').dwell(0.025)
         return i0sum // n, i1sum // n
 
     def _get_angle_offsets_bang(self, print_time):
@@ -1261,7 +1265,6 @@ class TMC4671:
         limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
         self._write_field("PID_FLUX_TARGET", limit_cur)
         self._write_field("PID_TORQUE_TARGET", limit_cur)
-        self._write_field("PWM_CHOP", 7)
         self._write_field("MODE_MOTION", MotionMode.torque_mode)
         self.printer.lookup_object('toolhead').dwell(0.25)
         # We're now aligned with the U pole.
@@ -1276,31 +1279,35 @@ class TMC4671:
         self._write_field("PWM_CHOP", 0)
 
     def _tune_flux_pid(self, test_existing, print_time):
-        self._tune_pid("FLUX", 4.0, test_existing, print_time)
+        self._tune_pid("FLUX", 1.0, test_existing, print_time)
 
     def _tune_torque_pid(self, test_existing, print_time):
-        self._tune_pid("TORQUE", 4.0, test_existing, print_time)
+        self._tune_pid("TORQUE", 0.5, test_existing, print_time)
 
     def _tune_pid(self, X, Kc, test_existing, print_time):
         ch = self.current_helper
+        old_mode = self._read_field("MODE_MOTION")
         old_phi_e_selection = self._read_field("PHI_E_SELECTION")
         self._write_field("PHI_E_SELECTION", 1) # external mode, so it won't change.
         self._write_field("PHI_E_EXT", 0) # and, set this to be PHI_E = 0
         self._write_field("MODE_MOTION", MotionMode.torque_mode)
         limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
+        old_flux_offset = self._read_field("PID_FLUX_OFFSET")
+        self._write_field("PID_FLUX_OFFSET", 0)
         test_cur = limit_cur #// 2
         not_done = True
         old_cur = self._read_field("PID_%s_ACTUAL"%X)
         self._write_field("PWM_CHOP", 7)
         if not test_existing:
             Kc0 = Kc
-            self._write_field("PID_%s_P"%X, to_q8_8(Kc0))
-            self._write_field("PID_%s_I"%X, to_q8_8(0.0))
+            self._write_field("PID_%s_P"%X, to_q4_12(Kc0))
+            self._write_field("PID_%s_I"%X, to_q4_12(0.0))
         else:
             Kc0 = from_q8_8(self._read_field("PID_%s_P"%X))
+        # Do a setpoint change experiment
         self._write_field("PID_%s_TARGET"%X, 0)
         logging.info("test_cur = %d"%test_cur)
-        n = 100
+        n = 200
         c = self._dump_pid(n, X)
         self._write_field("PID_%s_TARGET"%X, test_cur)
         c += self._dump_pid(n, X)
@@ -1310,38 +1317,47 @@ class TMC4671:
         self._write_field("ABN_DECODER_PHI_E_OFFSET", -self._read_field("HALL_PHI_E")%65536),
         # Experiment over, switch off
         self._write_field("PID_%s_TARGET"%X, 0)
-        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-        self._write_field("PWM_CHOP", 0)
-        self._write_field("PHI_E_SELECTION", old_phi_e_selection) # restore it
+        # Put motion config back how it was
+        self._write_field("MODE_MOTION", old_mode)
+        self._write_field("PID_FLUX_OFFSET", old_flux_offset)
+        self._write_field("PHI_E_SELECTION", old_phi_e_selection)
         # Analysis and logging
-        for i in range(2*n):
-            logging.info(",".join(map(str, c[i])))
+        for r in c:
+            logging.info(",".join(map(str, r)))
         # At this point we can determine system model
-        yinf = sum(float(a[1]) for a in c[3*n//2:2*n])/float(2*n - 3*n//2) - sum(float(a[1]) for a in c[0:n])/float(n)
+        y0 = sum(float(a[1]) for a in c[0:n])/float(n)
+        yinf = sum(float(a[1]) for a in c[3*n//2:2*n])/float(2*n - 3*n//2) - y0
+        if yinf < 0.0:
+            # Wups, turned out negative...
+            yinf *= -1.0
+            c = [(t, -y) for t, y in c]
         yp = -100000 # Not a possible value
         tp = 0
         for tpt, ypt in c[n+1:-1]:
             if ypt < yp:
                 break
             yp, tp = ypt, tpt
-        #yp, tp = max((float(a[1]),a[0]) for a in c[n+1:-1])
-        tp -= float(c[n][0] + c[n+1][0])/2.0
+        yp -= y0
+        # It is better to overestimate tp than under.
+        #tp -= float(c[n][0] + c[n+1][0])/2.0
+        tp -= c[n][0]
         tp *= 1e-9 # it was in nanoseconds, we want seconds
         D = (yp - yinf) / yinf
-        B = abs((1.0*test_cur-yinf)/yinf)
-        A = 1.152*D**2 - 1.607*D +1
+        B = abs((test_cur-yinf) / yinf)
+        A = 1.152*D**2 - 1.607*D + 1
         r = 2*A / B
         logging.info("yinf = %g, yp = %g, tp = %g"%(yinf, yp, tp))
-        k = 1.0/(Kc0*B)
-        theta = tp*(0.309 + 0.209 * math.exp(-0.61*r))
+        k = 1.0 / (Kc0*B)
+        theta = tp * (0.309 + 0.209 * math.exp(-0.61*r))
         tau1 = r*theta
         logging.info("TMC 4671 %s %s PID system model k=%g, theta=%g, tau1=%g"%(self.name, X, k, theta, tau1,))
-        Kc, taui = simc(k, theta, tau1, theta)
-        Ki = Kc/(taui*256)
+        Kc, taui = simc(k, theta, tau1, 8.0/25e3)
+        # Account for sampling frequency
+        Ki = Kc/(taui*2*25e3)
         logging.info("TMC 4671 %s %s PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, X, Kc, taui, Ki))
-        #if not test_existing:
-        #    self._write_field("PID_%s_P"%X, to_q8_8(Kc))
-        #    self._write_field("PID_%s_I"%X, to_q8_8(Ki))
+        if not test_existing:
+            self._write_field("PID_%s_P"%X, to_q4_12(Kc))
+            self._write_field("PID_%s_I"%X, to_q4_12(Ki))
 
     def _dump_pid(self, n, X):
         f = "PID_%s_ACTUAL"%X
@@ -1381,11 +1397,11 @@ class TMC4671:
         # self._tune_flux_pid(print_time)
         # setup filters
         self.enable_biquad("CONFIG_BIQUAD_F_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 2e3, 2**-0.5)))
-        self.enable_biquad("CONFIG_BIQUAD_T_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 2e3, 2**-0.5)))
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 8e3, 2**-0.5)))
+        #self.enable_biquad("CONFIG_BIQUAD_T_ENABLE",
+        #                   *biquad_tmc(*biquad_lpf(self.pwmfreq, 2e3, 2**-0.5)))
         #self._write_field("CONFIG_BIQUAD_F_ENABLE", 0)
-        #self._write_field("CONFIG_BIQUAD_T_ENABLE", 0)
+        self._write_field("CONFIG_BIQUAD_T_ENABLE", 0)
         #self._write_field("CONFIG_BIQUAD_V_ENABLE", 0)
         self._write_field("CONFIG_BIQUAD_X_ENABLE", 0)
         self.enable_biquad("CONFIG_BIQUAD_V_ENABLE",
@@ -1394,6 +1410,15 @@ class TMC4671:
         self.mcu_tmc6100.set_register("GCONF",
                                       self.fields6100.set_field("disable", 0),
                                       print_time)
+        # Just test the PID, as it also sets up the encoder offsets
+        #self._write_field("PID_FLUX_TARGET", 0)
+        self._write_field("PID_TORQUE_TARGET", 0)
+        self._write_field("PID_VELOCITY_TARGET", 0)
+        self._tune_flux_pid(print_time, True)
+        self._write_field("ABN_DECODER_COUNT", 0)
+        self._write_field("PID_POSITION_TARGET", 0)
+        self._write_field("MODE_MOTION", MotionMode.position_mode)
+        #self._write_field("MODE_MOTION", MotionMode.stopped_mode)
 
     cmd_INIT_TMC_help = "Initialize TMC stepper driver registers"
     def cmd_INIT_TMC(self, gcmd):
@@ -1467,11 +1492,11 @@ class TMC4671:
                   self._read_field("PID_POSITION_ACTUAL"),
                   self._read_field("PID_VELOCITY_ACTUAL"),
                   self._read_field("PID_ERROR_PID_VELOCITY_ERROR"),
-                  self._read_field("PID_TORQUE_TARGET"),
+                  self._read_field("INTERIM_PIDIN_TARGET_TORQUE"),
                   self._read_field("PID_TORQUE_ACTUAL"),
                   self._read_field("PID_ERROR_PID_TORQUE_ERROR"),
                   self._read_field("PID_ERROR_PID_TORQUE_ERROR_SUM"),
-                  self._read_field("PID_FLUX_TARGET"),
+                  self._read_field("INTERIM_PIDIN_TARGET_FLUX"),
                   self._read_field("PID_FLUX_ACTUAL"),
                   self._read_field("PID_ERROR_PID_FLUX_ERROR"),
                   self._read_field("PID_ERROR_PID_FLUX_ERROR_SUM"),
