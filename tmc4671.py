@@ -774,8 +774,17 @@ DumpGroups = {
             "PID_VELOCITY_P_VELOCITY_I", "PID_POSITION_P_POSITION_I",
             "PID_TORQUE_FLUX_TARGET", "PID_TORQUE_FLUX_OFFSET",
             "PID_VELOCITY_TARGET", "PID_POSITION_TARGET",
-            "PID_TORQUE_FLUX_ACTUAL", "PID_VELOCITY_ACTUAL",
-            "PID_POSITION_ACTUAL", "PID_ERROR_PID_POSITION_ERROR",
+            "PID_TORQUE_FLUX_ACTUAL",
+            "PID_VELOCITY_ACTUAL",
+            "PID_POSITION_ACTUAL",
+            "PID_ERROR_PID_TORQUE_ERROR",
+            "PID_ERROR_PID_FLUX_ERROR",
+            "PID_ERROR_PID_VELOCITY_ERROR",
+            "PID_ERROR_PID_POSITION_ERROR",
+            "PID_ERROR_PID_TORQUE_ERROR_SUM",
+            "PID_ERROR_PID_FLUX_ERROR_SUM",
+            "PID_ERROR_PID_VELOCITY_ERROR_SUM",
+            "PID_ERROR_PID_POSITION_ERROR_SUM",
             ],
     "STEP": ["STEP_WIDTH", "PHI_E", "MODE_RAMP_MODE_MOTION", "STATUS_FLAGS",
              "PID_POSITION_TARGET"],
@@ -960,9 +969,7 @@ class CurrentHelper:
         self.current_scale = config.getfloat('current_scale_ma_lsb', 1.272,
                                        above=0., maxval=10)
         self.flux_limit = self._calc_flux_limit(self.run_current)
-        self.fields.set_field("PIDOUT_UQ_UD_LIMITS", self.flux_limit)
         self.fields.set_field("PID_TORQUE_FLUX_LIMITS", self.flux_limit)
-        self.fields.set_field("PID_FLUX_TARGET", self.flux_limit)
     def _calc_flux_limit(self, current):
         flux_limit = to_q4_12(current / self.current_scale)
         return flux_limit
@@ -974,9 +981,7 @@ class CurrentHelper:
     def set_current(self, run_current):
         self.run_current = run_current
         self.flux_limit = self._calc_flux_limit(self.run_current)
-        self._write_field("PIDOUT_UQ_UD_LIMITS", self.flux_limit)
         self._write_field("PID_TORQUE_FLUX_LIMITS", self.flux_limit)
-        self._write_field("PID_FLUX_TARGET", self.flux_limit)
         return self.flux_limit
     def _read_field(self, field):
         reg_name = self.fields.lookup_register(field)
@@ -1161,7 +1166,7 @@ class TMC4671:
         set_config_field(config, "ABN_NPOL", 0)
         set_config_field(config, "ABN_USE_ABN_AS_N", 0)
         set_config_field(config, "ABN_CLN", 0)
-        set_config_field(config, "ABN_DIRECTION", 1)
+        set_config_field(config, "ABN_DIRECTION", 0)
         set_config_field(config, "ABN_DECODER_PPR", 1600)
         set_config_field(config, "HALL_INTERP", 0)
         set_config_field(config, "HALL_SYNC", 1)
@@ -1183,19 +1188,19 @@ class TMC4671:
         set_config_field(config, "POSITION_P_n", 1) # q8.8
         set_config_field(config, "MODE_PID_SMPL", 0) # Advanced PID samples position at fPWM
         set_config_field(config, "MODE_PID_TYPE", 1) # Advanced PID mode
-        #set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 30000) # Voltage limit, 32768 = Vm
+        set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 31000) # Voltage limit, 32768 = Vm
         #set_config_field(config, "PID_TORQUE_FLUX_LIMITS", 0x7fff)
         set_config_field(config, "PID_POSITION_LIMIT_LOW", -0x7fffffff)
         set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x7fffffff)
-        #set_config_field(config, "PID_VELOCITY_LIMIT", 0x0fffffff)
-        set_config_field(config, "PID_VELOCITY_LIMIT", 780000)
+        set_config_field(config, "PID_VELOCITY_LIMIT", 0x0fffffff)
+        #set_config_field(config, "PID_VELOCITY_LIMIT", 780000)
         set_config_field(config, "PID_FLUX_OFFSET", 0)
-        set_config_field(config, "PID_FLUX_P", to_q4_12(2.8552))
-        set_config_field(config, "PID_FLUX_I", to_q4_12(0.3433))
-        set_config_field(config, "PID_TORQUE_P", to_q4_12(1.5945))
-        set_config_field(config, "PID_TORQUE_I", to_q4_12(0.0249))
-        set_config_field(config, "PID_VELOCITY_P", to_q4_12(2.08))
-        set_config_field(config, "PID_VELOCITY_I", to_q4_12(0.01465))
+        set_config_field(config, "PID_FLUX_P", to_q4_12(1.2))
+        set_config_field(config, "PID_FLUX_I", to_q4_12(0.04))
+        set_config_field(config, "PID_TORQUE_P", to_q4_12(1.6))
+        set_config_field(config, "PID_TORQUE_I", to_q4_12(0.01))
+        set_config_field(config, "PID_VELOCITY_P", to_q4_12(1.8))
+        set_config_field(config, "PID_VELOCITY_I", to_q4_12(0.0))
         set_config_field(config, "PID_POSITION_P", to_q4_12(1.6))
         set_config_field(config, "PID_POSITION_I", 0)
 
@@ -1267,22 +1272,22 @@ class TMC4671:
         self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
         i1sum = 0
         i0sum = 0
-        n = 50
+        n = 100
         for i in range(n):
             v = self.fields.get_reg_fields(reg_name,
                                            self.mcu_tmc.tmc_spi.reg_read(reg))
             i1sum += v["ADC_I1_RAW"]
             i0sum += v["ADC_I0_RAW"]
-            self.printer.lookup_object('toolhead').dwell(0.025)
+            #self.printer.lookup_object('toolhead').dwell(0.025)
         return i0sum // n, i1sum // n
 
-    def _tune_flux_pid(self, test_existing, print_time):
-        self._tune_pid("FLUX", 1.0, test_existing, print_time)
+    def _tune_flux_pid(self, test_existing, derate, print_time):
+        self._tune_pid("FLUX", 1.0, derate, test_existing, print_time)
 
-    def _tune_torque_pid(self, test_existing, print_time):
-        self._tune_pid("TORQUE", 1.0, test_existing, print_time)
+    def _tune_torque_pid(self, test_existing, derate, print_time):
+        self._tune_pid("TORQUE", 1.0, derate, test_existing, print_time)
 
-    def _tune_pid(self, X, Kc, test_existing, print_time):
+    def _tune_pid(self, X, Kc, derate, test_existing, print_time):
         ch = self.current_helper
         old_mode = self._read_field("MODE_MOTION")
         old_phi_e_selection = self._read_field("PHI_E_SELECTION")
@@ -1294,22 +1299,28 @@ class TMC4671:
         self._write_field("UD_EXT", limit_cur)
         self._write_field("UQ_EXT", 0)
         self.printer.lookup_object('toolhead').dwell(0.2)
-        self._write_field("PID_FLUX_OFFSET", 0)
+        #self._write_field("PID_FLUX_OFFSET", 0)
         self._write_field("PID_TORQUE_TARGET", 0)
         self._write_field("PID_VELOCITY_TARGET", 0)
         self._write_field("PID_POSITION_TARGET", 0)
         self._write_field("PID_POSITION_ACTUAL", 0)
         self._write_field("PWM_CHOP", 7)
         self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
+        for i in range(5):
+            self.printer.lookup_object('toolhead').dwell(0.1)
+            self._write_field("PWM_CHOP", 0)
+            # Give it some time to settle
+            self.printer.lookup_object('toolhead').dwell(0.1)
+            self._write_field("PWM_CHOP", 7)
         # Give it some time to settle
-        self.printer.lookup_object('toolhead').dwell(0.8)
-        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-        # Give it some time to settle
-        self.printer.lookup_object('toolhead').dwell(0.8)
+        self.printer.lookup_object('toolhead').dwell(0.2)
         # While we're here, set the offsets
         self._write_field("HALL_PHI_E_OFFSET", -self._read_field("HALL_PHI_E")%65536),
         self._write_field("ABN_DECODER_COUNT", 0)
         self._write_field("ABN_DECODER_PHI_E_OFFSET", 0)
+        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+        # Give it some time to settle
+        self.printer.lookup_object('toolhead').dwell(0.4)
         self._write_field("MODE_MOTION", MotionMode.torque_mode)
         test_cur = limit_cur #// 2
         old_cur = self._read_field("PID_%s_ACTUAL"%X)
@@ -1364,9 +1375,11 @@ class TMC4671:
         theta = tp * (0.309 + 0.209 * math.exp(-0.61*r))
         tau1 = r*theta
         logging.info("TMC 4671 %s %s PID system model k=%g, theta=%g, tau1=%g"%(self.name, X, k, theta, tau1,))
-        Kc, taui = simc(k, theta, tau1, 8.0/25e3)
+        Kc, taui = simc(k, theta, tau1, 12.0/25e3)
         # Account for sampling frequency
         Ki = Kc/(taui*2*25e3)
+        Kc *= derate
+        Ki *= derate
         logging.info("TMC 4671 %s %s PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, X, Kc, taui, Ki))
         if not test_existing:
             self._write_field("PID_%s_P"%X, to_q4_12(Kc))
@@ -1426,8 +1439,8 @@ class TMC4671:
         self._write_field("PID_FLUX_TARGET", 0)
         self._write_field("PID_TORQUE_TARGET", 0)
         self._write_field("PID_VELOCITY_TARGET", 0)
-        self._tune_flux_pid(True, print_time)
-        self._tune_torque_pid(True, print_time)
+        self._tune_flux_pid(False, 1.0, print_time)
+        self._tune_torque_pid(False, 1.0, print_time)
         self._write_field("ABN_DECODER_COUNT", 0)
         self._write_field("PID_POSITION_TARGET", 0)
         #self._write_field("PID_FLUX_TARGET", limit_cur)
@@ -1450,16 +1463,18 @@ class TMC4671:
     cmd_TMC_TUNE_PID_help = "Tune the current and torque PID coefficients"
     def cmd_TMC_TUNE_PID(self, gcmd):
         test_existing = gcmd.get_int('CHECK', 0)
+        derate = gcmd.get_float('DERATE', 1.0)
         logging.info("TMC_TUNE_PID %s", self.name)
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
-        self._tune_flux_pid(test_existing, print_time)
-        self._tune_torque_pid(test_existing, print_time)
+        self._tune_flux_pid(test_existing, derate, print_time)
+        self._tune_torque_pid(test_existing, derate, print_time)
 
     cmd_TMC_DEBUG_MOVE_help = "Test TMC motion mode (motor must be free to move)"
     def cmd_TMC_DEBUG_MOVE(self, gcmd):
         logging.info("TMC_DEBUG_MOVE %s", self.name)
         velocity = gcmd.get_int('VELOCITY', None)
         torque = gcmd.get_int('TORQUE', None)
+        pos = gcmd.get_int('POSITION', None)
         open_loop_velocity = gcmd.get_int('OPENVEL', None)
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         if velocity is not None:
@@ -1468,6 +1483,9 @@ class TMC4671:
         elif torque is not None:
             self._debug_pid_motion(torque, MotionMode.torque_mode,
                                         "PID_TORQUE_TARGET", print_time)
+        elif pos is not None:
+            self._debug_pid_motion(pos, MotionMode.position_mode,
+                                        "PID_POSITION_TARGET", print_time)
         elif open_loop_velocity is not None:
             self._debug_openloop_velocity_motion(open_loop_velocity, print_time)
 
@@ -1485,7 +1503,10 @@ class TMC4671:
         self._write_field(target_reg, 0)
         self._write_field("MODE_MOTION", mode)
         n2 = 20
-        v = [velocity * i // (2*n2) for i in range(n2,2*n2)] + [velocity for i in range(n2*2)]
+        if mode == MotionMode.stopped_mode:
+            v = [velocity * i // (2*n2) for i in range(n2,2*n2)] + [velocity for i in range(n2*2)]
+        else:
+            v = [velocity for i in range(n2,2*n2)] + [velocity for i in range(n2*2)]
         n = 500
         c = self._dump_motion(n, f=lambda x : self._write_field(target_reg, x), v=v)
         self._write_field("MODE_MOTION", old_mode)
