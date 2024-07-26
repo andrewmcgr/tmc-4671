@@ -1094,11 +1094,19 @@ class TMC4671:
                                   field_formatters=FieldFormatters,
                                   prefix="foc_")
         # TODO: make 6100 optional for boards without one.
-        self.fields6100 = FieldHelper(Fields6100, prefix="drv_")
+        gcode = self.printer.lookup_object("gcode")
+        if config.get("drv_cs_pin", None) is not None:
+            self.fields6100 = FieldHelper(Fields6100, prefix="drv_")
+            self.mcu_tmc6100 = MCU_TMC_SPI(config, Registers6100, self.fields6100,
+                                           12e6, pin_option="drv_cs_pin")
+            gcode.register_mux_command("DUMP_TMC6100", "STEPPER", self.name,
+                                       self.cmd_DUMP_TMC6100,
+                                       desc=self.cmd_DUMP_TMC6100_help)
+        else:
+            self.fields6100 = None
+            self.mcu_tmc6100 = None
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
                                    TMC_FREQUENCY, pin_option="cs_pin")
-        self.mcu_tmc6100 = MCU_TMC_SPI(config, Registers6100, self.fields6100,
-                                       12e6, pin_option="drv_cs_pin")
         self.read_translate = None
         self.read_registers = Registers.keys()
         self.printer.register_event_handler("klippy:connect",
@@ -1106,16 +1114,12 @@ class TMC4671:
         # Register commands
         self.step_helper = StepHelper(config, self.mcu_tmc)
         self.current_helper = CurrentHelper(config, self.mcu_tmc)
-        gcode = self.printer.lookup_object("gcode")
         gcode.register_mux_command("SET_TMC_FIELD", "STEPPER", self.name,
                                    self.cmd_SET_TMC_FIELD,
                                    desc=self.cmd_SET_TMC_FIELD_help)
         gcode.register_mux_command("DUMP_TMC", "STEPPER", self.name,
                                    self.cmd_DUMP_TMC,
                                    desc=self.cmd_DUMP_TMC_help)
-        gcode.register_mux_command("DUMP_TMC6100", "STEPPER", self.name,
-                                   self.cmd_DUMP_TMC6100,
-                                   desc=self.cmd_DUMP_TMC6100_help)
         gcode.register_mux_command("TMC_DEBUG_MOVE", "STEPPER", self.name,
                                    self.cmd_TMC_DEBUG_MOVE,
                                    desc=self.cmd_TMC_DEBUG_MOVE_help)
@@ -1133,12 +1137,13 @@ class TMC4671:
                                    desc=self.cmd_SET_TMC_CURRENT_help)
         # Allow other registers to be set from the config
         set_config_field = self.fields.set_config_field
-        set_config6100_field = self.fields6100.set_config_field
-        # defaults as per 4671+6100 BOB datasheet
-        set_config6100_field(config, "singleline", 0)
-        set_config6100_field(config, "normal", 1)
-        set_config6100_field(config, "DRVSTRENGTH", 0)
-        set_config6100_field(config, "BBMCLKS", 10)
+        if self.fields6100 is not None:
+            set_config6100_field = self.fields6100.set_config_field
+            # defaults as per 4671+6100 BOB datasheet
+            set_config6100_field(config, "singleline", 0)
+            set_config6100_field(config, "normal", 1)
+            set_config6100_field(config, "DRVSTRENGTH", 0)
+            set_config6100_field(config, "BBMCLKS", 10)
         # This should not really be set to anything else
         # therefore not providing convenience interface
         maxcnt = 0xF9F
@@ -1153,8 +1158,8 @@ class TMC4671:
         set_config_field(config, "MOTOR_TYPE", 3)
         set_config_field(config, "N_POLE_PAIRS", 4)
         set_config_field(config, "ADC_I_UX_SELECT", 0)
-        set_config_field(config, "ADC_I_V_SELECT", 1)
-        set_config_field(config, "ADC_I_WY_SELECT", 2)
+        set_config_field(config, "ADC_I_V_SELECT", 2)
+        set_config_field(config, "ADC_I_WY_SELECT", 1)
         set_config_field(config, "ADC_I0_SELECT", 0)
         set_config_field(config, "ADC_I1_SELECT", 1)
         #set_config_field(config, "CFG_ADC_I0", 0)
@@ -1405,9 +1410,10 @@ class TMC4671:
             raise self.printer.command_error(
                 "TMC 4671 not identified, identification register returned %x" % (ping,))
         # Disable 6100
-        self.mcu_tmc6100.set_register("GCONF",
-                                      self.fields6100.set_field("disable", 1),
-                                      print_time)
+        if self.fields6100 is not None:
+            self.mcu_tmc6100.set_register("GCONF",
+                                          self.fields6100.set_field("disable", 1),
+                                          print_time)
         # Set torque and current in 4671 to zero
         self._write_field("PID_FLUX_TARGET", 0)
         self._write_field("PID_TORQUE_TARGET", 0)
@@ -1415,9 +1421,10 @@ class TMC4671:
         self._write_field("PID_POSITION_TARGET", 0)
         self._write_field("PWM_CHOP", 7)
         # Send registers, 6100 first then 4671
-        for reg_name in list(self.fields6100.registers.keys()):
-            val = self.fields6100.registers[reg_name] # Val may change during loop
-            self.mcu_tmc6100.set_register(reg_name, val, print_time)
+        if self.fields6100 is not None:
+            for reg_name in list(self.fields6100.registers.keys()):
+                val = self.fields6100.registers[reg_name] # Val may change during loop
+                self.mcu_tmc6100.set_register(reg_name, val, print_time)
         for reg_name in list(self.fields.registers.keys()):
             val = self.fields.registers[reg_name] # Val may change during loop
             self.mcu_tmc.set_register(reg_name, val, print_time)
@@ -1436,9 +1443,10 @@ class TMC4671:
         self.enable_biquad("CONFIG_BIQUAD_V_ENABLE",
                            *biquad_tmc(*biquad_lpf(self.pwmfreq, 400.0, 2**-0.5)))
         # Now enable 6100
-        self.mcu_tmc6100.set_register("GCONF",
-                                      self.fields6100.set_field("disable", 0),
-                                      print_time)
+        if self.fields6100 is not None:
+            self.mcu_tmc6100.set_register("GCONF",
+                                          self.fields6100.set_field("disable", 0),
+                                          print_time)
         # Just test the PID, as it also sets up the encoder offsets
         self._write_field("PID_FLUX_TARGET", 0)
         self._write_field("PID_TORQUE_TARGET", 0)
