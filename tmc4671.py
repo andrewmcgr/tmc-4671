@@ -744,13 +744,14 @@ FieldFormatters = {
     "ABN_DECODER_PHI_E": format_phi,
     "ABN_DECODER_PHI_E_OFFSET": format_phi,
     "ABN_DECODER_PHI_M_OFFSET": format_phi,
-    "PID_FLUX_P": format_q4_12,
-    "PID_FLUX_I": format_q4_12,
-    "PID_TORQUE_P": format_q4_12,
-    "PID_TORQUE_I": format_q4_12,
+    "PID_FLUX_P": format_q8_8,
+    "PID_FLUX_I": format_q8_8,
+    "PID_TORQUE_P": format_q8_8,
+    "PID_TORQUE_I": format_q8_8,
     "PID_VELOCITY_P": format_q4_12,
     "PID_VELOCITY_I": format_q4_12,
     "PID_POSITION_P": format_q4_12,
+    "PID_POSITION_I": format_q4_12,
 }
 
 DumpGroups = {
@@ -1204,24 +1205,26 @@ class TMC4671:
         set_config_field(config, "VELOCITY_P_n", 1) # q8.8
         set_config_field(config, "POSITION_I_n", 1) # q4.12
         set_config_field(config, "POSITION_P_n", 1) # q8.8
-        set_config_field(config, "MODE_PID_SMPL", 0) # Advanced PID samples position at fPWM
+        set_config_field(config, "MODE_PID_SMPL", 1) # Advanced PID samples position at fPWM
         set_config_field(config, "MODE_PID_TYPE", 1) # Advanced PID mode
         set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 31500) # Voltage limit, 32768 = Vm
         #set_config_field(config, "ADC_VM_LIMIT_HIGH", 32200) # Brake threshold
         #set_config_field(config, "ADC_VM_LIMIT_LOW", 31900) # Brake off threshold
         #set_config_field(config, "PID_TORQUE_FLUX_LIMITS", 0x7fff)
-        set_config_field(config, "PID_POSITION_LIMIT_LOW", -0x7fffffff)
-        set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x7fffffff)
+        # TODO: get this from the size of the printer
+        set_config_field(config, "PID_POSITION_LIMIT_LOW", -0x10000000)
+        set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x10000000)
         #set_config_field(config, "PID_VELOCITY_LIMIT", 0x7fffffff)
-        set_config_field(config, "PID_VELOCITY_LIMIT", 3000)
+        # TODO: Units, what should this be anyway?
+        set_config_field(config, "PID_VELOCITY_LIMIT", 0x300000)
         set_config_field(config, "PID_FLUX_OFFSET", 0)
-        set_config_field(config, "PID_FLUX_P", to_q4_12(2.2417))
-        set_config_field(config, "PID_FLUX_I", to_q4_12(0.0347))
-        set_config_field(config, "PID_TORQUE_P", to_q4_12(2.2417))
-        set_config_field(config, "PID_TORQUE_I", to_q4_12(0.0347))
-        set_config_field(config, "PID_VELOCITY_P", to_q4_12(0.7324))
-        set_config_field(config, "PID_VELOCITY_I", to_q4_12(0.0))
-        set_config_field(config, "PID_POSITION_P", to_q4_12(0.7324))
+        set_config_field(config, "PID_FLUX_P", to_q8_8(2.2417))
+        set_config_field(config, "PID_FLUX_I", to_q8_8(0.527))
+        set_config_field(config, "PID_TORQUE_P", to_q8_8(35.844))
+        set_config_field(config, "PID_TORQUE_I", to_q8_8(8.441))
+        set_config_field(config, "PID_VELOCITY_P", to_q4_12(1.5))
+        set_config_field(config, "PID_VELOCITY_I", to_q4_12(0.05))
+        set_config_field(config, "PID_POSITION_P", to_q4_12(1.7324))
         set_config_field(config, "PID_POSITION_I", 0)
 
     def _read_field(self, field):
@@ -1371,8 +1374,8 @@ class TMC4671:
         dwell(0.2)
         if not test_existing:
             Kc0 = Kc
-            self._write_field("PID_%s_P"%X, to_q4_12(Kc0))
-            self._write_field("PID_%s_I"%X, to_q4_12(0.0))
+            self._write_field("PID_%s_P"%X, to_q8_8(Kc0))
+            self._write_field("PID_%s_I"%X, to_q8_8(0.0))
         else:
             Kc0 = from_q4_12(self._read_field("PID_%s_P"%X))
         # Do a setpoint change experiment
@@ -1430,8 +1433,8 @@ class TMC4671:
         Ki *= derate
         logging.info("TMC 4671 %s %s PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, X, Kc, taui, Ki))
         if not test_existing:
-            self._write_field("PID_%s_P"%X, to_q4_12(Kc))
-            self._write_field("PID_%s_I"%X, to_q4_12(Ki))
+            self._write_field("PID_%s_P"%X, to_q8_8(Kc))
+            self._write_field("PID_%s_I"%X, to_q8_8(Ki))
         return Kc, Ki
 
     def _dump_pid(self, n, X):
