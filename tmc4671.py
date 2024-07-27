@@ -1205,7 +1205,7 @@ class TMC4671:
         set_config_field(config, "VELOCITY_P_n", 1) # q8.8
         set_config_field(config, "POSITION_I_n", 1) # q4.12
         set_config_field(config, "POSITION_P_n", 1) # q8.8
-        set_config_field(config, "MODE_PID_SMPL", 1) # Advanced PID samples position at fPWM
+        set_config_field(config, "MODE_PID_SMPL", 2) # Advanced PID samples position at fPWM
         set_config_field(config, "MODE_PID_TYPE", 1) # Advanced PID mode
         set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 31500) # Voltage limit, 32768 = Vm
         #set_config_field(config, "ADC_VM_LIMIT_HIGH", 32200) # Brake threshold
@@ -1219,12 +1219,12 @@ class TMC4671:
         set_config_field(config, "PID_VELOCITY_LIMIT", 0x300000)
         set_config_field(config, "PID_FLUX_OFFSET", 0)
         set_config_field(config, "PID_FLUX_P", to_q8_8(2.2417))
-        set_config_field(config, "PID_FLUX_I", to_q8_8(0.527))
-        set_config_field(config, "PID_TORQUE_P", to_q8_8(35.844))
-        set_config_field(config, "PID_TORQUE_I", to_q8_8(8.441))
-        set_config_field(config, "PID_VELOCITY_P", to_q4_12(1.5))
-        set_config_field(config, "PID_VELOCITY_I", to_q4_12(0.05))
-        set_config_field(config, "PID_POSITION_P", to_q4_12(1.7324))
+        set_config_field(config, "PID_FLUX_I", to_q8_8(1.227))
+        set_config_field(config, "PID_TORQUE_P", to_q8_8(33.117))
+        set_config_field(config, "PID_TORQUE_I", to_q8_8(19.598))
+        set_config_field(config, "PID_VELOCITY_P", to_q4_12(2.0))
+        set_config_field(config, "PID_VELOCITY_I", to_q4_12(0.6575))
+        set_config_field(config, "PID_POSITION_P", to_q4_12(0.9))
         set_config_field(config, "PID_POSITION_I", 0)
 
     def _read_field(self, field):
@@ -1426,7 +1426,7 @@ class TMC4671:
         theta = tp * (0.309 + 0.209 * math.exp(-0.61*r))
         tau1 = r*theta
         logging.info("TMC 4671 %s %s PID system model k=%g, theta=%g, tau1=%g"%(self.name, X, k, theta, tau1,))
-        Kc, taui = simc(k, theta, tau1, 12.0/25e3)
+        Kc, taui = simc(k, theta, tau1, 16.0/25e3)
         # Account for sampling frequency
         Ki = Kc/(taui*2*25e3)
         Kc *= derate
@@ -1478,15 +1478,19 @@ class TMC4671:
         self.enable_biquad("CONFIG_BIQUAD_F_ENABLE",
                            *biquad_tmc(*biquad_lpf(self.pwmfreq, 9600, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_T_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 9600, 2**-0.5)))
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 3600, 2**-0.5)))
+                           #*biquad_tmc(*biquad_notch(self.pwmfreq, 195, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_X_ENABLE",
-                           *biquad_tmc(*biquad_notch(self.pwmfreq, 237, 2**-0.5)))
+                           *biquad_tmc(*biquad_lpf(
+                               self.pwmfreq/(self._read_field("MODE_PID_SMPL")+1.0),
+                               200, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_V_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 4000.0, 2**-0.5)))
-        self._write_field("CONFIG_BIQUAD_F_ENABLE", 0)
-        self._write_field("CONFIG_BIQUAD_T_ENABLE", 0)
-        self._write_field("CONFIG_BIQUAD_V_ENABLE", 0)
-        self._write_field("CONFIG_BIQUAD_X_ENABLE", 0)
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 100, 2**-0.5)))
+                           #*biquad_tmc(*biquad_notch(self.pwmfreq, 195, 2**-0.5)))
+        self._write_field("CONFIG_BIQUAD_F_ENABLE", 1)
+        self._write_field("CONFIG_BIQUAD_T_ENABLE", 1)
+        self._write_field("CONFIG_BIQUAD_V_ENABLE", 1)
+        self._write_field("CONFIG_BIQUAD_X_ENABLE", 1)
 
     cmd_INIT_TMC_help = "Initialize TMC stepper driver registers"
     def cmd_INIT_TMC(self, gcmd):
