@@ -989,7 +989,10 @@ class CurrentHelper:
         return adc * self.current_scale * 1e-3
     def get_current(self):
         c = self.convert_adc_current(self._read_field("PID_TORQUE_FLUX_LIMITS"))
-        return c, MAX_CURRENT
+        iux = self.convert_adc_current(self._read_field("ADC_IUX"))
+        iv = self.convert_adc_current(self._read_field("ADC_IV"))
+        iwy = self.convert_adc_current(self._read_field("ADC_IWY"))
+        return c, MAX_CURRENT, iux, iv, iwy
     def set_current(self, run_current):
         self.run_current = run_current
         self.flux_limit = self._calc_flux_limit(self.run_current)
@@ -1007,6 +1010,7 @@ class CurrentHelper:
                                   self.fields.set_field(field, val,
                                                         reg_value=reg_value,
                                                         reg_name=reg_name))
+
 # Helper to configure the microstep settings
 def StepHelper(config, mcu_tmc):
     fields = mcu_tmc.get_fields()
@@ -1025,6 +1029,57 @@ def StepHelper(config, mcu_tmc):
             % (stepper_name,))
     step_width = 65536 // (res * mres)
     fields.set_field("STEP_WIDTH", step_width)
+
+
+######################################################################
+# Periodic error checking
+######################################################################
+
+class TMCErrorCheck:
+    def __init__(self, config, mcu_tmc):
+        self.printer = config.get_printer()
+        name_parts = config.get_name().split()
+        self.stepper_name = ' '.join(name_parts[1:])
+        self.mcu_tmc = mcu_tmc
+        self.fields = mcu_tmc.get_fields()
+        self.check_timer = None
+        # Setup for temperature query
+        self.adc_temp = None
+        self.adc_temp_reg = config.get("adc_temp_reg", None)
+        if self.adc_temp_reg is not None:
+            pheaters = self.printer.load_object(config, 'heaters')
+            pheaters.register_monitor(config)
+    def _query_temperature(self):
+        try:
+            if self.adc_temp_reg is not None:
+                self.adc_temp = self.mcu_tmc.read_field(self.adc_temp_reg)
+        except self.printer.command_error as e:
+            # Ignore comms error for temperature
+            self.adc_temp = None
+            return
+    def _do_periodic_check(self, eventtime):
+        try:
+            self._query_temperature()
+        except self.printer.command_error as e:
+            self.printer.invoke_shutdown(str(e))
+            return self.printer.get_reactor().NEVER
+        return eventtime + 1.
+    def start_checks(self):
+        if self.check_timer is not None:
+            self.stop_checks()
+        cleared_flags = 0
+        reactor = self.printer.get_reactor()
+        curtime = reactor.monotonic()
+        self.check_timer = reactor.register_timer(self._do_periodic_check,
+                                                  curtime + 1.)
+        return True
+    def get_status(self, eventtime=None):
+        if self.check_timer is None:
+            return {'drv_status': None, 'temperature': None}
+        temp = None
+        if self.adc_temp is not None:
+            pass
+        return {'drv_status': None, 'temperature': temp}
 
 # 4671 does not support chaining, so that's removed
 # 4671 protocol does not require dummy reads
@@ -1095,11 +1150,26 @@ class MCU_TMC_SPI:
             "Unable to write tmc spi '%s' register %s" % (self.name, reg_name))
     def get_tmc_frequency(self):
         return self.tmc_frequency
+    def read_field(self, field):
+        reg_name = self.fields.lookup_register(field)
+        reg_value = self.get_register(reg_name)
+        return self.fields.get_field(field,
+                                     reg_value=reg_value,
+                                     reg_name=reg_name)
+    def write_field(self, field, val):
+        reg_name = self.fields.lookup_register(field)
+        reg_value = self.get_register(reg_name)
+        self.set_register(reg_name,
+                          self.fields.set_field(field,
+                                                val,
+                                                reg_value=reg_value,
+                                                reg_name=reg_name))
 
 class TMC4671:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.name = config.get_name().split()[-1]
+        self.init_done = False
         self.fields = FieldHelper(Fields,
                                   signed_fields=SignedFields,
                                   field_formatters=FieldFormatters,
@@ -1127,6 +1197,7 @@ class TMC4671:
         # Register commands
         self.step_helper = StepHelper(config, self.mcu_tmc)
         self.current_helper = CurrentHelper(config, self.mcu_tmc)
+        self.error_helper = TMCErrorCheck(config, self.mcu_tmc)
         gcode.register_mux_command("SET_TMC_FIELD", "STEPPER", self.name,
                                    self.cmd_SET_TMC_FIELD,
                                    desc=self.cmd_SET_TMC_FIELD_help)
@@ -1287,6 +1358,7 @@ class TMC4671:
         #limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
         #self._write_field("PID_FLUX_TARGET", limit_cur)
         self._write_field("MODE_MOTION", MotionMode.position_mode)
+        self.init_done = True
         #self._write_field("MODE_MOTION", MotionMode.stopped_mode)
 
     def _calibrate_adc(self, print_time):
@@ -1491,6 +1563,18 @@ class TMC4671:
         self._write_field("CONFIG_BIQUAD_T_ENABLE", 1)
         self._write_field("CONFIG_BIQUAD_V_ENABLE", 1)
         self._write_field("CONFIG_BIQUAD_X_ENABLE", 1)
+
+    def get_status(self, eventtime=None):
+        if not self.init_done:
+            return {}
+        current = self.current_helper.get_current()
+        res = {'run_current': current[0],
+               'current_ux': current[2],
+               'current_v': current[3],
+               'current_wy': current[4],
+               }
+        #res.update(self.echeck_helper.get_status(eventtime))
+        return res
 
     cmd_INIT_TMC_help = "Initialize TMC stepper driver registers"
     def cmd_INIT_TMC(self, gcmd):
