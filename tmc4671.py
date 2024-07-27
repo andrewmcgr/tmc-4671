@@ -688,6 +688,9 @@ def format_q4_12(val):
 def to_q4_12(val):
     return round(val * 2**12) & 0xffff
 
+def from_q4_12(val):
+    return val * 2**-12
+
 def format_q0_15(val):
     return "%.7f" % (val * 2**-15)
 
@@ -771,20 +774,27 @@ DumpGroups = {
              "ADC_AENC_WY_RAW_ADC_AENC_VN_RAW", "AENC_DECODER_PHI_A_RAW"],
     "PWM": ["PWM_POLARITIES", "PWM_MAXCNT", "PWM_BBM_H_BBM_L", "PWM_SV_CHOP",
             "MOTOR_TYPE_N_POLE_PAIRS"],
+    "PIDCONF": ["PID_FLUX_P_FLUX_I", "PID_TORQUE_P_TORQUE_I",
+                "PID_VELOCITY_P_VELOCITY_I", "PID_POSITION_P_POSITION_I",
+                ],
     "PID": ["PID_FLUX_P_FLUX_I", "PID_TORQUE_P_TORQUE_I",
             "PID_VELOCITY_P_VELOCITY_I", "PID_POSITION_P_POSITION_I",
             "PID_TORQUE_FLUX_TARGET", "PID_TORQUE_FLUX_OFFSET",
             "PID_VELOCITY_TARGET", "PID_POSITION_TARGET",
             "PID_TORQUE_FLUX_ACTUAL",
-            "PID_VELOCITY_ACTUAL",
-            "PID_POSITION_ACTUAL",
-            "PID_ERROR_PID_TORQUE_ERROR",
+            "INTERIM_PIDIN_TARGET_FLUX",
             "PID_ERROR_PID_FLUX_ERROR",
-            "PID_ERROR_PID_VELOCITY_ERROR",
-            "PID_ERROR_PID_POSITION_ERROR",
-            "PID_ERROR_PID_TORQUE_ERROR_SUM",
             "PID_ERROR_PID_FLUX_ERROR_SUM",
+            "INTERIM_PIDIN_TARGET_TORQUE",
+            "PID_ERROR_PID_TORQUE_ERROR",
+            "PID_ERROR_PID_TORQUE_ERROR_SUM",
+            "PID_VELOCITY_ACTUAL",
+            "INTERIM_PIDIN_TARGET_VELOCITY",
+            "PID_ERROR_PID_VELOCITY_ERROR",
             "PID_ERROR_PID_VELOCITY_ERROR_SUM",
+            "PID_POSITION_ACTUAL",
+            "INTERIM_PIDIN_TARGET_POSITION",
+            "PID_ERROR_PID_POSITION_ERROR",
             "PID_ERROR_PID_POSITION_ERROR_SUM",
             ],
     "STEP": ["STEP_WIDTH", "PHI_E", "MODE_RAMP_MODE_MOTION", "STATUS_FLAGS",
@@ -948,7 +958,7 @@ class FieldHelper:
             field_value = self.get_field(field_name, reg_value, reg_name)
             sval = self.field_formatters.get(field_name, str)(field_value)
             if sval and sval != "0":
-                fields.append(" %s=%s" % (field_name, sval))
+                fields.append(" %s=%s" % (field_name.lower(), sval))
         return "%-11s %08x%s" % (reg_name + ":", reg_value, "".join(fields))
     def get_reg_fields(self, reg_name, reg_value):
         # Provide fields found in a register
@@ -1111,6 +1121,8 @@ class TMC4671:
         self.read_registers = Registers.keys()
         self.printer.register_event_handler("klippy:connect",
                                             self._handle_connect)
+        self.printer.register_event_handler("klippy:ready",
+                                            self._handle_ready)
         # Register commands
         self.step_helper = StepHelper(config, self.mcu_tmc)
         self.current_helper = CurrentHelper(config, self.mcu_tmc)
@@ -1194,20 +1206,22 @@ class TMC4671:
         set_config_field(config, "POSITION_P_n", 1) # q8.8
         set_config_field(config, "MODE_PID_SMPL", 0) # Advanced PID samples position at fPWM
         set_config_field(config, "MODE_PID_TYPE", 1) # Advanced PID mode
-        set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 2430) # Voltage limit, 32768 = Vm
+        set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 31500) # Voltage limit, 32768 = Vm
+        #set_config_field(config, "ADC_VM_LIMIT_HIGH", 32200) # Brake threshold
+        #set_config_field(config, "ADC_VM_LIMIT_LOW", 31900) # Brake off threshold
         #set_config_field(config, "PID_TORQUE_FLUX_LIMITS", 0x7fff)
         set_config_field(config, "PID_POSITION_LIMIT_LOW", -0x7fffffff)
         set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x7fffffff)
-        set_config_field(config, "PID_VELOCITY_LIMIT", 0x0fffffff)
-        #set_config_field(config, "PID_VELOCITY_LIMIT", 780000)
+        #set_config_field(config, "PID_VELOCITY_LIMIT", 0x7fffffff)
+        set_config_field(config, "PID_VELOCITY_LIMIT", 3000)
         set_config_field(config, "PID_FLUX_OFFSET", 0)
-        set_config_field(config, "PID_FLUX_P", to_q4_12(1.1702))
-        set_config_field(config, "PID_FLUX_I", to_q4_12(0.0830))
-        set_config_field(config, "PID_TORQUE_P", to_q4_12(1.1702))
-        set_config_field(config, "PID_TORQUE_I", to_q4_12(0.0830))
-        set_config_field(config, "PID_VELOCITY_P", to_q4_12(1.8))
+        set_config_field(config, "PID_FLUX_P", to_q4_12(2.2417))
+        set_config_field(config, "PID_FLUX_I", to_q4_12(0.0347))
+        set_config_field(config, "PID_TORQUE_P", to_q4_12(2.2417))
+        set_config_field(config, "PID_TORQUE_I", to_q4_12(0.0347))
+        set_config_field(config, "PID_VELOCITY_P", to_q4_12(0.7324))
         set_config_field(config, "PID_VELOCITY_I", to_q4_12(0.0))
-        set_config_field(config, "PID_POSITION_P", to_q4_12(1.6))
+        set_config_field(config, "PID_POSITION_P", to_q4_12(0.7324))
         set_config_field(config, "PID_POSITION_I", 0)
 
     def _read_field(self, field):
@@ -1249,6 +1263,28 @@ class TMC4671:
             self._init_registers()
         except self.printer.command_error as e:
             logging.info("TMC %s failed to init: %s", self.name, str(e))
+
+    def _handle_ready(self):
+        print_time = self.printer.lookup_object('toolhead').get_last_move_time()
+        # Now enable 6100
+        if self.fields6100 is not None:
+            self.mcu_tmc6100.set_register("GCONF",
+                                          self.fields6100.set_field("disable", 0),
+                                          print_time)
+        # Just test the PID, as it also sets up the encoder offsets
+        self._write_field("PID_FLUX_TARGET", 0)
+        self._write_field("PID_TORQUE_TARGET", 0)
+        self._write_field("PID_VELOCITY_TARGET", 0)
+        P, I = self._tune_flux_pid(True, 1.0, print_time)
+        #self._write_field("PID_TORQUE_P", to_q4_12(P))
+        #self._write_field("PID_TORQUE_I", to_q4_12(I))
+        #self._tune_torque_pid(True, 1.0, print_time)
+        self._write_field("ABN_DECODER_COUNT", 0)
+        self._write_field("PID_POSITION_TARGET", 0)
+        #limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
+        #self._write_field("PID_FLUX_TARGET", limit_cur)
+        self._write_field("MODE_MOTION", MotionMode.position_mode)
+        #self._write_field("MODE_MOTION", MotionMode.stopped_mode)
 
     def _calibrate_adc(self, print_time):
         self._write_field("PWM_CHOP", 0)
@@ -1349,7 +1385,11 @@ class TMC4671:
         # Experiment over, switch off
         self._write_field("PID_%s_TARGET"%X, 0)
         # Put motion config back how it was
-        self._write_field("PID_FLUX_TARGET", limit_cur)
+        #self._write_field("PID_FLUX_TARGET", limit_cur)
+        self._write_field("PID_TORQUE_TARGET", 0)
+        self._write_field("PID_VELOCITY_TARGET", 0)
+        self._write_field("PID_POSITION_TARGET", 0)
+        self._write_field("PID_POSITION_ACTUAL", 0)
         self._write_field("MODE_MOTION", old_mode)
         self._write_field("PID_FLUX_OFFSET", old_flux_offset)
         self._write_field("PHI_E_SELECTION", old_phi_e_selection)
@@ -1433,34 +1473,17 @@ class TMC4671:
         # self._tune_flux_pid(print_time)
         # setup filters
         self.enable_biquad("CONFIG_BIQUAD_F_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 1600, 2**-0.5)))
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 9600, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_T_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 800, 2**-0.5)))
-        #self._write_field("CONFIG_BIQUAD_F_ENABLE", 0)
-        #self._write_field("CONFIG_BIQUAD_T_ENABLE", 0)
-        #self._write_field("CONFIG_BIQUAD_V_ENABLE", 0)
-        self._write_field("CONFIG_BIQUAD_X_ENABLE", 0)
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 9600, 2**-0.5)))
+        self.enable_biquad("CONFIG_BIQUAD_X_ENABLE",
+                           *biquad_tmc(*biquad_notch(self.pwmfreq, 237, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_V_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 400.0, 2**-0.5)))
-        # Now enable 6100
-        if self.fields6100 is not None:
-            self.mcu_tmc6100.set_register("GCONF",
-                                          self.fields6100.set_field("disable", 0),
-                                          print_time)
-        # Just test the PID, as it also sets up the encoder offsets
-        self._write_field("PID_FLUX_TARGET", 0)
-        self._write_field("PID_TORQUE_TARGET", 0)
-        self._write_field("PID_VELOCITY_TARGET", 0)
-        P, I = self._tune_flux_pid(False, 1.0, print_time)
-        self._write_field("PID_TORQUE_P", to_q4_12(P))
-        self._write_field("PID_TORQUE_I", to_q4_12(I))
-        #self._tune_torque_pid(True, 1.0, print_time)
-        self._write_field("ABN_DECODER_COUNT", 0)
-        self._write_field("PID_POSITION_TARGET", 0)
-        #limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
-        #self._write_field("PID_FLUX_TARGET", limit_cur)
-        self._write_field("MODE_MOTION", MotionMode.position_mode)
-        #self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 4000.0, 2**-0.5)))
+        self._write_field("CONFIG_BIQUAD_F_ENABLE", 0)
+        self._write_field("CONFIG_BIQUAD_T_ENABLE", 0)
+        self._write_field("CONFIG_BIQUAD_V_ENABLE", 0)
+        self._write_field("CONFIG_BIQUAD_X_ENABLE", 0)
 
     cmd_INIT_TMC_help = "Initialize TMC stepper driver registers"
     def cmd_INIT_TMC(self, gcmd):
