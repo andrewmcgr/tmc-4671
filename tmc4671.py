@@ -284,6 +284,12 @@ ReadOnlyRegisters = {
     "TMC4671_INPUTS_RAW", "TMC4671_OUTPUTS_RAW",
     }
 
+ADC_GPIO_FIELDS = {
+    "AGPI_A": "ADC_AGPI_A_RAW",
+    "AGPI_B": "ADC_AGPI_B_RAW",
+    None: None
+}
+
 Fields = {}
 
 Fields["ADC_I1_RAW_ADC_I0_RAW"] = {
@@ -1035,6 +1041,7 @@ def StepHelper(config, mcu_tmc):
 # Periodic error checking
 ######################################################################
 
+
 class TMCErrorCheck:
     def __init__(self, config, mcu_tmc):
         self.printer = config.get_printer()
@@ -1045,7 +1052,9 @@ class TMCErrorCheck:
         self.check_timer = None
         # Setup for temperature query
         self.adc_temp = None
-        self.adc_temp_reg = config.get("adc_temp_reg", None)
+        self.adc_temp_reg = config.getchoice("adc_temp_reg",
+                                             ADC_GPIO_FIELDS,
+                                             default=None)
         if self.adc_temp_reg is not None:
             pheaters = self.printer.load_object(config, 'heaters')
             pheaters.register_monitor(config)
@@ -1078,12 +1087,28 @@ class TMCErrorCheck:
         self.check_timer = reactor.register_timer(self._do_periodic_check,
                                                   curtime + 1.)
         return True
+# Per the OpenFFBoard firmware source
+#[thermistor ffboard]
+#temperature1: 25
+#resistance1: 10000
+#beta: 4300
     def get_status(self, eventtime=None):
         if self.check_timer is None:
             return {'drv_status': None, 'temperature': None}
         temp = None
         if self.adc_temp is not None:
-            pass
+            # Convert it to temp here
+            v = self.adc_temp - 0x7fff
+            if v < 0:
+                temp = 0.0
+            else:
+                #temp = 1500.0 * 43252.0 / float(v)
+                temp = 64878000.0 / float(v)
+                #temp = (1.0/298.15) + math.log(temp / 10000.0) / 4300.0
+                temp = (0.003354016) + math.log(temp / 10000.0) / 4300.0
+                temp = 1.0 / temp
+                temp -= 273.15
+            #logging.info("TMC %s temp: %g", self.stepper_name, temp)
         return {'drv_status': None, 'temperature': temp}
 
 # 4671 does not support chaining, so that's removed
