@@ -1064,6 +1064,11 @@ class TMCErrorCheck:
             self.printer.invoke_shutdown(str(e))
             return self.printer.get_reactor().NEVER
         return eventtime + 1.
+    def stop_checks(self):
+        if self.check_timer is None:
+            return
+        self.printer.get_reactor().unregister_timer(self.check_timer)
+        self.check_timer = None
     def start_checks(self):
         if self.check_timer is not None:
             self.stop_checks()
@@ -1168,8 +1173,10 @@ class MCU_TMC_SPI:
 class TMC4671:
     def __init__(self, config):
         self.printer = config.get_printer()
+        self.stepper_name = ' '.join(config.get_name().split()[1:])
         self.name = config.get_name().split()[-1]
         self.init_done = False
+        self.alignment_done = False
         self.fields = FieldHelper(Fields,
                                   signed_fields=SignedFields,
                                   field_formatters=FieldFormatters,
@@ -1194,6 +1201,12 @@ class TMC4671:
                                             self._handle_connect)
         self.printer.register_event_handler("klippy:ready",
                                             self._handle_ready)
+        self.stepper = None
+        self.stepper_enable = self.printer.load_object(config, "stepper_enable")
+        self.printer.register_event_handler("klippy:mcu_identify",
+                                            self._handle_mcu_identify)
+        self.printer.register_event_handler("klippy:connect",
+                                            self._handle_connect)
         # Register commands
         self.step_helper = StepHelper(config, self.mcu_tmc)
         self.current_helper = CurrentHelper(config, self.mcu_tmc)
@@ -1327,11 +1340,50 @@ class TMC4671:
         self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
         self.mcu_tmc.tmc_spi.reg_write(reg, 0)
 
+    def _do_enable(self, print_time):
+        try:
+            # Only need to do this once.
+            if not self.alignment_done:
+                # Just test the PID, as it also sets up the encoder offsets
+                self._write_field("PID_FLUX_TARGET", 0)
+                self._write_field("PID_TORQUE_TARGET", 0)
+                self._write_field("PID_VELOCITY_TARGET", 0)
+                P, I = self._tune_flux_pid(True, 1.0, print_time)
+                self._write_field("ABN_DECODER_COUNT", 0)
+                self._write_field("PID_POSITION_TARGET", 0)
+                self.alignment_done = True
+            self.error_helper.start_checks()
+            self._write_field("MODE_MOTION", MotionMode.position_mode)
+        except self.printer.command_error as e:
+            self.printer.invoke_shutdown(str(e))
+
+    def _do_disable(self, print_time):
+        try:
+            self.error_helper.stop_checks()
+            # Switching off the enable line will turn off the drivers
+            # but, belt and braces, stop the controller as well.
+            self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+        except self.printer.command_error as e:
+            self.printer.invoke_shutdown(str(e))
+
+    def _handle_mcu_identify(self):
+        # Lookup stepper object
+        force_move = self.printer.lookup_object("force_move")
+        self.stepper = force_move.lookup_stepper(self.stepper_name)
+        # Note default pulse duration and step_both_edge unavailable
+        self.stepper.setup_default_pulse_duration(.000000100, False)
+
+    def _handle_stepper_enable(self, print_time, is_enable):
+        if is_enable:
+            cb = (lambda ev: self._do_enable(print_time))
+        else:
+            cb = (lambda ev: self._do_disable(print_time))
+        self.printer.get_reactor().register_callback(cb)
+
     def _handle_connect(self):
-        # Check if using step on both edges optimization
-        #pulse_duration, step_both_edge = self.stepper.get_pulse_duration()
-        #if step_both_edge:
-        #    self.fields.set_field("dedge", 1)
+        # Check for soft stepper enable/disable
+        enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
+        enable_line.register_state_callback(self._handle_stepper_enable)
         # Send init
         try:
             self._init_registers()
@@ -1349,7 +1401,7 @@ class TMC4671:
         self._write_field("PID_FLUX_TARGET", 0)
         self._write_field("PID_TORQUE_TARGET", 0)
         self._write_field("PID_VELOCITY_TARGET", 0)
-        P, I = self._tune_flux_pid(True, 1.0, print_time)
+        #P, I = self._tune_flux_pid(True, 1.0, print_time)
         #self._write_field("PID_TORQUE_P", to_q4_12(P))
         #self._write_field("PID_TORQUE_I", to_q4_12(I))
         #self._tune_torque_pid(True, 1.0, print_time)
@@ -1357,15 +1409,18 @@ class TMC4671:
         self._write_field("PID_POSITION_TARGET", 0)
         #limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
         #self._write_field("PID_FLUX_TARGET", limit_cur)
-        self._write_field("MODE_MOTION", MotionMode.position_mode)
+        #self._write_field("MODE_MOTION", MotionMode.position_mode)
+        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
         self.init_done = True
-        #self._write_field("MODE_MOTION", MotionMode.stopped_mode)
 
     def _calibrate_adc(self, print_time):
         self._write_field("PWM_CHOP", 0)
         self._write_field("CFG_ADC_I0", 0)
         self._write_field("CFG_ADC_I1", 0)
         i0_off, i1_off = self._sample_adc("ADC_I1_RAW_ADC_I0_RAW")
+        # Following code would calibrate the scalers as well.
+        # However, not doing that makes things simpler, and the
+        # calibration result is always +- 1 from nominal.
         #self._write_field("CFG_ADC_I0", 2)
         #self._write_field("CFG_ADC_I1", 2)
         #i0_l, i1_l = self._sample_adc("ADC_I1_RAW_ADC_I0_RAW")
