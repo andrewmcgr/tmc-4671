@@ -614,6 +614,8 @@ Fields["STATUS_FLAGS"] = {
     "AENC_N": 1 << 30,
 }
 
+# Mask has same structure as the status field
+
 # TODO: interim data fields
 SignedFields = {"ADC_I1_SCALE", "ADC_I0_SCALE", "AENC_0_SCALE", "AENC_1_SCALE",
                 "AENC_2_SCALE", "ADC_IUX", "ADC_IWY", "ADC_IV", "AENC_UX",
@@ -973,7 +975,6 @@ class FieldHelper:
         return {field_name: self.get_field(field_name, reg_value, reg_name)
                 for field_name, mask in reg_fields.items()}
 
-# TODO: actually make this do something
 MAX_CURRENT = 10.000
 
 class CurrentHelper:
@@ -984,6 +985,9 @@ class CurrentHelper:
         self.fields = mcu_tmc.get_fields()
         self.run_current = config.getfloat('run_current',
                                       above=0., maxval=MAX_CURRENT)
+        self.homing_current = config.getfloat('homing_current', above=0.,
+                                              maxval=MAX_CURRENT,
+                                              default=self.run_current)
         self.current_scale = config.getfloat('current_scale_ma_lsb', 1.272,
                                        above=0., maxval=10)
         self.flux_limit = self._calc_flux_limit(self.run_current)
@@ -993,6 +997,10 @@ class CurrentHelper:
         return flux_limit
     def convert_adc_current(self, adc):
         return adc * self.current_scale * 1e-3
+    def get_run_current(self):
+        return self.run_current
+    def get_homing_current(self):
+        return self.homing_current
     def get_current(self):
         c = self.convert_adc_current(self._read_field("PID_TORQUE_FLUX_LIMITS"))
         iux = self.convert_adc_current(self._read_field("ADC_IUX"))
@@ -1050,6 +1058,15 @@ class TMCErrorCheck:
         self.mcu_tmc = mcu_tmc
         self.fields = mcu_tmc.get_fields()
         self.check_timer = None
+        self.status_warn_mask = self._make_mask(["PID_IQ_OUTPUT_LIMIT",
+                                                 "PID_ID_OUTPUT_LIMIT",
+                                                 "REF_SW_R",
+                                                 "REF_SW_L"])
+        self.status_error_mask = self._make_mask(["PWM_MIN",
+                                                  "PWM_MAX",
+                                                  "ADC_I_CLIPPED",
+                                                  "AENC_CLIPPED"])
+        self.last_status = 0
         # Setup for temperature query
         self.adc_temp = None
         self.adc_temp_reg = config.getchoice("adc_temp_reg",
@@ -1058,16 +1075,38 @@ class TMCErrorCheck:
         if self.adc_temp_reg is not None:
             pheaters = self.printer.load_object(config, 'heaters')
             pheaters.register_monitor(config)
+    def _make_mask(self, entries):
+        mask = 0
+        for f in entries:
+            mask = self.fields.set_field(f, 1, mask, "STATUS_FLAGS")
+        return mask
+    def _query_status(self):
+        try:
+            status = self.mcu_tmc.get_register("STATUS_FLAGS")
+            if status & self.status_warn_mask != self.last_status & self.status_warn_mask:
+                fmt = self.fields.pretty_format("STATUS_FLAGS", status)
+                logging.info("TMC 4671 '%s' reports %s", self.stepper_name, fmt)
+            self.last_status = status
+            if status & self.status_error_mask:
+                fmt = self.fields.pretty_format("STATUS_FLAGS", status)
+                raise self.printer.command_error("TMC 4671 '%s' reports error: %s"
+                                                 % (self.stepper_name, fmt))
+        except self.printer.command_error as e:
+            self.printer.invoke_shutdown(str(e))
+            return self.printer.get_reactor().NEVER
     def _query_temperature(self):
         try:
             if self.adc_temp_reg is not None:
                 self.adc_temp = self.mcu_tmc.read_field(self.adc_temp_reg)
+                # TODO: remove this, just temp logging
+                #self._convert_temp(self.adc_temp)
         except self.printer.command_error as e:
             # Ignore comms error for temperature
             self.adc_temp = None
             return
     def _do_periodic_check(self, eventtime):
         try:
+            self._query_status()
             self._query_temperature()
         except self.printer.command_error as e:
             self.printer.invoke_shutdown(str(e))
@@ -1087,29 +1126,82 @@ class TMCErrorCheck:
         self.check_timer = reactor.register_timer(self._do_periodic_check,
                                                   curtime + 1.)
         return True
-# Per the OpenFFBoard firmware source
-#[thermistor ffboard]
-#temperature1: 25
-#resistance1: 10000
-#beta: 4300
+    # Per the OpenFFBoard firmware source
+    #[thermistor ffboard]
+    #temperature1: 25
+    #resistance1: 10000
+    #beta: 4300
+    def _convert_temp(self, adc):
+        v = adc - 0x7fff
+        if v < 0:
+            temp = 0.0
+        else:
+            #temp = 1500.0 * 43252.0 / float(v)
+            temp = 64878000.0 / float(v)
+            #temp = (1.0/298.15) + math.log(temp / 10000.0) / 4300.0
+            temp = (0.003354016) + math.log(temp / 10000.0) / 4300.0
+            temp = 1.0 / temp
+            temp -= 273.15
+        logging.info("TMC %s temp: %g", self.stepper_name, temp)
     def get_status(self, eventtime=None):
         if self.check_timer is None:
             return {'drv_status': None, 'temperature': None}
         temp = None
         if self.adc_temp is not None:
             # Convert it to temp here
-            v = self.adc_temp - 0x7fff
-            if v < 0:
-                temp = 0.0
-            else:
-                #temp = 1500.0 * 43252.0 / float(v)
-                temp = 64878000.0 / float(v)
-                #temp = (1.0/298.15) + math.log(temp / 10000.0) / 4300.0
-                temp = (0.003354016) + math.log(temp / 10000.0) / 4300.0
-                temp = 1.0 / temp
-                temp -= 273.15
-            #logging.info("TMC %s temp: %g", self.stepper_name, temp)
+            temp = self._convert_temp(adc)
         return {'drv_status': None, 'temperature': temp}
+
+# Helper class for "sensorless homing"
+class TMCVirtualPinHelper:
+    def __init__(self, config, mcu_tmc, current_helper):
+        self.printer = config.get_printer()
+        self.mcu_tmc = mcu_tmc
+        self.fields = mcu_tmc.get_fields()
+        self.current_helper = current_helper
+        self.diag_pin = config.get('diag_pin', None)
+        self.mcu_endstop = None
+        self.en_pwm = False
+        self.status_mask_entries = config.getlist("homing_mask",
+                                                  ["PID_IQ_OUTPUT_LIMIT",
+                                                   "PID_ID_OUTPUT_LIMIT",
+                                                   "REF_SW_R",
+                                                   "REF_SW_L"])
+        self.status_mask = 0
+        for f in self.status_mask_entries:
+            self.status_mask = self.fields.set_field(f, 1,
+                                                     self.status_mask,
+                                                     "STATUS_FLAGS")
+        # Register virtual_endstop pin
+        name_parts = config.get_name().split()
+        ppins = self.printer.lookup_object("pins")
+        ppins.register_chip("%s_%s" % (name_parts[0], name_parts[-1]), self)
+    def setup_pin(self, pin_type, pin_params):
+        # Validate pin
+        ppins = self.printer.lookup_object('pins')
+        if pin_type != 'endstop' or pin_params['pin'] != 'virtual_endstop':
+            raise ppins.error("tmc virtual endstop only useful as endstop")
+        if pin_params['invert'] or pin_params['pullup']:
+            raise ppins.error("Can not pullup/invert tmc virtual pin")
+        if self.diag_pin is None:
+            raise ppins.error("tmc virtual endstop requires diag pin config")
+        # Setup for sensorless homing
+        self.printer.register_event_handler("homing:homing_move_begin",
+                                            self.handle_homing_move_begin)
+        self.printer.register_event_handler("homing:homing_move_end",
+                                            self.handle_homing_move_end)
+        self.mcu_endstop = ppins.setup_pin('endstop', self.diag_pin)
+        return self.mcu_endstop
+    def handle_homing_move_begin(self, hmove):
+        if self.mcu_endstop not in hmove.get_mcu_endstops():
+            return
+        self.current_helper.set_current(self.current_helper.get_homing_current())
+        self.mcu_tmc.write_field("STATUS_MASK", self.status_mask)
+    def handle_homing_move_end(self, hmove):
+        if self.mcu_endstop not in hmove.get_mcu_endstops():
+            return
+        self.current_helper.set_current(self.current_helper.get_run_current())
+        self.mcu_tmc.write_field("STATUS_MASK", 0)
 
 # 4671 does not support chaining, so that's removed
 # 4671 protocol does not require dummy reads
@@ -1236,6 +1328,7 @@ class TMC4671:
         self.step_helper = StepHelper(config, self.mcu_tmc)
         self.current_helper = CurrentHelper(config, self.mcu_tmc)
         self.error_helper = TMCErrorCheck(config, self.mcu_tmc)
+        TMCVirtualPinHelper(config, self.mcu_tmc, self.current_helper)
         gcode.register_mux_command("SET_TMC_FIELD", "STEPPER", self.name,
                                    self.cmd_SET_TMC_FIELD,
                                    desc=self.cmd_SET_TMC_FIELD_help)
@@ -1422,6 +1515,7 @@ class TMC4671:
             self.mcu_tmc6100.set_register("GCONF",
                                           self.fields6100.set_field("disable", 0),
                                           print_time)
+        self._write_field("STATUS_MASK", 0)
         # Just test the PID, as it also sets up the encoder offsets
         self._write_field("PID_FLUX_TARGET", 0)
         self._write_field("PID_TORQUE_TARGET", 0)
