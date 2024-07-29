@@ -27,7 +27,9 @@ class MotionMode(IntEnum):
     position_mode = 3
     uq_ud_ext_mode = 8
 
-# Tuple is the address followed by a value to put in the next higher address to select that sub-register, or none to just go straight there.
+# Tuple is the address followed by a value to put in the next higher address
+# to select that sub-register, or none to just go straight there.
+# Not used for 6100, but there to use the same code.
 
 ######################################################################
 # Register map for the 6100 companion chip
@@ -94,7 +96,7 @@ DumpGroups6100 = {
 
 
 ######################################################################
-# Register map for the 4671 itself
+# Register map for the 4671
 ######################################################################
 
 
@@ -126,6 +128,7 @@ Registers = {
     "ADC_I_SELECT": (0x0A, None), # RW,Init
     "ADC_I1_I0_EXT": (0x0B, None), # RW,Test
     "DS_ANALOG_INPUT_STAGE_CFG": (0x0C, None), # RW,Test
+
     "AENC_0_SCALE_OFFSET": (0x0D, None), # RW,Init
     "AENC_1_SCALE_OFFSET": (0x0E, None), # RW,Init
     "AENC_2_SCALE_OFFSET": (0x0F, None), # RW,Init
@@ -134,18 +137,22 @@ Registers = {
     "ADC_IV": (0x13, None), # R,Monitor
     "AENC_WY_UX": (0x15, None), # R,Monitor
     "AENC_VN": (0x16, None), # R,Monitor
+
     "PWM_POLARITIES": (0x17, None), # RW,Init
     "PWM_MAXCNT": (0x18, None), # RW,Init
     "PWM_BBM_H_BBM_L": (0x19, None), # RW,Init
     "PWM_SV_CHOP": (0x1A, None), # RW,Init
     "MOTOR_TYPE_N_POLE_PAIRS": (0x1B, None), # RW,Init
     "PHI_E_EXT": (0x1C, None), # RW,Test
+
     "OPENLOOP_MODE": (0x1F, None), # RW,Init
     "OPENLOOP_ACCELERATION": (0x20, None), # RW,Init
     "OPENLOOP_VELOCITY_TARGET": (0x21, None), # RW,Init
     "OPENLOOP_VELOCITY_ACTUAL": (0x22, None), # RW,Monitor
     "OPENLOOP_PHI": (0x23, None), # RW,Monitor/Test
+
     "UQ_UD_EXT": (0x24, None), # RW,Init/Test
+
     "ABN_DECODER_MODE": (0x25, None), # RW,Init
     "ABN_DECODER_PPR": (0x26, None), # RW,Init
     "ABN_DECODER_COUNT": (0x27, None), # RW,Init/Test/Monitor
@@ -176,6 +183,7 @@ Registers = {
     "AENC_DECODER_COUNT_N": (0x42, None), # RW,Monitor/Init
     "AENC_DECODER_PHI_E_PHI_M_OFFSET": (0x45, None), # RW,Init
     "AENC_DECODER_PHI_E_PHI_M": (0x46, None), # R,Monitor
+
     "CONFIG_DATA": (0x4D, None), # RW,Init
     "CONFIG_ADDR": (0x4E, None), # RW,Init
 
@@ -203,11 +211,12 @@ Registers = {
     "CONFIG_BIQUAD_F_B_1": (0x4D, 29),
     "CONFIG_BIQUAD_F_B_2": (0x4D, 30),
     "CONFIG_BIQUAD_F_ENABLE": (0x4D, 31),
+
     "CONFIG_REF_SWITCH_CONFIG": (0x4D, 51),
     "CONFIG_SINGLE_PIN_IF_STATUS_CFG": (0x4D, 60),
     "CONFIG_SINGLE_PIN_IF_SCALE_OFFSET": (0x4D, 61),
-    "CONFIG_ADVANCED_PI_REPRESENT": (0x4D, 62),
 
+    "CONFIG_ADVANCED_PI_REPRESENT": (0x4D, 62),
     "VELOCITY_SELECTION": (0x50, None), # RW,Init
     "POSITION_SELECTION": (0x51, None), # RW,Init
     "PHI_E_SELECTION": (0x52, None), # RW,Init
@@ -289,6 +298,7 @@ Registers = {
     "STEP_WIDTH": (0x78, None), # RW,Init
     "UART_BPS": (0x79, None), # RW,Init
     "GPIO_DSADCI_CONFIG": (0x7B, None), # RW,Init
+
     "STATUS_FLAGS": (0x7C, None), # RW,Monitor
     "STATUS_MASK": (0x7D, None), # RW,Monitor
 }
@@ -533,7 +543,6 @@ Fields["AENC_DECODER_PHI_E_PHI_M"] = {
     "AENC_DECODER_PHI_E": 0xffff << 16
 }
 
-# TODO: CONFIG_DATA
 # CONFIG_DATA changes layout depending on the selected address
 Fields["CONFIG_ADVANCED_PI_REPRESENT"] = {
     "CURRENT_I_n": 1 << 0,
@@ -590,7 +599,6 @@ Fields["PID_TORQUE_FLUX_ACTUAL"] = {
     "PID_TORQUE_ACTUAL": 0xffff << 16
 }
 
-# TODO: if necessary, INTERIM_DATA
 Fields["INTERIM_PWM_WY_UX"] = {
     "INTERIM_PWM_UX": 0xffff,
     "INTERIM_PWM_WY": 0xffff << 16
@@ -601,9 +609,6 @@ Fields["ADC_VM_LIMITS"] = {
     "ADC_VM_LIMIT_LOW": 0xffff,
     "ADC_VM_LIMIT_HIGH": 0xffff << 16
 }
-
-# TODO: if necessary, TMC467_*_RAW
-# TODO: if necessary, GPIO_dsADCI_CONFIG
 
 Fields["STATUS_FLAGS"] = {
     "PID_X_TARGET_LIMIT": 1 << 0,
@@ -635,7 +640,6 @@ Fields["STATUS_FLAGS"] = {
 
 # Mask has same structure as the status field
 
-# TODO: interim data fields
 SignedFields = {"ADC_I1_SCALE", "ADC_I0_SCALE", "AENC_0_SCALE", "AENC_1_SCALE",
                 "AENC_2_SCALE", "ADC_IUX", "ADC_IWY", "ADC_IV", "AENC_UX",
                 "AENC_WY", "AENC_VN", "PHI_E_EXT", "OPENLOOP_VELOCITY_TARGET",
@@ -902,7 +906,7 @@ def biquad_Z_tmc(T, b0, b1, b2, a0, a1, a2):
     # return in the same order as the config registers
     return a1, a2, b0, b1, b2
 
-## Normalise a biquad filter, according to TMC
+# Normalise a biquad filter, according to TMC
 def biquad_tmc(b0, b1, b2, a0, a1, a2):
     e29 = 2**29
     b0 = round(b0/a0 * e29)
@@ -917,7 +921,7 @@ def biquad_tmc(b0, b1, b2, a0, a1, a2):
 def simc(k, theta, tau1, tauc):
     Kc = (1.0/k) * (tau1/(tauc + theta))
     taui = min(tau1, 4*(tauc + theta))
-return Kc, taui
+    return Kc, taui
 
 
 ######################################################################
