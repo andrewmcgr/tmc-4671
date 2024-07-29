@@ -1,4 +1,12 @@
-# TMC4671 configuration
+# TMC4671 servo driver support
+#
+# Copyright (C) 2024       Andrew McGregor <andrewmcgr@gmail.com>
+#
+# Based heavily on Klipper TMC stepper drivers which are:
+#
+# Copyright (C) 2018-2020  Kevin O'Connor <kevin@koconnor.net>
+#
+# This file may be distributed under the terms of the GNU GPLv3 license.
 import logging, collections
 import math
 from time import monotonic_ns
@@ -6,7 +14,9 @@ from enum import IntEnum
 from statistics import median_low
 from . import bus, tmc
 
+# The 4671 has a 25 MHz external clock
 TMC_FREQUENCY=25000000.
+# However there is a 100 MHz internal clock, hence 10 ns units in places
 
 # Some magic numbers for the driver
 
@@ -19,7 +29,11 @@ class MotionMode(IntEnum):
 
 # Tuple is the address followed by a value to put in the next higher address to select that sub-register, or none to just go straight there.
 
+######################################################################
 # Register map for the 6100 companion chip
+######################################################################
+
+
 Registers6100 = {
     "GCONF": (0x00, None),
     "GSTAT": (0x01, None),
@@ -78,7 +92,12 @@ DumpGroups6100 = {
     "Default": ["GCONF", "GSTAT", "IOIN", "SHORT_CONF", "DRV_CONF",],
 }
 
+
+######################################################################
 # Register map for the 4671 itself
+######################################################################
+
+
 Registers = {
     "CHIPINFO_DATA": (0x00, None), # R,Test
     "CHIPINFO_ADDR": (0x01, None), # RW,Test
@@ -822,6 +841,12 @@ DumpGroups = {
                 "CONFIG_BIQUAD_F_B_2", "CONFIG_BIQUAD_F_ENABLE",],
 }
 
+
+######################################################################
+# Biquad filter utilities
+######################################################################
+
+
 # Filter design formula from 4671 datasheet
 def biquad_lpf_tmc(fs, f, D):
     w0 = 2.0 * math.pi * f / fs
@@ -892,7 +917,13 @@ def biquad_tmc(b0, b1, b2, a0, a1, a2):
 def simc(k, theta, tau1, tauc):
     Kc = (1.0/k) * (tau1/(tauc + theta))
     taui = min(tau1, 4*(tauc + theta))
-    return Kc, taui
+return Kc, taui
+
+
+######################################################################
+# Field manipulation helpers
+######################################################################
+
 
 # Return the position of the first bit set in a mask
 def ffs(mask):
@@ -975,6 +1006,12 @@ class FieldHelper:
         return {field_name: self.get_field(field_name, reg_value, reg_name)
                 for field_name, mask in reg_fields.items()}
 
+
+######################################################################
+# Current control
+######################################################################
+
+
 MAX_CURRENT = 10.000
 
 class CurrentHelper:
@@ -1025,7 +1062,12 @@ class CurrentHelper:
                                                         reg_value=reg_value,
                                                         reg_name=reg_name))
 
+
+######################################################################
 # Helper to configure the microstep settings
+######################################################################
+
+
 def StepHelper(config, mcu_tmc):
     fields = mcu_tmc.get_fields()
     stepper_name = " ".join(config.get_name().split()[1:])
@@ -1158,7 +1200,12 @@ class TMCErrorCheck:
             temp = self._convert_temp(adc)
         return {'drv_status': None, 'temperature': temp}
 
+
+######################################################################
 # Helper class for "sensorless homing"
+######################################################################
+
+
 class TMCVirtualPinHelper:
     def __init__(self, config, mcu_tmc, current_helper):
         self.printer = config.get_printer()
@@ -1214,6 +1261,11 @@ class TMCVirtualPinHelper:
             return
         self.current_helper.set_current(self.current_helper.get_run_current())
         self.mcu_tmc.write_field("STATUS_MASK", 0)
+
+
+######################################################################
+# SPI communication, fields, and registers
+######################################################################
 
 # 4671 does not support chaining, so that's removed
 # 4671 protocol does not require dummy reads
@@ -1308,6 +1360,11 @@ class MCU_TMC_SPI:
                                                 reg_value=reg_value,
                                                 reg_name=reg_name))
 
+######################################################################
+# Main driver class
+######################################################################
+
+
 class TMC4671:
     def __init__(self, config):
         self.printer = config.get_printer()
@@ -1319,7 +1376,7 @@ class TMC4671:
                                   signed_fields=SignedFields,
                                   field_formatters=FieldFormatters,
                                   prefix="foc_")
-        # TODO: make 6100 optional for boards without one.
+        # 6100 is optional for boards without one.
         gcode = self.printer.lookup_object("gcode")
         if config.get("drv_cs_pin", None) is not None:
             self.fields6100 = FieldHelper(Fields6100, prefix="drv_")
@@ -1428,16 +1485,15 @@ class TMC4671:
         set_config_field(config, "VELOCITY_P_n", 1) # q8.8
         set_config_field(config, "POSITION_I_n", 1) # q4.12
         set_config_field(config, "POSITION_P_n", 1) # q8.8
-        set_config_field(config, "MODE_PID_SMPL", 2) # Advanced PID samples position at fPWM
+        set_config_field(config, "MODE_PID_SMPL", 2) # Advanced PID samples position at fPWM/3
         set_config_field(config, "MODE_PID_TYPE", 1) # Advanced PID mode
         set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 31500) # Voltage limit, 32768 = Vm
-        #set_config_field(config, "ADC_VM_LIMIT_HIGH", 32200) # Brake threshold
-        #set_config_field(config, "ADC_VM_LIMIT_LOW", 31900) # Brake off threshold
-        #set_config_field(config, "PID_TORQUE_FLUX_LIMITS", 0x7fff)
+        # Brake chopper defaults to off. Be very careful.
+        set_config_field(config, "ADC_VM_LIMIT_HIGH", 0) # Brake threshold
+        set_config_field(config, "ADC_VM_LIMIT_LOW", 0) # Brake off threshold
         # TODO: get this from the size of the printer
         set_config_field(config, "PID_POSITION_LIMIT_LOW", -0x10000000)
         set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x10000000)
-        #set_config_field(config, "PID_VELOCITY_LIMIT", 0x7fffffff)
         # TODO: Units, what should this be anyway?
         set_config_field(config, "PID_VELOCITY_LIMIT", 0x300000)
         set_config_field(config, "PID_FLUX_OFFSET", 0)
@@ -1464,8 +1520,6 @@ class TMC4671:
                                                         reg_value=reg_value,
                                                         reg_name=reg_name))
 
-    # Intended to be called, e.g. like this:
-    # self.enable_biquad("CONFIG_BIQUAD_X_ENABLE", *biquad_tmc(self.pwmT, *biquad_lpf(self.pwmfreq, 5e3, 0.7)))
     def enable_biquad(self, enable_field, *biquad):
         reg, addr = self.mcu_tmc.name_to_reg[enable_field]
         for o,i in enumerate(biquad):
@@ -1537,19 +1591,11 @@ class TMC4671:
                                           self.fields6100.set_field("disable", 0),
                                           print_time)
         self._write_field("STATUS_MASK", 0)
-        # Just test the PID, as it also sets up the encoder offsets
         self._write_field("PID_FLUX_TARGET", 0)
         self._write_field("PID_TORQUE_TARGET", 0)
         self._write_field("PID_VELOCITY_TARGET", 0)
-        #P, I = self._tune_flux_pid(True, 1.0, print_time)
-        #self._write_field("PID_TORQUE_P", to_q4_12(P))
-        #self._write_field("PID_TORQUE_I", to_q4_12(I))
-        #self._tune_torque_pid(True, 1.0, print_time)
         self._write_field("ABN_DECODER_COUNT", 0)
         self._write_field("PID_POSITION_TARGET", 0)
-        #limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
-        #self._write_field("PID_FLUX_TARGET", limit_cur)
-        #self._write_field("MODE_MOTION", MotionMode.position_mode)
         self._write_field("MODE_MOTION", MotionMode.stopped_mode)
         self.init_done = True
 
@@ -1612,7 +1658,6 @@ class TMC4671:
         self._write_field("UD_EXT", limit_cur)
         self._write_field("UQ_EXT", 0)
         dwell(0.2)
-        #self._write_field("PID_FLUX_OFFSET", 0)
         self._write_field("PID_TORQUE_TARGET", 0)
         self._write_field("PID_VELOCITY_TARGET", 0)
         self._write_field("PID_POSITION_TARGET", 0)
@@ -1655,7 +1700,6 @@ class TMC4671:
         # Experiment over, switch off
         self._write_field("PID_%s_TARGET"%X, 0)
         # Put motion config back how it was
-        #self._write_field("PID_FLUX_TARGET", limit_cur)
         self._write_field("PID_TORQUE_TARGET", 0)
         self._write_field("PID_VELOCITY_TARGET", 0)
         self._write_field("PID_POSITION_TARGET", 0)
@@ -1731,7 +1775,7 @@ class TMC4671:
         self._write_field("PID_VELOCITY_TARGET", 0)
         self._write_field("PID_POSITION_TARGET", 0)
         self._write_field("PWM_CHOP", 7)
-        # Send registers, 6100 first then 4671
+        # Send registers, 6100 first if configured then 4671
         if self.fields6100 is not None:
             for reg_name in list(self.fields6100.registers.keys()):
                 val = self.fields6100.registers[reg_name] # Val may change during loop
@@ -1740,8 +1784,6 @@ class TMC4671:
             val = self.fields.registers[reg_name] # Val may change during loop
             self.mcu_tmc.set_register(reg_name, val, print_time)
         self._calibrate_adc(print_time)
-        #self._get_angle_offsets_bang(print_time)
-        # self._tune_flux_pid(print_time)
         # setup filters
         self.enable_biquad("CONFIG_BIQUAD_F_ENABLE",
                            *biquad_tmc(*biquad_lpf(self.pwmfreq, 9600, 2**-0.5)))
