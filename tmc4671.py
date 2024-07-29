@@ -1058,10 +1058,15 @@ class TMCErrorCheck:
         self.mcu_tmc = mcu_tmc
         self.fields = mcu_tmc.get_fields()
         self.check_timer = None
-        self.status_warn_mask = self._make_mask(["PID_IQ_OUTPUT_LIMIT",
-                                                 "PID_ID_OUTPUT_LIMIT",
+        self.status_warn_mask = self._make_mask(["PID_IQ_TARGET_LIMIT",
+                                                 "PID_ID_TARGET_LIMIT",
+                                                 "PID_IQ_ERRSUM_LIMIT",
+                                                 "PID_ID_ERRSUM_LIMIT",
+                                                 "PID_V_OUTPUT_LIMIT",
                                                  "REF_SW_R",
                                                  "REF_SW_L"])
+        # Useful for debugging
+        #self.status_warn_mask = 0xffffffff
         self.status_error_mask = self._make_mask(["PWM_MIN",
                                                   "PWM_MAX",
                                                   "ADC_I_CLIPPED",
@@ -1086,6 +1091,8 @@ class TMCErrorCheck:
             if status & self.status_warn_mask != self.last_status & self.status_warn_mask:
                 fmt = self.fields.pretty_format("STATUS_FLAGS", status)
                 logging.info("TMC 4671 '%s' reports %s", self.stepper_name, fmt)
+            self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
+            status = self.mcu_tmc.get_register("STATUS_FLAGS")
             self.last_status = status
             if status & self.status_error_mask:
                 fmt = self.fields.pretty_format("STATUS_FLAGS", status)
@@ -1120,7 +1127,6 @@ class TMCErrorCheck:
     def start_checks(self):
         if self.check_timer is not None:
             self.stop_checks()
-        cleared_flags = 0
         reactor = self.printer.get_reactor()
         curtime = reactor.monotonic()
         self.check_timer = reactor.register_timer(self._do_periodic_check,
@@ -1162,9 +1168,15 @@ class TMCVirtualPinHelper:
         self.diag_pin = config.get('diag_pin', None)
         self.mcu_endstop = None
         self.en_pwm = False
+        # Stalls show up as either IQ_ERRSUM or V_OUTPUT.
+        # Include the reference switches so can connect endstops
+        # to driver boards.
         self.status_mask_entries = config.getlist("homing_mask",
                                                   ["PID_IQ_OUTPUT_LIMIT",
                                                    "PID_ID_OUTPUT_LIMIT",
+                                                   "PID_IQ_ERRSUM_LIMIT",
+                                                   "PID_ID_ERRSUM_LIMIT",
+                                                   "PID_V_OUTPUT_LIMIT",
                                                    "REF_SW_R",
                                                    "REF_SW_L"])
         self.status_mask = 0
@@ -1214,7 +1226,7 @@ class MCU_TMC_SPI_simple:
         self.spi = bus.MCU_SPI_from_config(config, 3, default_speed=1000000, pin_option=pin_option)
     def reg_read(self, reg):
         cmd = [reg, 0x00, 0x00, 0x00, 0x00]
-        self.spi.spi_send(cmd)
+        #self.spi.spi_send(cmd)
         params = self.spi.spi_transfer(cmd)
         pr = bytearray(params['response'])
         return (pr[1] << 24) | (pr[2] << 16) | (pr[3] << 8) | pr[4]
@@ -1253,6 +1265,15 @@ class MCU_TMC_SPI:
                         "Unable to write tmc spi '%s' address register %s (last read %x)" % (self.name, reg_name, v))
             read = self.tmc_spi.reg_read(reg)
         return read
+    def set_register_once(self, reg_name, val, print_time=None):
+        reg, addr = self.name_to_reg[reg_name]
+        with self.mutex:
+            if addr is not None:
+                v = self.tmc_spi.reg_write(reg+1, addr, print_time)
+                if v != addr:
+                    raise self.printer.command_error(
+                        "Unable to write tmc spi '%s' address register %s (last read %x)" % (self.name, reg_name, v))
+            v = self.tmc_spi.reg_write(reg, val, print_time)
     def set_register(self, reg_name, val, print_time=None):
         reg, addr = self.name_to_reg[reg_name]
         with self.mutex:
@@ -1703,6 +1724,7 @@ class TMC4671:
             self.mcu_tmc6100.set_register("GCONF",
                                           self.fields6100.set_field("disable", 1),
                                           print_time)
+        self._write_field("STATUS_FLAGS", 0)
         # Set torque and current in 4671 to zero
         self._write_field("PID_FLUX_TARGET", 0)
         self._write_field("PID_TORQUE_TARGET", 0)
