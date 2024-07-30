@@ -775,10 +775,10 @@ FieldFormatters = {
     "ABN_DECODER_PHI_E": format_phi,
     "ABN_DECODER_PHI_E_OFFSET": format_phi,
     "ABN_DECODER_PHI_M_OFFSET": format_phi,
-    "PID_FLUX_P": format_q8_8,
-    "PID_FLUX_I": format_q8_8,
-    "PID_TORQUE_P": format_q8_8,
-    "PID_TORQUE_I": format_q8_8,
+    "PID_FLUX_P": format_q4_12,
+    "PID_FLUX_I": format_q4_12,
+    "PID_TORQUE_P": format_q4_12,
+    "PID_TORQUE_I": format_q4_12,
     "PID_VELOCITY_P": format_q4_12,
     "PID_VELOCITY_I": format_q4_12,
     "PID_POSITION_P": format_q4_12,
@@ -1011,6 +1011,23 @@ class FieldHelper:
                 for field_name, mask in reg_fields.items()}
 
 
+class PIDHelper:
+    def __init__(self, config, mcu_tmc, var, def_v, nvar, def_n):
+        self.mcu_tmc = mcu_tmc
+        self.fields = mcu_tmc.get_fields()
+        fvar = "PID_" + var
+        logging.info("TMC: %s", ','.join((str(i) for i in [var, def_v, nvar, fvar])))
+        set_config_field = self.fields.set_config_field
+        set_config_field(config, nvar, def_n)
+        if self.fields.get_field(nvar):
+            self.to_f = to_q4_12
+            self.from_f = from_q4_12
+        else:
+            self.to_f = to_q8_8
+            self.from_f = from_q8_8
+        FieldFormatters[fvar] = self.from_f
+        set_config_field(config, fvar, self.to_f(def_v))
+
 ######################################################################
 # Current control
 ######################################################################
@@ -1106,8 +1123,6 @@ class TMCErrorCheck:
         self.check_timer = None
         self.status_warn_mask = self._make_mask(["PID_IQ_TARGET_LIMIT",
                                                  "PID_ID_TARGET_LIMIT",
-                                                 "PID_IQ_ERRSUM_LIMIT",
-                                                 "PID_ID_ERRSUM_LIMIT",
                                                  "PID_V_OUTPUT_LIMIT",
                                                  "REF_SW_R",
                                                  "REF_SW_L"])
@@ -1483,32 +1498,30 @@ class TMC4671:
         set_config_field(config, "VELOCITY_SELECTION", 9) # ABN
         #set_config_field(config, "VELOCITY_METER_SELECTION", 0) # Default velocity meter
         set_config_field(config, "VELOCITY_METER_SELECTION", 1) # PWM frequency velocity meter
-        set_config_field(config, "CURRENT_I_n", 1) # q4.12
-        set_config_field(config, "CURRENT_P_n", 1) # q8.8
-        set_config_field(config, "VELOCITY_I_n", 1) # q4.12
-        set_config_field(config, "VELOCITY_P_n", 1) # q8.8
-        set_config_field(config, "POSITION_I_n", 1) # q4.12
-        set_config_field(config, "POSITION_P_n", 1) # q8.8
         set_config_field(config, "MODE_PID_SMPL", 2) # Advanced PID samples position at fPWM/3
         set_config_field(config, "MODE_PID_TYPE", 1) # Advanced PID mode
         set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 31500) # Voltage limit, 32768 = Vm
         # Brake chopper defaults to off. Be very careful.
-        set_config_field(config, "ADC_VM_LIMIT_HIGH", 0) # Brake threshold
-        set_config_field(config, "ADC_VM_LIMIT_LOW", 0) # Brake off threshold
+        #set_config_field(config, "ADC_VM_LIMIT_HIGH", 0) # Brake threshold
+        #set_config_field(config, "ADC_VM_LIMIT_LOW", 0) # Brake off threshold
         # TODO: get this from the size of the printer
         set_config_field(config, "PID_POSITION_LIMIT_LOW", -0x10000000)
         set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x10000000)
         # TODO: Units, what should this be anyway?
         set_config_field(config, "PID_VELOCITY_LIMIT", 0x300000)
         set_config_field(config, "PID_FLUX_OFFSET", 0)
-        set_config_field(config, "PID_FLUX_P", to_q8_8(2.2417))
-        set_config_field(config, "PID_FLUX_I", to_q8_8(1.227))
-        set_config_field(config, "PID_TORQUE_P", to_q8_8(33.117))
-        set_config_field(config, "PID_TORQUE_I", to_q8_8(19.598))
-        set_config_field(config, "PID_VELOCITY_P", to_q4_12(2.0))
-        set_config_field(config, "PID_VELOCITY_I", to_q4_12(0.6575))
-        set_config_field(config, "PID_POSITION_P", to_q4_12(0.9))
-        set_config_field(config, "PID_POSITION_I", 0)
+        pid_defaults = [
+            ("FLUX_P", 3.22, "CURRENT_P_n", 1),
+            ("FLUX_I", 1.101, "CURRENT_I_n", 1),
+            ("TORQUE_P", 3.22, "CURRENT_P_n", 1),
+            ("TORQUE_I", 1.101, "CURRENT_I_n", 1),
+            ("VELOCITY_P", 3.0, "VELOCITY_P_n", 1),
+            ("VELOCITY_I", 0.5, "VELOCITY_I_n", 1),
+            ("POSITION_P", 2.5, "POSITION_P_n", 1),
+            ("POSITION_I", 0, "POSITION_I_n", 1)
+            ]
+        self.pid_helpers = {n: PIDHelper(config, self.mcu_tmc, n, v, nn, nv)
+                            for n, v, nn, nv in pid_defaults}
 
     def _read_field(self, field):
         reg_name = self.fields.lookup_register(field)
@@ -1748,8 +1761,8 @@ class TMC4671:
         Ki *= derate
         logging.info("TMC 4671 %s %s PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, X, Kc, taui, Ki))
         if not test_existing:
-            self._write_field("PID_%s_P"%X, to_q8_8(Kc))
-            self._write_field("PID_%s_I"%X, to_q8_8(Ki))
+            self._write_field("PID_%s_P"%X, self.pid_helpers["%s_P"%X].to_f(Kc))
+            self._write_field("PID_%s_I"%X, self.pid_helpers["%s_I"%X].to_f(Ki))
         return Kc, Ki
 
     def _dump_pid(self, n, X):
@@ -1772,7 +1785,7 @@ class TMC4671:
             self.mcu_tmc6100.set_register("GCONF",
                                           self.fields6100.set_field("disable", 1),
                                           print_time)
-        self._write_field("STATUS_FLAGS", 0)
+        self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         # Set torque and current in 4671 to zero
         self._write_field("PID_FLUX_TARGET", 0)
         self._write_field("PID_TORQUE_TARGET", 0)
@@ -1785,6 +1798,8 @@ class TMC4671:
                 val = self.fields6100.registers[reg_name] # Val may change during loop
                 self.mcu_tmc6100.set_register(reg_name, val, print_time)
         for reg_name in list(self.fields.registers.keys()):
+            if reg_name == "STATUS_FLAGS":
+                continue
             val = self.fields.registers[reg_name] # Val may change during loop
             self.mcu_tmc.set_register(reg_name, val, print_time)
         self._calibrate_adc(print_time)
@@ -1838,8 +1853,8 @@ class TMC4671:
         logging.info("TMC_TUNE_PID %s", self.name)
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         P, I = self._tune_flux_pid(test_existing, derate, print_time)
-        self._write_field("PID_TORQUE_P", to_q4_12(P))
-        self._write_field("PID_TORQUE_I", to_q4_12(I))
+        self._write_field("PID_TORQUE_P", self.pid_helpers["TORQUE_P"].to_f(P))
+        self._write_field("PID_TORQUE_I", self.pid_helpers["TORQUE_I"].to_f(I))
 
     cmd_TMC_DEBUG_MOVE_help = "Test TMC motion mode (motor must be free to move)"
     def cmd_TMC_DEBUG_MOVE(self, gcmd):
