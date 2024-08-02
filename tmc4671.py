@@ -1511,10 +1511,10 @@ class TMC4671:
         set_config_field(config, "PID_VELOCITY_LIMIT", 0x300000)
         set_config_field(config, "PID_FLUX_OFFSET", 0)
         pid_defaults = [
-            ("FLUX_P", 3.22, "CURRENT_P_n", 1),
-            ("FLUX_I", 1.101, "CURRENT_I_n", 1),
-            ("TORQUE_P", 3.22, "CURRENT_P_n", 1),
-            ("TORQUE_I", 1.101, "CURRENT_I_n", 1),
+            ("FLUX_P", 2.1, "CURRENT_P_n", 1),
+            ("FLUX_I", 0.290, "CURRENT_I_n", 1),
+            ("TORQUE_P", 2.1, "CURRENT_P_n", 1),
+            ("TORQUE_I", 0.290, "CURRENT_I_n", 1),
             ("VELOCITY_P", 3.0, "VELOCITY_P_n", 1),
             ("VELOCITY_I", 0.5, "VELOCITY_I_n", 1),
             ("POSITION_P", 2.5, "POSITION_P_n", 1),
