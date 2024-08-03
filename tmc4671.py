@@ -1149,6 +1149,8 @@ class TMCErrorCheck:
     def _query_status(self):
         try:
             status = self.mcu_tmc.get_register("STATUS_FLAGS")
+            fmt = self.fields.pretty_format("STATUS_FLAGS", status)
+            logging.info("TMC 4671 '%s' raw %s", self.stepper_name, fmt)
             if status & self.status_warn_mask != self.last_status & self.status_warn_mask:
                 fmt = self.fields.pretty_format("STATUS_FLAGS", status)
                 logging.info("TMC 4671 '%s' reports %s", self.stepper_name, fmt)
@@ -1239,10 +1241,13 @@ class TMCVirtualPinHelper:
         # to driver boards.
         self.status_mask_entries = config.getlist("homing_mask",
                                                   ["PID_IQ_OUTPUT_LIMIT",
-                                                   "PID_ID_OUTPUT_LIMIT",
-                                                   "PID_IQ_ERRSUM_LIMIT",
-                                                   "PID_ID_ERRSUM_LIMIT",
-                                                   "PID_V_OUTPUT_LIMIT",
+                                                   #"PID_ID_OUTPUT_LIMIT",
+                                                   #"PID_IQ_ERRSUM_LIMIT",
+                                                   #"PID_ID_ERRSUM_LIMIT",
+                                                   "PID_IQ_TARGET_LIMIT",
+                                                   "PID_ID_TARGET_LIMIT",
+                                                   #"PID_X_OUTPUT_LIMIT",
+                                                   #"PID_V_OUTPUT_LIMIT",
                                                    "REF_SW_R",
                                                    "REF_SW_L"])
         self.status_mask = 0
@@ -1252,6 +1257,7 @@ class TMCVirtualPinHelper:
                                                      "STATUS_FLAGS")
         # Register virtual_endstop pin
         name_parts = config.get_name().split()
+        self.name = "_".join(name_parts)
         ppins = self.printer.lookup_object("pins")
         ppins.register_chip("%s_%s" % (name_parts[0], name_parts[-1]), self)
     def setup_pin(self, pin_type, pin_params):
@@ -1273,13 +1279,23 @@ class TMCVirtualPinHelper:
     def handle_homing_move_begin(self, hmove):
         if self.mcu_endstop not in hmove.get_mcu_endstops():
             return
+        #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 3000)
         self.current_helper.set_current(self.current_helper.get_homing_current())
+        self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         self.mcu_tmc.write_field("STATUS_MASK", self.status_mask)
+        status = self.mcu_tmc.get_register("STATUS_FLAGS")
+        fmt = self.fields.pretty_format("STATUS_FLAGS", status)
+        logging.info("TMC 4671 '%s' status at homing start %s", self.name, fmt)
     def handle_homing_move_end(self, hmove):
+        status = self.mcu_tmc.get_register("STATUS_FLAGS")
+        fmt = self.fields.pretty_format("STATUS_FLAGS", status)
+        logging.info("TMC 4671 '%s' status at homing end %s", self.name, fmt)
         if self.mcu_endstop not in hmove.get_mcu_endstops():
             return
+        #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 0x300000)
         self.current_helper.set_current(self.current_helper.get_run_current())
         self.mcu_tmc.write_field("STATUS_MASK", 0)
+        self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
 
 
 ######################################################################
@@ -1425,7 +1441,7 @@ class TMC4671:
         self.step_helper = StepHelper(config, self.mcu_tmc)
         self.current_helper = CurrentHelper(config, self.mcu_tmc)
         self.error_helper = TMCErrorCheck(config, self.mcu_tmc)
-        TMCVirtualPinHelper(config, self.mcu_tmc, self.current_helper)
+        #TMCVirtualPinHelper(config, self.mcu_tmc, self.current_helper)
         gcode.register_mux_command("SET_TMC_FIELD", "STEPPER", self.name,
                                    self.cmd_SET_TMC_FIELD,
                                    desc=self.cmd_SET_TMC_FIELD_help)
@@ -1511,14 +1527,14 @@ class TMC4671:
         set_config_field(config, "PID_VELOCITY_LIMIT", 0x300000)
         set_config_field(config, "PID_FLUX_OFFSET", 0)
         pid_defaults = [
-            ("FLUX_P", 2.1, "CURRENT_P_n", 1),
-            ("FLUX_I", 0.290, "CURRENT_I_n", 1),
-            ("TORQUE_P", 2.1, "CURRENT_P_n", 1),
-            ("TORQUE_I", 0.290, "CURRENT_I_n", 1),
-            ("VELOCITY_P", 3.0, "VELOCITY_P_n", 1),
-            ("VELOCITY_I", 0.5, "VELOCITY_I_n", 1),
-            ("POSITION_P", 2.5, "POSITION_P_n", 1),
-            ("POSITION_I", 0, "POSITION_I_n", 1)
+            ("FLUX_P", 2.39, "CURRENT_P_n", 1),
+            ("FLUX_I", 0.175, "CURRENT_I_n", 1),
+            ("TORQUE_P", 2.39, "CURRENT_P_n", 1),
+            ("TORQUE_I", 0.175, "CURRENT_I_n", 1),
+            ("VELOCITY_P", 2.0, "VELOCITY_P_n", 1),
+            ("VELOCITY_I", 0.0, "VELOCITY_I_n", 1),
+            ("POSITION_P", 0.5, "POSITION_P_n", 1),
+            ("POSITION_I", 0.0, "POSITION_I_n", 1)
             ]
         self.pid_helpers = {n: PIDHelper(config, self.mcu_tmc, n, v, nn, nv)
                             for n, v, nn, nv in pid_defaults}
@@ -1562,6 +1578,11 @@ class TMC4671:
                 self._write_field("ABN_DECODER_COUNT", 0)
                 self._write_field("PID_POSITION_TARGET", 0)
                 self.alignment_done = True
+            # Do this every time, may have moved while disabled
+            self._write_field("PID_TORQUE_TARGET", 0)
+            self._write_field("PID_VELOCITY_TARGET", 0)
+            self._write_field("PID_POSITION_TARGET", 0)
+            self._write_field("PID_POSITION_ACTUAL", 0)
             self.error_helper.start_checks()
             self._write_field("MODE_MOTION", MotionMode.position_mode)
         except self.printer.command_error as e:
@@ -1573,6 +1594,10 @@ class TMC4671:
             # Switching off the enable line will turn off the drivers
             # but, belt and braces, stop the controller as well.
             self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+            self._write_field("PID_TORQUE_TARGET", 0)
+            self._write_field("PID_VELOCITY_TARGET", 0)
+            self._write_field("PID_POSITION_TARGET", 0)
+            self._write_field("PID_POSITION_ACTUAL", 0)
         except self.printer.command_error as e:
             self.printer.invoke_shutdown(str(e))
 
@@ -1816,10 +1841,10 @@ class TMC4671:
         self.enable_biquad("CONFIG_BIQUAD_V_ENABLE",
                            *biquad_tmc(*biquad_lpf(self.pwmfreq, 100, 2**-0.5)))
                            #*biquad_tmc(*biquad_notch(self.pwmfreq, 195, 2**-0.5)))
-        self._write_field("CONFIG_BIQUAD_F_ENABLE", 1)
-        self._write_field("CONFIG_BIQUAD_T_ENABLE", 1)
-        self._write_field("CONFIG_BIQUAD_V_ENABLE", 1)
-        self._write_field("CONFIG_BIQUAD_X_ENABLE", 1)
+        self._write_field("CONFIG_BIQUAD_F_ENABLE", 0)
+        self._write_field("CONFIG_BIQUAD_T_ENABLE", 0)
+        self._write_field("CONFIG_BIQUAD_V_ENABLE", 0)
+        self._write_field("CONFIG_BIQUAD_X_ENABLE", 0)
 
     def get_status(self, eventtime=None):
         if not self.init_done:
