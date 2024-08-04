@@ -46,7 +46,7 @@ Wiring:
 * `current_scale_ma_lsb` is 1.155 for the OpenFFBoard with ACS724T-30AB current sensors, and 1.272 for the EVAL-BOB
 * `run_current` should be total peak current, which means 2.8 times the rated current for a stepper motor, maximum. For BLDC, calculate this from the peak power dissipation, if no rated current is given, then multiply by 3.4. Yes, this gives some very large-seeming current values, but the 4671 will not use them except very briefly.
 * Configure the matching stepper section with appropriate full_steps_per_rotation and microsteps. Both must be powers of two, and their product must be less than 65536. 256 steps and 8 microsteps works well in most cases.
-* Note that there is currently a bug where the automatic enabling of drivers when homing will crash Klipper, so you must `set_stepper_enable stepper=stepper_x`, or `manual_stepper stepper=foo enable=1` to manually enable them before homing.
+* Note that there was bug where the automatic enabling of drivers when homing would crash Klipper. A workaround was to `set_stepper_enable stepper=stepper_x`, or `manual_stepper stepper=foo enable=1` to manually enable them before homing.
 
 The following is a working example for driving an LDO 2504-E1000 with OpenFFBoard drivers. Sensorless homing is commented out because it currently does not work, but is shown as an example:
 ```ini
