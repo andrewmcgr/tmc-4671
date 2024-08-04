@@ -1531,9 +1531,9 @@ class TMC4671:
             ("FLUX_I", 0.175, "CURRENT_I_n", 1),
             ("TORQUE_P", 2.39, "CURRENT_P_n", 1),
             ("TORQUE_I", 0.175, "CURRENT_I_n", 1),
-            ("VELOCITY_P", 2.0, "VELOCITY_P_n", 1),
+            ("VELOCITY_P", 1.4, "VELOCITY_P_n", 1),
             ("VELOCITY_I", 0.0, "VELOCITY_I_n", 1),
-            ("POSITION_P", 0.5, "POSITION_P_n", 1),
+            ("POSITION_P", 0.8, "POSITION_P_n", 1),
             ("POSITION_I", 0.0, "POSITION_I_n", 1)
             ]
         self.pid_helpers = {n: PIDHelper(config, self.mcu_tmc, n, v, nn, nv)
