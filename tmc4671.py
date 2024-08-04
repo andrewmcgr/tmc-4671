@@ -1150,7 +1150,7 @@ class TMCErrorCheck:
         try:
             status = self.mcu_tmc.get_register("STATUS_FLAGS")
             fmt = self.fields.pretty_format("STATUS_FLAGS", status)
-            logging.info("TMC 4671 '%s' raw %s", self.stepper_name, fmt)
+            #logging.info("TMC 4671 '%s' raw %s", self.stepper_name, fmt)
             if status & self.status_warn_mask != self.last_status & self.status_warn_mask:
                 fmt = self.fields.pretty_format("STATUS_FLAGS", status)
                 logging.info("TMC 4671 '%s' reports %s", self.stepper_name, fmt)
@@ -1763,8 +1763,8 @@ class TMC4671:
         self._write_field("PID_FLUX_OFFSET", old_flux_offset)
         self._write_field("PHI_E_SELECTION", old_phi_e_selection)
         # Analysis and logging
-        for r in c:
-            logging.info("%g,%s"%(float(r[0]-c[0][0])/1e9,','.join(map(str, r[1:]))))
+        #for r in c:
+        #    logging.info("%g,%s"%(float(r[0]-c[0][0])/1e9,','.join(map(str, r[1:]))))
         # At this point we can determine system model
         y0 = sum(float(a[1]) for a in c[0:n])/float(n)
         yinf = sum(float(a[1]) for a in c[3*n//2:2*n])/float(2*n - 3*n//2) - y0
