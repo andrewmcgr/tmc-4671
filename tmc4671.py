@@ -1616,14 +1616,15 @@ class TMC4671:
         self.printer.get_reactor().register_callback(cb)
 
     def _handle_connect(self):
+        print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         # Check for soft stepper enable/disable
         enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
-        enable_line.register_state_callback(self._handle_stepper_enable)
         # Send init
         try:
             self._init_registers()
         except self.printer.command_error as e:
             logging.info("TMC %s failed to init: %s", self.name, str(e))
+        enable_line.register_state_callback(self._handle_stepper_enable)
 
     def _handle_ready(self):
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
@@ -1632,6 +1633,18 @@ class TMC4671:
             self.mcu_tmc6100.set_register("GCONF",
                                           self.fields6100.set_field("disable", 0),
                                           print_time)
+        enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
+        enable_line.motor_enable(print_time)
+        # Just test the PID, as it also sets up the encoder offsets
+        self._write_field("PID_FLUX_TARGET", 0)
+        self._write_field("PID_TORQUE_TARGET", 0)
+        self._write_field("PID_VELOCITY_TARGET", 0)
+        P, I = self._tune_flux_pid(True, 1.0, print_time)
+        self._write_field("ABN_DECODER_COUNT", 0)
+        self._write_field("PID_POSITION_TARGET", 0)
+        print_time = self.printer.lookup_object('toolhead').get_last_move_time()
+        enable_line.motor_disable(print_time)
+        self.alignment_done = True
         self._write_field("STATUS_MASK", 0)
         self._write_field("PID_FLUX_TARGET", 0)
         self._write_field("PID_TORQUE_TARGET", 0)
