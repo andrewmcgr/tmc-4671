@@ -809,6 +809,9 @@ DumpGroups = {
     "PIDCONF": ["PID_FLUX_P_FLUX_I", "PID_TORQUE_P_TORQUE_I",
                 "PID_VELOCITY_P_VELOCITY_I", "PID_POSITION_P_POSITION_I",
                 ],
+    "MONITOR": [
+        "INTERIM_PIDIN_TARGET_TORQUE", "PID_VELOCITY_ACTUAL", "INTERIM_PIDIN_TARGET_VELOCITY",
+    ],
     "PID": ["PID_FLUX_P_FLUX_I", "PID_TORQUE_P_TORQUE_I",
             "PID_VELOCITY_P_VELOCITY_I", "PID_POSITION_P_POSITION_I",
             "PID_TORQUE_FLUX_TARGET", "PID_TORQUE_FLUX_OFFSET",
@@ -898,11 +901,11 @@ def biquad_Z_tmc(T, b0, b1, b2, a0, a1, a2):
     a2z = (T**2 + 2*a1*T + 4*a2) / den
     a1z = (2*(T**2) - 8*a2) / den
     e29 = 2**29
-    b0 = round(b0z * e29)
-    b1 = round(b1z * e29)
-    b2 = round(b2z * e29)
-    a1 = round(-a1z * e29)
-    a2 = round(-a2z * e29)
+    b0 = round(b0z/a0 * e29)
+    b1 = round(b1z/a0 * e29)
+    b2 = round(b2z/a0 * e29)
+    a1 = round(-a1z/a0 * e29)
+    a2 = round(-a2z/a0 * e29)
     # return in the same order as the config registers
     return a1, a2, b0, b1, b2
 
@@ -1161,6 +1164,10 @@ class TMCErrorCheck:
                 fmt = self.fields.pretty_format("STATUS_FLAGS", status)
                 raise self.printer.command_error("TMC 4671 '%s' reports error: %s"
                                                  % (self.stepper_name, fmt))
+            for reg_name in DumpGroups["MONITOR"]:
+                val = self.mcu_tmc.get_register(reg_name)
+                logging.info("TMC 4671 '%s' %s: %s", self.stepper_name,
+                             reg_name, self.fields.pretty_format(reg_name, val))
         except self.printer.command_error as e:
             self.printer.invoke_shutdown(str(e))
             return self.printer.get_reactor().NEVER
@@ -1517,24 +1524,21 @@ class TMC4671:
         set_config_field(config, "MODE_PID_SMPL", 2) # Advanced PID samples position at fPWM/3
         set_config_field(config, "MODE_PID_TYPE", 1) # Advanced PID mode
         set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 31500) # Voltage limit, 32768 = Vm
-        # Brake chopper defaults to off. Be very careful.
-        #set_config_field(config, "ADC_VM_LIMIT_HIGH", 0) # Brake threshold
-        #set_config_field(config, "ADC_VM_LIMIT_LOW", 0) # Brake off threshold
         # TODO: get this from the size of the printer
         set_config_field(config, "PID_POSITION_LIMIT_LOW", -0x10000000)
         set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x10000000)
         # TODO: Units, what should this be anyway?
-        set_config_field(config, "PID_VELOCITY_LIMIT", 0x300000)
+        set_config_field(config, "PID_VELOCITY_LIMIT", 0x3000000)
         set_config_field(config, "PID_FLUX_OFFSET", 0)
         pid_defaults = [
-            ("FLUX_P", 2.39, "CURRENT_P_n", 1),
-            ("FLUX_I", 0.175, "CURRENT_I_n", 1),
-            ("TORQUE_P", 2.39, "CURRENT_P_n", 1),
-            ("TORQUE_I", 0.175, "CURRENT_I_n", 1),
-            ("VELOCITY_P", 1.0, "VELOCITY_P_n", 1),
+            ("FLUX_P", 2.29, "CURRENT_P_n", 1),
+            ("FLUX_I", 0.21, "CURRENT_I_n", 1),
+            ("TORQUE_P", 2.29, "CURRENT_P_n", 1),
+            ("TORQUE_I", 0.21, "CURRENT_I_n", 1),
+            ("VELOCITY_P", 3.6, "VELOCITY_P_n", 1),
             ("VELOCITY_I", 0.0, "VELOCITY_I_n", 1),
-            ("POSITION_P", 0.8, "POSITION_P_n", 1),
-            ("POSITION_I", 0.0, "POSITION_I_n", 1)
+            ("POSITION_P", 1.0, "POSITION_P_n", 1),
+            ("POSITION_I", 0.009, "POSITION_I_n", 1)
             ]
         self.pid_helpers = {n: PIDHelper(config, self.mcu_tmc, n, v, nn, nv)
                             for n, v, nn, nv in pid_defaults}
@@ -1679,10 +1683,17 @@ class TMC4671:
         self._write_field("PWM_CHOP", 7)
         logging.info("TMC 4671 %s ADC offsets I0=%d I1=%d", self.name, i0_off, i1_off)
         logging.info("TMC 4671 %s ADC VM %s", self.name, str(self._sample_vm()))
+        # Now calibrate for brake chopper
         vml, vmh = self._sample_vm()
         vmr = abs(vmh - vml)
-        self._write_field("ADC_VM_LIMIT_HIGH", (vmh-32768)//20 + 2*vmr + vmh)
-        self._write_field("ADC_VM_LIMIT_LOW", vmr + vmh)
+        high = (vmh-32768)//20 + 2*vmr + vmh
+        if high < 65536:
+            self._write_field("ADC_VM_LIMIT_HIGH", high)
+            self._write_field("ADC_VM_LIMIT_LOW", vmr + vmh)
+        else:
+            # What else can we do but turn the brake off?
+            self._write_field("ADC_VM_LIMIT_HIGH", 0)
+            self._write_field("ADC_VM_LIMIT_LOW", 0)
 
     def _sample_adc(self, reg_name):
         self.printer.lookup_object('toolhead').dwell(0.2)
