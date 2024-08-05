@@ -1511,7 +1511,7 @@ class TMC4671:
         set_config_field(config, "HALL_BLANK", 2)
         set_config_field(config, "PHI_E_SELECTION", 3) # ABN
         set_config_field(config, "POSITION_SELECTION", 9) # ABN
-        set_config_field(config, "VELOCITY_SELECTION", 9) # ABN
+        set_config_field(config, "VELOCITY_SELECTION", 3) # ABN
         #set_config_field(config, "VELOCITY_METER_SELECTION", 0) # Default velocity meter
         set_config_field(config, "VELOCITY_METER_SELECTION", 1) # PWM frequency velocity meter
         set_config_field(config, "MODE_PID_SMPL", 2) # Advanced PID samples position at fPWM/3
@@ -1531,7 +1531,7 @@ class TMC4671:
             ("FLUX_I", 0.175, "CURRENT_I_n", 1),
             ("TORQUE_P", 2.39, "CURRENT_P_n", 1),
             ("TORQUE_I", 0.175, "CURRENT_I_n", 1),
-            ("VELOCITY_P", 1.4, "VELOCITY_P_n", 1),
+            ("VELOCITY_P", 1.0, "VELOCITY_P_n", 1),
             ("VELOCITY_I", 0.0, "VELOCITY_I_n", 1),
             ("POSITION_P", 0.8, "POSITION_P_n", 1),
             ("POSITION_I", 0.0, "POSITION_I_n", 1)
@@ -1678,6 +1678,11 @@ class TMC4671:
         self._write_field("ADC_I0_OFFSET", i0_off)
         self._write_field("PWM_CHOP", 7)
         logging.info("TMC 4671 %s ADC offsets I0=%d I1=%d", self.name, i0_off, i1_off)
+        logging.info("TMC 4671 %s ADC VM %s", self.name, str(self._sample_vm()))
+        vml, vmh = self._sample_vm()
+        vmr = abs(vmh - vml)
+        self._write_field("ADC_VM_LIMIT_HIGH", (vmh-32768)//20 + 2*vmr + vmh)
+        self._write_field("ADC_VM_LIMIT_LOW", vmr + vmh)
 
     def _sample_adc(self, reg_name):
         self.printer.lookup_object('toolhead').dwell(0.2)
@@ -1693,6 +1698,15 @@ class TMC4671:
             i0.append(v["ADC_I0_RAW"])
             self.printer.lookup_object('toolhead').dwell(0.0005)
         return median_low(i0), median_low(i1)
+
+    def _sample_vm(self):
+        self.printer.lookup_object('toolhead').dwell(0.2)
+        vm = []
+        n = 100
+        for i in range(n):
+            vm.append(self._read_field("ADC_VM_RAW"))
+            self.printer.lookup_object('toolhead').dwell(0.0005)
+        return min(vm), max(vm)
 
     def _tune_flux_pid(self, test_existing, derate, print_time):
         return self._tune_pid("FLUX", 1.5, derate, True, test_existing, print_time)
