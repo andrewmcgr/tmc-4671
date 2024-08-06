@@ -811,6 +811,7 @@ DumpGroups = {
                 ],
     "MONITOR": [
         "INTERIM_PIDIN_TARGET_TORQUE", "PID_VELOCITY_ACTUAL", "INTERIM_PIDIN_TARGET_VELOCITY",
+            "PID_POSITION_ACTUAL",
     ],
     "PID": ["PID_FLUX_P_FLUX_I", "PID_TORQUE_P_TORQUE_I",
             "PID_VELOCITY_P_VELOCITY_I", "PID_POSITION_P_POSITION_I",
@@ -1531,14 +1532,14 @@ class TMC4671:
         set_config_field(config, "PID_VELOCITY_LIMIT", 0x3000000)
         set_config_field(config, "PID_FLUX_OFFSET", 0)
         pid_defaults = [
-            ("FLUX_P", 2.29, "CURRENT_P_n", 1),
-            ("FLUX_I", 0.21, "CURRENT_I_n", 1),
-            ("TORQUE_P", 2.29, "CURRENT_P_n", 1),
-            ("TORQUE_I", 0.21, "CURRENT_I_n", 1),
-            ("VELOCITY_P", 3.6, "VELOCITY_P_n", 1),
+            ("FLUX_P", 2.10, "CURRENT_P_n", 1),
+            ("FLUX_I", 0.19, "CURRENT_I_n", 1),
+            ("TORQUE_P", 2.10, "CURRENT_P_n", 1),
+            ("TORQUE_I", 0.19, "CURRENT_I_n", 1),
+            ("VELOCITY_P", 1.6, "VELOCITY_P_n", 1),
             ("VELOCITY_I", 0.0, "VELOCITY_I_n", 1),
             ("POSITION_P", 1.0, "POSITION_P_n", 1),
-            ("POSITION_I", 0.009, "POSITION_I_n", 1)
+            ("POSITION_I", 0.0, "POSITION_I_n", 1)
             ]
         self.pid_helpers = {n: PIDHelper(config, self.mcu_tmc, n, v, nn, nv)
                             for n, v, nn, nv in pid_defaults}
@@ -1870,14 +1871,14 @@ class TMC4671:
         self.enable_biquad("CONFIG_BIQUAD_F_ENABLE",
                            *biquad_tmc(*biquad_lpf(self.pwmfreq, 9600, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_T_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 3600, 2**-0.5)))
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 9600, 2**-0.5)))
                            #*biquad_tmc(*biquad_notch(self.pwmfreq, 195, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_X_ENABLE",
                            *biquad_tmc(*biquad_lpf(
                                self.pwmfreq/(self._read_field("MODE_PID_SMPL")+1.0),
                                200, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_V_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 100, 2**-0.5)))
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 1000, 2**-0.5)))
                            #*biquad_tmc(*biquad_notch(self.pwmfreq, 195, 2**-0.5)))
         self._write_field("CONFIG_BIQUAD_F_ENABLE", 0)
         self._write_field("CONFIG_BIQUAD_T_ENABLE", 0)
