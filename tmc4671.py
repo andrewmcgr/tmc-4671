@@ -1532,13 +1532,13 @@ class TMC4671:
         set_config_field(config, "PID_VELOCITY_LIMIT", 0x3000000)
         set_config_field(config, "PID_FLUX_OFFSET", 0)
         pid_defaults = [
-            ("FLUX_P", 2.10, "CURRENT_P_n", 1),
-            ("FLUX_I", 0.19, "CURRENT_I_n", 1),
-            ("TORQUE_P", 2.10, "CURRENT_P_n", 1),
-            ("TORQUE_I", 0.19, "CURRENT_I_n", 1),
-            ("VELOCITY_P", 1.6, "VELOCITY_P_n", 1),
-            ("VELOCITY_I", 0.0, "VELOCITY_I_n", 1),
-            ("POSITION_P", 1.0, "POSITION_P_n", 1),
+            ("FLUX_P", 2.51, "CURRENT_P_n", 1),
+            ("FLUX_I", 0.22, "CURRENT_I_n", 1),
+            ("TORQUE_P", 2.51, "CURRENT_P_n", 1),
+            ("TORQUE_I", 0.22, "CURRENT_I_n", 1),
+            ("VELOCITY_P", 0.512, "VELOCITY_P_n", 1),
+            ("VELOCITY_I", 0.002, "VELOCITY_I_n", 1),
+            ("POSITION_P", 0.902, "POSITION_P_n", 1),
             ("POSITION_I", 0.0, "POSITION_I_n", 1)
             ]
         self.pid_helpers = {n: PIDHelper(config, self.mcu_tmc, n, v, nn, nv)
@@ -1818,7 +1818,7 @@ class TMC4671:
         theta = tp * (0.309 + 0.209 * math.exp(-0.61*r))
         tau1 = r*theta
         logging.info("TMC 4671 %s %s PID system model k=%g, theta=%g, tau1=%g"%(self.name, X, k, theta, tau1,))
-        Kc, taui = simc(k, theta, tau1, 16.0/25e3)
+        Kc, taui = simc(k, theta, tau1, 0.0005)
         # Account for sampling frequency
         Ki = Kc/(taui*2*25e3)
         Kc *= derate
@@ -1869,20 +1869,20 @@ class TMC4671:
         self._calibrate_adc(print_time)
         # setup filters
         self.enable_biquad("CONFIG_BIQUAD_F_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 9600, 2**-0.5)))
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 4600, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_T_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 9600, 2**-0.5)))
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 2500, 2**-0.5)))
                            #*biquad_tmc(*biquad_notch(self.pwmfreq, 195, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_X_ENABLE",
                            *biquad_tmc(*biquad_lpf(
                                self.pwmfreq/(self._read_field("MODE_PID_SMPL")+1.0),
                                200, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_V_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 1000, 2**-0.5)))
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 1500, 2**-0.5)))
                            #*biquad_tmc(*biquad_notch(self.pwmfreq, 195, 2**-0.5)))
-        self._write_field("CONFIG_BIQUAD_F_ENABLE", 0)
-        self._write_field("CONFIG_BIQUAD_T_ENABLE", 0)
-        self._write_field("CONFIG_BIQUAD_V_ENABLE", 0)
+        self._write_field("CONFIG_BIQUAD_F_ENABLE", 1)
+        self._write_field("CONFIG_BIQUAD_T_ENABLE", 1)
+        self._write_field("CONFIG_BIQUAD_V_ENABLE", 1)
         self._write_field("CONFIG_BIQUAD_X_ENABLE", 0)
 
     def get_status(self, eventtime=None):
