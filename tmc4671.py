@@ -1534,11 +1534,11 @@ class TMC4671:
         pid_defaults = [
             ("FLUX_P", 2.51, "CURRENT_P_n", 1),
             ("FLUX_I", 0.22, "CURRENT_I_n", 1),
-            ("TORQUE_P", 2.51, "CURRENT_P_n", 1),
-            ("TORQUE_I", 0.22, "CURRENT_I_n", 1),
-            ("VELOCITY_P", 0.512, "VELOCITY_P_n", 1),
-            ("VELOCITY_I", 0.002, "VELOCITY_I_n", 1),
-            ("POSITION_P", 0.902, "POSITION_P_n", 1),
+            ("TORQUE_P", 2.61, "CURRENT_P_n", 1),
+            ("TORQUE_I", 0.16, "CURRENT_I_n", 1),
+            ("VELOCITY_P", 0.312, "VELOCITY_P_n", 1),
+            ("VELOCITY_I", 0.0, "VELOCITY_I_n", 1),
+            ("POSITION_P", 0.992, "POSITION_P_n", 1),
             ("POSITION_I", 0.0, "POSITION_I_n", 1)
             ]
         self.pid_helpers = {n: PIDHelper(config, self.mcu_tmc, n, v, nn, nv)
@@ -1871,14 +1871,13 @@ class TMC4671:
         self.enable_biquad("CONFIG_BIQUAD_F_ENABLE",
                            *biquad_tmc(*biquad_lpf(self.pwmfreq, 4600, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_T_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 2500, 2**-0.5)))
-                           #*biquad_tmc(*biquad_notch(self.pwmfreq, 195, 2**-0.5)))
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 4600, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_X_ENABLE",
                            *biquad_tmc(*biquad_lpf(
                                self.pwmfreq/(self._read_field("MODE_PID_SMPL")+1.0),
                                200, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_V_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 1500, 2**-0.5)))
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 4600, 2**-0.5)))
                            #*biquad_tmc(*biquad_notch(self.pwmfreq, 195, 2**-0.5)))
         self._write_field("CONFIG_BIQUAD_F_ENABLE", 1)
         self._write_field("CONFIG_BIQUAD_T_ENABLE", 1)
