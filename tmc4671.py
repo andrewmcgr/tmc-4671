@@ -667,7 +667,7 @@ SignedFields = {"ADC_I1_SCALE", "ADC_I0_SCALE", "AENC_0_SCALE", "AENC_1_SCALE",
                 "PID_ERROR_PID_TORQUE_ERROR", "PID_ERROR_PID_FLUX_ERROR", "PID_ERROR_PID_VELOCITY_ERROR",
                 "PID_ERROR_PID_POSITION_ERROR", "PID_ERROR_PID_TORQUE_ERROR_SUM",
                 "PID_ERROR_PID_FLUX_ERROR_SUM", "PID_ERROR_PID_VELOCITY_ERROR_SUM",
-                "PID_ERROR_PID_POSITION_ERROR_SUM", "STEP_WIDTH"
+                "PID_ERROR_PID_POSITION_ERROR_SUM", "STEP_WIDTH",
                 "INTERIM_PIDIN_TARGET_TORQUE",
                 "INTERIM_PIDIN_TARGET_FLUX",
                 "INTERIM_PIDIN_TARGET_VELOCITY",
@@ -1559,10 +1559,10 @@ class TMC4671:
             ("FLUX_I", 0.009, "CURRENT_I_n", 1),
             ("TORQUE_P", 1.55, "CURRENT_P_n", 1),
             ("TORQUE_I", 0.009, "CURRENT_I_n", 1),
-            ("VELOCITY_P", 1.9, "VELOCITY_P_n", 0),
-            ("VELOCITY_I", 0.1, "VELOCITY_I_n", 1),
-            ("POSITION_P", 1.56, "POSITION_P_n", 0),
-            ("POSITION_I", 0.488, "POSITION_I_n", 1)
+            ("VELOCITY_P", 0.758, "VELOCITY_P_n", 0),
+            ("VELOCITY_I", 0.007, "VELOCITY_I_n", 1),
+            ("POSITION_P", 0.672, "POSITION_P_n", 0),
+            ("POSITION_I", 0.0, "POSITION_I_n", 1)
             ]
         self.pid_helpers = {n: PIDHelper(config, self.mcu_tmc, n, v, nn, nv)
                             for n, v, nn, nv in pid_defaults}
