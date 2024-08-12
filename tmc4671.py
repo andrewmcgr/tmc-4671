@@ -810,7 +810,10 @@ DumpGroups = {
                 "PID_VELOCITY_P_VELOCITY_I", "PID_POSITION_P_POSITION_I",
                 ],
     "MONITOR": [
-        "INTERIM_PIDIN_TARGET_TORQUE", "PID_VELOCITY_ACTUAL", "INTERIM_PIDIN_TARGET_VELOCITY",
+            "ADC_IWY_IUX",
+            "ADC_IV",
+            "PID_TORQUE_FLUX_ACTUAL",
+            "INTERIM_PIDIN_TARGET_TORQUE", "PID_VELOCITY_ACTUAL", "INTERIM_PIDIN_TARGET_VELOCITY",
             "PID_POSITION_ACTUAL",
     ],
     "PID": ["PID_FLUX_P_FLUX_I", "PID_TORQUE_P_TORQUE_I",
@@ -1187,11 +1190,11 @@ class TMCErrorCheck:
                 fmt = self.fields.pretty_format("STATUS_FLAGS", status)
                 raise self.printer.command_error("TMC 4671 '%s' reports error: %s"
                                                  % (self.stepper_name, fmt))
-            for reg_name in DumpGroups["MONITOR"]:
-                val = self.mcu_tmc.get_register(reg_name)
-                self.monitor_data.update(self.fields.get_reg_fields(reg_name, val))
-                logging.info("TMC 4671 '%s' %s: %s", self.stepper_name,
-                             reg_name, self.fields.pretty_format(reg_name, val))
+            #for reg_name in DumpGroups["MONITOR"]:
+            #    val = self.mcu_tmc.get_register(reg_name)
+            #    self.monitor_data.update(self.fields.get_reg_fields(reg_name, val))
+            #    logging.info("TMC 4671 '%s' %s: %s", self.stepper_name,
+            #                 reg_name, self.fields.pretty_format(reg_name, val))
         except self.printer.command_error as e:
             self.printer.invoke_shutdown(str(e))
             return self.printer.get_reactor().NEVER
@@ -1242,10 +1245,10 @@ class TMCErrorCheck:
             temp = (0.003354016) + math.log(temp / 10000.0) / 4300.0
             temp = 1.0 / temp
             temp -= 273.15
-        logging.info("TMC %s temp: %g", self.stepper_name, temp)
+        #logging.info("TMC %s temp: %g", self.stepper_name, temp)
     def get_status(self, eventtime=None):
         res = {'drv_status': None, 'temperature': None}
-        res.update(self.monitor_data)
+        #res.update(self.monitor_data)
         if self.check_timer is None:
             return res
         temp = None
@@ -1253,7 +1256,6 @@ class TMCErrorCheck:
             # Convert it to temp here
             temp = self._convert_temp(self.adc_temp)
         res['temperature'] = temp
-        logging.info("TMC %s get_status: %s %s", self.stepper_name, str(res), str(self.monitor_data))
         return res
 
 
@@ -1561,13 +1563,13 @@ class TMC4671:
         set_config_field(config, "PID_POSITION_LIMIT_LOW", -0x10000000)
         set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x10000000)
         # TODO: Units, what should this be anyway?
-        set_config_field(config, "PID_VELOCITY_LIMIT", 0x40000)
+        set_config_field(config, "PID_VELOCITY_LIMIT", 0x100000)
         set_config_field(config, "PID_FLUX_OFFSET", 0)
         pid_defaults = [
-            ("FLUX_P", 1.55, "CURRENT_P_n", 1),
-            ("FLUX_I", 0.009, "CURRENT_I_n", 1),
-            ("TORQUE_P", 1.55, "CURRENT_P_n", 1),
-            ("TORQUE_I", 0.009, "CURRENT_I_n", 1),
+            ("FLUX_P", 2.2, "CURRENT_P_n", 1),
+            ("FLUX_I", 0.007, "CURRENT_I_n", 1),
+            ("TORQUE_P", 2.2, "CURRENT_P_n", 1),
+            ("TORQUE_I", 0.007, "CURRENT_I_n", 1),
             ("VELOCITY_P", 0.758, "VELOCITY_P_n", 0),
             ("VELOCITY_I", 0.0, "VELOCITY_I_n", 1),
             ("POSITION_P", 0.672, "POSITION_P_n", 0),
@@ -1575,6 +1577,10 @@ class TMC4671:
             ]
         self.pid_helpers = {n: PIDHelper(config, self.mcu_tmc, n, v, nn, nv)
                             for n, v, nn, nv in pid_defaults}
+        self.monitor_data = {n: None
+                             for reg_name in DumpGroups["MONITOR"]
+                             for n in self.fields.get_reg_fields(reg_name, 0)
+                             }
 
     def _read_field(self, field):
         reg_name = self.fields.lookup_register(field)
@@ -1753,7 +1759,7 @@ class TMC4671:
         return min(vm), max(vm)
 
     def _tune_flux_pid(self, test_existing, derate, print_time):
-        return self._tune_pid("FLUX", 1.5, derate, True, test_existing, print_time)
+        return self._tune_pid("FLUX", 2.5, derate, True, test_existing, print_time)
 
     def _tune_torque_pid(self, test_existing, derate, print_time):
         return self._tune_pid("TORQUE", 1.0, derate, True, test_existing, print_time)
@@ -1852,7 +1858,7 @@ class TMC4671:
         logging.info("TMC 4671 %s %s PID system model k=%g, theta=%g, tau1=%g"%(self.name, X, k, theta, tau1,))
         Kc, taui = simc(k, theta, tau1, 0.001*derate)
         # Account for sampling frequency
-        Ki = Kc/(taui*2*self.pwmfreq)
+        Ki = Kc/(taui*0.5*self.pwmfreq)
         logging.info("TMC 4671 %s %s PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, X, Kc, taui, Ki))
         if not test_existing:
             self._write_field("PID_%s_P"%X, self.pid_helpers["%s_P"%X].to_f(Kc))
@@ -1924,6 +1930,10 @@ class TMC4671:
                'current_v': current[3],
                'current_wy': current[4],
                }
+        for reg_name in DumpGroups["MONITOR"]:
+            val = self.mcu_tmc.get_register(reg_name)
+            self.monitor_data.update(self.fields.get_reg_fields(reg_name, val))
+        res.update(self.monitor_data)
         res.update(self.error_helper.get_status(eventtime))
         return res
 
