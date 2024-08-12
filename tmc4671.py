@@ -1028,7 +1028,7 @@ class FieldHelper:
         return "%-11s %08x%s" % (reg_name + ":", reg_value, "".join(fields))
     def get_reg_fields(self, reg_name, reg_value):
         # Provide fields found in a register
-        reg_fields = self.all_fields.get(reg_name, {})
+        reg_fields = self.all_fields.get(reg_name, {reg_name: 0})
         return {field_name: self.get_field(field_name, reg_value, reg_name)
                 for field_name, mask in reg_fields.items()}
 
@@ -1155,6 +1155,10 @@ class TMCErrorCheck:
                                                   "ADC_I_CLIPPED",
                                                   "AENC_CLIPPED"])
         self.last_status = 0
+        self.monitor_data = {n: None
+                             for reg_name in DumpGroups["MONITOR"]
+                             for n in self.fields.get_reg_fields(reg_name, 0)
+                             }
         # Setup for temperature query
         self.adc_temp = None
         self.adc_temp_reg = config.getchoice("adc_temp_reg",
@@ -1185,6 +1189,7 @@ class TMCErrorCheck:
                                                  % (self.stepper_name, fmt))
             for reg_name in DumpGroups["MONITOR"]:
                 val = self.mcu_tmc.get_register(reg_name)
+                self.monitor_data.update(self.fields.get_reg_fields(reg_name, val))
                 logging.info("TMC 4671 '%s' %s: %s", self.stepper_name,
                              reg_name, self.fields.pretty_format(reg_name, val))
         except self.printer.command_error as e:
@@ -1239,13 +1244,17 @@ class TMCErrorCheck:
             temp -= 273.15
         logging.info("TMC %s temp: %g", self.stepper_name, temp)
     def get_status(self, eventtime=None):
+        res = {'drv_status': None, 'temperature': None}
+        res.update(self.monitor_data)
         if self.check_timer is None:
-            return {'drv_status': None, 'temperature': None}
+            return res
         temp = None
         if self.adc_temp is not None:
             # Convert it to temp here
-            temp = self._convert_temp(adc)
-        return {'drv_status': None, 'temperature': temp}
+            temp = self._convert_temp(self.adc_temp)
+        res['temperature'] = temp
+        logging.info("TMC %s get_status: %s %s", self.stepper_name, str(res), str(self.monitor_data))
+        return res
 
 
 ######################################################################
@@ -1560,7 +1569,7 @@ class TMC4671:
             ("TORQUE_P", 1.55, "CURRENT_P_n", 1),
             ("TORQUE_I", 0.009, "CURRENT_I_n", 1),
             ("VELOCITY_P", 0.758, "VELOCITY_P_n", 0),
-            ("VELOCITY_I", 0.007, "VELOCITY_I_n", 1),
+            ("VELOCITY_I", 0.0, "VELOCITY_I_n", 1),
             ("POSITION_P", 0.672, "POSITION_P_n", 0),
             ("POSITION_I", 0.0, "POSITION_I_n", 1)
             ]
@@ -1915,7 +1924,7 @@ class TMC4671:
                'current_v': current[3],
                'current_wy': current[4],
                }
-        #res.update(self.echeck_helper.get_status(eventtime))
+        res.update(self.error_helper.get_status(eventtime))
         return res
 
     cmd_INIT_TMC_help = "Initialize TMC stepper driver registers"
