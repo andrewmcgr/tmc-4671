@@ -1127,7 +1127,7 @@ def StepHelper(config, mcu_tmc):
     mres = sconfig.getchoice('microsteps', steps, default=256)
     if res * mres > 65536:
         raise config.error(
-            "Product of res and mres must be less than 65536 for [%s]"
+            "Product of res and mres must not be more than 65536 for [%s]"
             % (stepper_name,))
     step_width = 65536 // (res * mres)
     fields.set_field("STEP_WIDTH", step_width)
@@ -1512,8 +1512,8 @@ class TMC4671:
         # This should not really be set to anything else
         # therefore not providing convenience interface
         #maxcnt = 3999 # 25 kHz
-        maxcnt = 1999 # 50 kHz
-        #maxcnt = 999 # 100 kHz
+        #maxcnt = 1999 # 50 kHz
+        maxcnt = 999 # 100 kHz
         set_config_field(config, "PWM_MAXCNT", maxcnt) # 25 kHz
         # These are used later by filter definitions
         self.pwmfreq = 4.0 * TMC_FREQUENCY / (maxcnt + 1.0)
@@ -1566,13 +1566,13 @@ class TMC4671:
         set_config_field(config, "PID_VELOCITY_LIMIT", 0x100000)
         set_config_field(config, "PID_FLUX_OFFSET", 0)
         pid_defaults = [
-            ("FLUX_P", 2.2, "CURRENT_P_n", 1),
-            ("FLUX_I", 0.007, "CURRENT_I_n", 1),
-            ("TORQUE_P", 2.2, "CURRENT_P_n", 1),
-            ("TORQUE_I", 0.007, "CURRENT_I_n", 1),
-            ("VELOCITY_P", 0.758, "VELOCITY_P_n", 0),
+            ("FLUX_P", 10.2, "CURRENT_P_n", 0),
+            ("FLUX_I", 0.057, "CURRENT_I_n", 1),
+            ("TORQUE_P", 11.8, "CURRENT_P_n", 0),
+            ("TORQUE_I", 0.038, "CURRENT_I_n", 1),
+            ("VELOCITY_P", 1.5, "VELOCITY_P_n", 0),
             ("VELOCITY_I", 0.0, "VELOCITY_I_n", 1),
-            ("POSITION_P", 0.672, "POSITION_P_n", 0),
+            ("POSITION_P", 1.1, "POSITION_P_n", 0),
             ("POSITION_I", 0.0, "POSITION_I_n", 1)
             ]
         self.pid_helpers = {n: PIDHelper(config, self.mcu_tmc, n, v, nn, nv)
@@ -1857,8 +1857,9 @@ class TMC4671:
         tau1 = r*theta
         logging.info("TMC 4671 %s %s PID system model k=%g, theta=%g, tau1=%g"%(self.name, X, k, theta, tau1,))
         Kc, taui = simc(k, theta, tau1, 0.001*derate)
-        # Account for sampling frequency
-        Ki = Kc/(taui*0.5*self.pwmfreq)
+        # Account for sampling frequency etc
+        Kc *= 2.0
+        Ki = Kc/(taui*self.pwmfreq)
         logging.info("TMC 4671 %s %s PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, X, Kc, taui, Ki))
         if not test_existing:
             self._write_field("PID_%s_P"%X, self.pid_helpers["%s_P"%X].to_f(Kc))
@@ -1905,19 +1906,19 @@ class TMC4671:
         self._calibrate_adc(print_time)
         # setup filters
         self.enable_biquad("CONFIG_BIQUAD_F_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 3600, 2**-0.5)))
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 9600, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_T_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 3600, 2**-0.5)))
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 9600, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_X_ENABLE",
                            *biquad_tmc(*biquad_lpf(
                                self.pwmfreq/(self._read_field("MODE_PID_SMPL")+1.0),
                                3200, 2**-0.5)))
         self.enable_biquad("CONFIG_BIQUAD_V_ENABLE",
-                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 80, 2**-0.5)))
+                           *biquad_tmc(*biquad_lpf(self.pwmfreq, 8000, 2**-0.5)))
                            #*biquad_tmc(*biquad_lpf_tmc(self.pwmfreq, 4500, 2.0)))
                            #*biquad_tmc(*biquad_apf(self.pwmfreq, 296, 2**-0.5)))
-        self._write_field("CONFIG_BIQUAD_F_ENABLE", 1)
-        self._write_field("CONFIG_BIQUAD_T_ENABLE", 1)
+        self._write_field("CONFIG_BIQUAD_F_ENABLE", 0)
+        self._write_field("CONFIG_BIQUAD_T_ENABLE", 0)
         self._write_field("CONFIG_BIQUAD_V_ENABLE", 0)
         self._write_field("CONFIG_BIQUAD_X_ENABLE", 0)
 
