@@ -11,7 +11,7 @@ import logging, collections
 import math
 from time import monotonic_ns
 from enum import IntEnum
-from statistics import median_low
+from statistics import median_low, mean
 from . import bus, tmc
 
 # The 4671 has a 25 MHz external clock
@@ -1414,7 +1414,7 @@ class MCU_TMC_SPI:
                 if v == val:
                     return
         raise self.printer.command_error(
-            "Unable to write tmc spi '%s' register %s" % (self.name, reg_name))
+            "Unable to write tmc spi '%s' address register %s (last read %x)" % (self.name, reg_name, v))
     def get_tmc_frequency(self):
         return self.tmc_frequency
     def read_field(self, field):
@@ -1442,6 +1442,7 @@ class TMC4671:
         self.printer = config.get_printer()
         self.stepper_name = ' '.join(config.get_name().split()[1:])
         self.name = config.get_name().split()[-1]
+        self.mutex = self.printer.get_reactor().mutex()
         self.init_done = False
         self.alignment_done = False
         self.fields = FieldHelper(Fields,
@@ -1460,6 +1461,12 @@ class TMC4671:
         else:
             self.fields6100 = None
             self.mcu_tmc6100 = None
+        # These will be calibrated later, but this is roughly correct
+        self.vm_offset = 32768
+        self.vm_range = round(32767/2.5)
+        # Correct for the OpenFFBoard
+        self.voltage_scale = config.getfloat('voltage_scale_ratio', 43.64,
+                                       above=0., maxval=10)
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
                                    TMC_FREQUENCY, pin_option="cs_pin")
         self.read_translate = None
@@ -1566,10 +1573,10 @@ class TMC4671:
         set_config_field(config, "PID_VELOCITY_LIMIT", 0x100000)
         set_config_field(config, "PID_FLUX_OFFSET", 0)
         pid_defaults = [
-            ("FLUX_P", 10.2, "CURRENT_P_n", 0),
-            ("FLUX_I", 0.057, "CURRENT_I_n", 1),
-            ("TORQUE_P", 11.8, "CURRENT_P_n", 0),
-            ("TORQUE_I", 0.038, "CURRENT_I_n", 1),
+            ("FLUX_P", 2.89, "CURRENT_P_n", 0),
+            ("FLUX_I", 0.009, "CURRENT_I_n", 1),
+            ("TORQUE_P", 2.89, "CURRENT_P_n", 0),
+            ("TORQUE_I", 0.009, "CURRENT_I_n", 1),
             ("VELOCITY_P", 1.5, "VELOCITY_P_n", 0),
             ("VELOCITY_I", 0.0, "VELOCITY_I_n", 1),
             ("POSITION_P", 1.1, "POSITION_P_n", 0),
@@ -1719,20 +1726,32 @@ class TMC4671:
         self._write_field("ADC_I0_SCALE", 256)
         self._write_field("ADC_I1_OFFSET", i1_off)
         self._write_field("ADC_I0_OFFSET", i0_off)
-        self._write_field("PWM_CHOP", 7)
+        # Calibrate for VM measurement
+        # Chip errata? This doesn't work.
+        #self._write_field("CFG_ADC_VM", 5)
+        #vml, vmh = self._sample_vm()
+        #self.vm_offset = round(mean((vml, vmh)))
+        #self._write_field("CFG_ADC_VM", 7)
+        #vml, vmh = self._sample_vm()
+        #self.vm_range = self.vm_offset - round(mean((vml, vmh)))
+        #self._write_field("CFG_ADC_VM", 4)
         logging.info("TMC 4671 %s ADC offsets I0=%d I1=%d", self.name, i0_off, i1_off)
-        logging.info("TMC 4671 %s ADC VM %s", self.name, str(self._sample_vm()))
+        logging.info("TMC 4671 %s ADC VM offset=%d range=%s VM=%g", self.name,
+                     self.vm_offset, self.vm_range, self._read_vm())
         # Now calibrate for brake chopper
         vml, vmh = self._sample_vm()
         vmr = abs(vmh - vml)
-        high = (vmh-32768)//20 + 2*vmr + vmh
+        high = (vmh-self.vm_offset)//20 + 2*vmr + vmh
         if high < 65536:
             self._write_field("ADC_VM_LIMIT_HIGH", high)
             self._write_field("ADC_VM_LIMIT_LOW", vmr + vmh)
+            logging.info("TMC 4671 %s brake thresholds low=%g V high=%g V", self.name,
+                         self._convert_vm(vmr+vmh), self._convert_vm(high))
         else:
             # What else can we do but turn the brake off?
             self._write_field("ADC_VM_LIMIT_HIGH", 0)
             self._write_field("ADC_VM_LIMIT_LOW", 0)
+        self._write_field("PWM_CHOP", 7)
 
     def _sample_adc(self, reg_name):
         self.printer.lookup_object('toolhead').dwell(0.2)
@@ -1758,6 +1777,12 @@ class TMC4671:
             self.printer.lookup_object('toolhead').dwell(0.0005)
         return min(vm), max(vm)
 
+    def _convert_vm(self, val):
+        return ((val - self.vm_offset) / float(self.vm_range)) * self.voltage_scale
+
+    def _read_vm(self):
+        return self._convert_vm(self._read_field("ADC_VM_RAW"))
+
     def _tune_flux_pid(self, test_existing, derate, print_time):
         return self._tune_pid("FLUX", 2.5, derate, True, test_existing, print_time)
 
@@ -1765,105 +1790,125 @@ class TMC4671:
         return self._tune_pid("TORQUE", 1.0, derate, True, test_existing, print_time)
 
     def _tune_pid(self, X, Kc, derate, offsets, test_existing, print_time):
-        ch = self.current_helper
-        dwell = self.printer.lookup_object('toolhead').dwell
-        old_mode = self._read_field("MODE_MOTION")
-        old_phi_e_selection = self._read_field("PHI_E_SELECTION")
-        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-        limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
-        old_flux_offset = self._read_field("PID_FLUX_OFFSET")
-        self._write_field("PHI_E_SELECTION", 1) # external mode, so it won't change.
-        self._write_field("PHI_E_EXT", 0) # and, set this to be PHI_E = 0
-        self._write_field("UD_EXT", limit_cur)
-        self._write_field("UQ_EXT", 0)
-        dwell(0.2)
-        self._write_field("PID_TORQUE_TARGET", 0)
-        self._write_field("PID_VELOCITY_TARGET", 0)
-        self._write_field("PID_POSITION_TARGET", 0)
-        self._write_field("PID_POSITION_ACTUAL", 0)
-        self._write_field("PWM_CHOP", 7)
-        self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
-        for i in range(5):
-            dwell(0.1)
+        with self.mutex:
+            ch = self.current_helper
+            dwell = self.printer.lookup_object('toolhead').dwell
+            old_mode = self._read_field("MODE_MOTION")
+            old_phi_e_selection = self._read_field("PHI_E_SELECTION")
+            self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+            limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
+            old_flux_offset = self._read_field("PID_FLUX_OFFSET")
+            self._write_field("PHI_E_EXT", 0) # and, set this to be PHI_E = 0
+            self._write_field("PHI_E_SELECTION", 1) # external mode, so it won't change.
+            # Start at some low voltage and see if we can read a current
+            test_U = round(self.vm_range/self.voltage_scale) # Should be about 1V
+            self._write_field("UQ_EXT", 0)
+            self._write_field("UD_EXT", test_U)
+            self._write_field("PID_TORQUE_TARGET", 0)
+            self._write_field("PID_VELOCITY_TARGET", 0)
+            self._write_field("PID_POSITION_TARGET", 0)
+            self._write_field("PID_POSITION_ACTUAL", 0)
+            self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
+            self._write_field("PWM_CHOP", 7)
+            dwell(0.05)
+            c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
             self._write_field("PWM_CHOP", 0)
+            logging.info("TMC 4671 '%s' initial I %s", self.stepper_name, str(self.current_helper.get_current()))
+            if max(abs(iux), abs(iwy)) < 1e-6:
+                # something is horribly wrong
+                return
+            # Ok, calculate a voltage that will give us about a third of the configured current limit
+            test2_U = round((c / 3.0) * test_U / max(abs(iux), abs(iwy)))
+            logging.info("TMC 4671 '%s' test U %g %g", self.stepper_name, test_U, test2_U)
+            self._write_field("UD_EXT", test2_U)
+            self._write_field("PWM_CHOP", 7)
+            dwell(0.05)
+            c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
+            logging.info("TMC 4671 '%s' alignment I %s", self.stepper_name, str(self.current_helper.get_current()))
+            test2_U/(self.vm_range/self.voltage_scale)
+            R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
+            logging.info("TMC 4671 '%s' est. motor R=%g", self.stepper_name, R)
+            for i in range(5):
+                dwell(0.1)
+                self._write_field("PWM_CHOP", 0)
+                # Give it some time to settle
+                dwell(0.1)
+                self._write_field("PWM_CHOP", 7)
             # Give it some time to settle
             dwell(0.1)
-            self._write_field("PWM_CHOP", 7)
-        # Give it some time to settle
-        dwell(0.4)
-        if offsets:
-            # While we're here, set the offsets
-            self._write_field("HALL_PHI_E_OFFSET", -self._read_field("HALL_PHI_E")%65536),
-            self._write_field("ABN_DECODER_COUNT", 0)
-            self._write_field("ABN_DECODER_PHI_E_OFFSET", 0)
-        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-        # Give it some time to settle
-        dwell(0.2)
-        self._write_field("MODE_MOTION", MotionMode.torque_mode)
-        test_cur = limit_cur #// 2
-        old_cur = self._read_field("PID_%s_ACTUAL"%X)
-        dwell(0.2)
-        if not test_existing:
-            Kc0 = Kc
-            self._write_field("PID_%s_P"%X, self.pid_helpers["%s_P"%X].to_f(Kc0))
-            self._write_field("PID_%s_I"%X, self.pid_helpers["%s_I"%X].to_f(0.0))
-        else:
-            Kc0 = from_q4_12(self._read_field("PID_%s_P"%X))
-        # Do a setpoint change experiment
-        self._write_field("PID_%s_TARGET"%X, 0)
-        logging.info("test_cur = %d"%test_cur)
-        n = 200
-        c = self._dump_pid(n, X)
-        self._write_field("PID_%s_TARGET"%X, test_cur)
-        c += self._dump_pid(n, X)
-        # Experiment over, switch off
-        self._write_field("PID_%s_TARGET"%X, 0)
-        # Put motion config back how it was
-        self._write_field("PID_TORQUE_TARGET", 0)
-        self._write_field("PID_VELOCITY_TARGET", 0)
-        self._write_field("PID_POSITION_TARGET", 0)
-        self._write_field("PID_POSITION_ACTUAL", 0)
-        self._write_field("MODE_MOTION", old_mode)
-        self._write_field("PID_FLUX_OFFSET", old_flux_offset)
-        self._write_field("PHI_E_SELECTION", old_phi_e_selection)
-        # Analysis and logging
-        #for r in c:
-        #    logging.info("%g,%s"%(float(r[0]-c[0][0])/1e9,','.join(map(str, r[1:]))))
-        # At this point we can determine system model
-        y0 = sum(float(a[1]) for a in c[0:n])/float(n)
-        yinf = sum(float(a[1]) for a in c[3*n//2:2*n])/float(2*n - 3*n//2) - y0
-        if yinf < 0.0:
-            # Wups, turned out negative...
-            yinf *= -1.0
-            c = [(t, -y) for t, y in c]
-        yp = -100000 # Not a possible value
-        tp = 0
-        for tpt, ypt in c[n+1:-1]:
-            if ypt < yp:
-                break
-            yp, tp = ypt, tpt
-        yp -= y0
-        # It is better to overestimate tp than under.
-        #tp -= float(c[n][0] + c[n+1][0])/2.0
-        tp -= c[n][0]
-        tp *= 1e-9 # it was in nanoseconds, we want seconds
-        D = (yp - yinf) / yinf
-        B = abs((test_cur-yinf) / yinf)
-        A = 1.152*D**2 - 1.607*D + 1
-        r = 2*A / B
-        logging.info("yinf = %g, yp = %g, tp = %g"%(yinf, yp, tp))
-        k = 1.0 / (Kc0*B)
-        theta = tp * (0.309 + 0.209 * math.exp(-0.61*r))
-        tau1 = r*theta
-        logging.info("TMC 4671 %s %s PID system model k=%g, theta=%g, tau1=%g"%(self.name, X, k, theta, tau1,))
-        Kc, taui = simc(k, theta, tau1, 0.001*derate)
-        # Account for sampling frequency etc
-        Kc *= 2.0
-        Ki = Kc/(taui*self.pwmfreq)
-        logging.info("TMC 4671 %s %s PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, X, Kc, taui, Ki))
-        if not test_existing:
-            self._write_field("PID_%s_P"%X, self.pid_helpers["%s_P"%X].to_f(Kc))
-            self._write_field("PID_%s_I"%X, self.pid_helpers["%s_I"%X].to_f(Ki))
+            if offsets:
+                # While we're here, set the offsets
+                self._write_field("HALL_PHI_E_OFFSET", -self._read_field("HALL_PHI_E")%65536),
+                self._write_field("ABN_DECODER_COUNT", 0)
+                self._write_field("ABN_DECODER_PHI_E_OFFSET", 0)
+            self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+            # Give it some time to settle
+            dwell(0.1)
+            self._write_field("MODE_MOTION", MotionMode.torque_mode)
+            test_cur = limit_cur #// 2
+            old_cur = self._read_field("PID_%s_ACTUAL"%X)
+            dwell(0.1)
+            if not test_existing:
+                Kc0 = Kc
+                self._write_field("PID_%s_P"%X, self.pid_helpers["%s_P"%X].to_f(Kc0))
+                self._write_field("PID_%s_I"%X, self.pid_helpers["%s_I"%X].to_f(0.0))
+            else:
+                Kc0 = from_q4_12(self._read_field("PID_%s_P"%X))
+            # Do a setpoint change experiment
+            self._write_field("PID_%s_TARGET"%X, 0)
+            logging.info("test_cur = %d"%test_cur)
+            n = 200
+            c = self._dump_pid(n, X)
+            self._write_field("PID_%s_TARGET"%X, test_cur)
+            c += self._dump_pid(n, X)
+            # Experiment over, switch off
+            self._write_field("PID_%s_TARGET"%X, 0)
+            # Put motion config back how it was
+            self._write_field("PID_TORQUE_TARGET", 0)
+            self._write_field("PID_VELOCITY_TARGET", 0)
+            self._write_field("PID_POSITION_TARGET", 0)
+            self._write_field("PID_POSITION_ACTUAL", 0)
+            self._write_field("MODE_MOTION", old_mode)
+            self._write_field("PID_FLUX_OFFSET", old_flux_offset)
+            self._write_field("PHI_E_SELECTION", old_phi_e_selection)
+            # Analysis and logging
+            #for r in c:
+            #    logging.info("%g,%s"%(float(r[0]-c[0][0])/1e9,','.join(map(str, r[1:]))))
+            # At this point we can determine system model
+            y0 = sum(float(a[1]) for a in c[0:n])/float(n)
+            yinf = sum(float(a[1]) for a in c[3*n//2:2*n])/float(2*n - 3*n//2) - y0
+            if yinf < 0.0:
+                # Wups, turned out negative...
+                yinf *= -1.0
+                c = [(t, -y) for t, y in c]
+            yp = -100000 # Not a possible value
+            tp = 0
+            for tpt, ypt in c[n+1:-1]:
+                if ypt < yp:
+                    break
+                yp, tp = ypt, tpt
+            yp -= y0
+            # It is better to overestimate tp than under.
+            #tp -= float(c[n][0] + c[n+1][0])/2.0
+            tp -= c[n][0]
+            tp *= 1e-9 # it was in nanoseconds, we want seconds
+            D = (yp - yinf) / yinf
+            B = abs((test_cur-yinf) / yinf)
+            A = 1.152*D**2 - 1.607*D + 1
+            r = 2*A / B
+            logging.info("yinf = %g, yp = %g, tp = %g"%(yinf, yp, tp))
+            k = 1.0 / (Kc0*B)
+            theta = tp * (0.309 + 0.209 * math.exp(-0.61*r))
+            tau1 = r*theta
+            logging.info("TMC 4671 %s %s PID system model k=%g, theta=%g, tau1=%g"%(self.name, X, k, theta, tau1,))
+            Kc, taui = simc(k, theta, tau1, 0.001*derate)
+            # Account for sampling frequency etc
+            Kc *= 2.0
+            Ki = Kc/(taui*self.pwmfreq)
+            logging.info("TMC 4671 %s %s PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, X, Kc, taui, Ki))
+            if not test_existing:
+                self._write_field("PID_%s_P"%X, self.pid_helpers["%s_P"%X].to_f(Kc))
+                self._write_field("PID_%s_I"%X, self.pid_helpers["%s_I"%X].to_f(Ki))
         return Kc, Ki
 
     def _dump_pid(self, n, X):
