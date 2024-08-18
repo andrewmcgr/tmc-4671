@@ -1558,9 +1558,11 @@ class TMC4671:
         set_config_field(config, "HALL_DPHI_MAX", 0xAAAA)
         set_config_field(config, "HALL_PHI_E_OFFSET", 0)
         set_config_field(config, "HALL_BLANK", 2)
-        set_config_field(config, "PHI_E_SELECTION", 3) # ABN
-        set_config_field(config, "POSITION_SELECTION", 9) # ABN
-        set_config_field(config, "VELOCITY_SELECTION", 3) # ABN
+        # 3: ABN, 5: Hall
+        set_config_field(config, "PHI_E_SELECTION", 3)
+        # 0: phi_e, 3: ABN_e 5: Hall_e 9: ABN_m 12: Hall_m
+        set_config_field(config, "POSITION_SELECTION", 9)
+        set_config_field(config, "VELOCITY_SELECTION", 3)
         #set_config_field(config, "VELOCITY_METER_SELECTION", 0) # Default velocity meter
         set_config_field(config, "VELOCITY_METER_SELECTION", 1) # PWM frequency velocity meter
         set_config_field(config, "MODE_PID_SMPL", 0) # Advanced PID samples position at fPWM
