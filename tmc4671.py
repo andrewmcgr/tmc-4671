@@ -1521,7 +1521,8 @@ class TMC4671:
         #maxcnt = 3999 # 25 kHz
         #maxcnt = 1999 # 50 kHz
         maxcnt = 999 # 100 kHz
-        set_config_field(config, "PWM_MAXCNT", maxcnt) # 25 kHz
+        maxcnt = 699 # ~143 kHz
+        set_config_field(config, "PWM_MAXCNT", maxcnt)
         # These are used later by filter definitions
         self.pwmfreq = 4.0 * TMC_FREQUENCY / (maxcnt + 1.0)
         self.pwmT = (maxcnt + 1.0) * 10e-9
@@ -1575,13 +1576,13 @@ class TMC4671:
         set_config_field(config, "PID_VELOCITY_LIMIT", 0x100000)
         set_config_field(config, "PID_FLUX_OFFSET", 0)
         pid_defaults = [
-            ("FLUX_P", 2.89, "CURRENT_P_n", 0),
-            ("FLUX_I", 0.009, "CURRENT_I_n", 1),
-            ("TORQUE_P", 2.89, "CURRENT_P_n", 0),
-            ("TORQUE_I", 0.009, "CURRENT_I_n", 1),
-            ("VELOCITY_P", 1.5, "VELOCITY_P_n", 0),
+            ("FLUX_P", 9.4, "CURRENT_P_n", 0),
+            ("FLUX_I", 0.087, "CURRENT_I_n", 1),
+            ("TORQUE_P", 9.4, "CURRENT_P_n", 0),
+            ("TORQUE_I", 0.087, "CURRENT_I_n", 1),
+            ("VELOCITY_P", 4.5, "VELOCITY_P_n", 0),
             ("VELOCITY_I", 0.0, "VELOCITY_I_n", 1),
-            ("POSITION_P", 1.1, "POSITION_P_n", 0),
+            ("POSITION_P", 2.5, "POSITION_P_n", 0),
             ("POSITION_I", 0.0, "POSITION_I_n", 1)
             ]
         self.pid_helpers = {n: PIDHelper(config, self.mcu_tmc, n, v, nn, nv)
@@ -1811,8 +1812,9 @@ class TMC4671:
             self._write_field("PID_POSITION_TARGET", 0)
             self._write_field("PID_POSITION_ACTUAL", 0)
             self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
+            # Turn on the chopper and wait a bit to measure the resistance
             self._write_field("PWM_CHOP", 7)
-            dwell(0.05)
+            dwell(0.1)
             c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
             self._write_field("PWM_CHOP", 0)
             logging.info("TMC 4671 '%s' initial I %s", self.stepper_name, str(self.current_helper.get_current()))
@@ -1822,22 +1824,24 @@ class TMC4671:
             # Ok, calculate a voltage that will give us about a third of the configured current limit
             test2_U = round((c / 3.0) * test_U / max(abs(iux), abs(iwy)))
             logging.info("TMC 4671 '%s' test U %g %g", self.stepper_name, test_U, test2_U)
+            # Switch back on, and this time motor should self-align
             self._write_field("UD_EXT", test2_U)
             self._write_field("PWM_CHOP", 7)
-            dwell(0.05)
+            dwell(0.1)
             c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
             logging.info("TMC 4671 '%s' alignment I %s", self.stepper_name, str(self.current_helper.get_current()))
             test2_U/(self.vm_range/self.voltage_scale)
             R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
             logging.info("TMC 4671 '%s' est. motor R=%g", self.stepper_name, R)
-            for i in range(5):
-                dwell(0.1)
+            for i in range(3):
+                dwell(0.2)
                 self._write_field("PWM_CHOP", 0)
                 # Give it some time to settle
                 dwell(0.1)
                 self._write_field("PWM_CHOP", 7)
             # Give it some time to settle
-            dwell(0.1)
+            dwell(0.2)
+            # Now we should be mechanically aligned
             if offsets:
                 # While we're here, set the offsets
                 self._write_field("HALL_PHI_E_OFFSET", -self._read_field("HALL_PHI_E")%65536),
@@ -1859,7 +1863,7 @@ class TMC4671:
             # Do a setpoint change experiment
             self._write_field("PID_%s_TARGET"%X, 0)
             logging.info("test_cur = %d"%test_cur)
-            n = 200
+            n = 100
             c = self._dump_pid(n, X)
             self._write_field("PID_%s_TARGET"%X, test_cur)
             c += self._dump_pid(n, X)
@@ -1903,10 +1907,10 @@ class TMC4671:
             theta = tp * (0.309 + 0.209 * math.exp(-0.61*r))
             tau1 = r*theta
             logging.info("TMC 4671 %s %s PID system model k=%g, theta=%g, tau1=%g"%(self.name, X, k, theta, tau1,))
-            Kc, taui = simc(k, theta, tau1, 0.001*derate)
+            Kc, taui = simc(k, theta, tau1, 2.0*derate/self.pwmfreq)
             # Account for sampling frequency etc
             Kc *= 2.0
-            Ki = Kc/(taui*self.pwmfreq)
+            Ki = 2.0*Kc/(taui*self.pwmfreq)
             logging.info("TMC 4671 %s %s PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, X, Kc, taui, Ki))
             if not test_existing:
                 self._write_field("PID_%s_P"%X, self.pid_helpers["%s_P"%X].to_f(Kc))
