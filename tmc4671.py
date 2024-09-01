@@ -639,7 +639,10 @@ Fields["STATUS_FLAGS"] = {
 }
 
 # Mask has same structure as the status field
-
+FloatFields = {"PID_FLUX_I", "PID_FLUX_P",
+                "PID_TORQUE_I", "PID_TORQUE_P", "PID_VELOCITY_I",
+                "PID_VELOCITY_P", "PID_POSITION_I", "PID_POSITION_P",
+}
 SignedFields = {"ADC_I1_SCALE", "ADC_I0_SCALE", "AENC_0_SCALE", "AENC_1_SCALE",
                 "AENC_2_SCALE", "ADC_IUX", "ADC_IWY", "ADC_IV", "AENC_UX",
                 "AENC_WY", "AENC_VN", "PHI_E_EXT", "OPENLOOP_VELOCITY_TARGET",
@@ -655,9 +658,7 @@ SignedFields = {"ADC_I1_SCALE", "ADC_I0_SCALE", "AENC_0_SCALE", "AENC_1_SCALE",
                 "AENC_DECODER_PHI_A", "AENC_DECODER_PPR", "AENC_DECODER_COUNT",
                 "AENC_DECODER_COUNT_N", "AENC_DECODER_PHI_M_OFFSET",
                 "AENC_DECODER_PHI_E_OFFSET", "AENC_DECODER_PHI_M",
-                "AENC_DECODER_PHI_E", "PHI_E", "PID_FLUX_I", "PID_FLUX_P",
-                "PID_TORQUE_I", "PID_TORQUE_P", "PID_VELOCITY_I",
-                "PID_VELOCITY_P", "PID_POSITION_I", "PID_POSITION_P",
+                "AENC_DECODER_PHI_E", "PHI_E",
                 "PIDOUT_UQ_UD_LIMITS", "PID_POSITION_LIMIT_LOW",
                 "PID_POSITION_LIMIT_HIGH", "PID_FLUX_TARGET",
                 "PID_TORQUE_TARGET", "PID_FLUX_OFFSET", "PID_TORQUE_OFFSET",
@@ -961,11 +962,13 @@ def ffs(mask):
     return (mask & -mask).bit_length() - 1
 
 class FieldHelper:
-    def __init__(self, all_fields, signed_fields=[], field_formatters={},
+    def __init__(self, all_fields, signed_fields=[], float_fields=[], field_formatters={}, field_setters={},
                  registers=None, prefix="driver_"):
         self.all_fields = all_fields
         self.signed_fields = {sf: 1 for sf in signed_fields}
+        self.float_fields = {ff: 1 for ff in float_fields}
         self.field_formatters = field_formatters
+        self.field_setters = field_setters
         self.registers = registers
         if self.registers is None:
             self.registers = collections.OrderedDict()
@@ -1003,7 +1006,7 @@ class FieldHelper:
         new_value = (reg_value & ~mask) | ((field_value << ffs(mask)) & mask)
         self.registers[reg_name] = new_value
         return new_value
-    def set_config_field(self, config, field_name, default):
+    def set_config_field(self, config, field_name, default, convert=lambda x: x):
         # Allow a field to be set from the config file
         config_name = self.prefix + field_name
         reg_name = self.lookup_register(field_name)
@@ -1012,14 +1015,17 @@ class FieldHelper:
         else:
             mask = self.all_fields[reg_name][field_name]
         maxval = mask >> ffs(mask)
-        if maxval == 1:
+        if field_name in self.float_fields:
+            val = config.getfloat(config_name, default)
+        elif maxval == 1:
             val = config.getboolean(config_name, default)
         elif field_name in self.signed_fields:
             val = config.getint(config_name, default,
                                 minval=-(maxval//2 + 1), maxval=maxval//2)
         else:
             val = config.getint(config_name, default, minval=0, maxval=maxval)
-        return self.set_field(field_name, val, reg_name=reg_name)
+        self.field_setters[field_name] = convert
+        return self.set_field(field_name, convert(val), reg_name=reg_name)
     def pretty_format(self, reg_name, reg_value):
         # Provide a string description of a register
         reg_fields = self.all_fields.get(reg_name, {reg_name: 0xffffffff})
@@ -1053,7 +1059,7 @@ class PIDHelper:
             self.to_f = to_q8_8
             self.from_f = from_q8_8
         FieldFormatters[fvar] = self.from_f
-        set_config_field(config, fvar, self.to_f(def_v))
+        set_config_field(config, fvar, def_v, convert=self.to_f)
 
 ######################################################################
 # Current control
@@ -1463,6 +1469,7 @@ class TMC4671:
         self.alignment_done = False
         self.fields = FieldHelper(Fields,
                                   signed_fields=SignedFields,
+                                  float_fields=FloatFields,
                                   field_formatters=FieldFormatters,
                                   prefix="foc_")
         # 6100 is optional for boards without one.
@@ -2209,9 +2216,15 @@ class TMC4671:
         if reg_name is None:
             raise gcmd.error("Unknown field name '%s'" % (field_name,))
         value = gcmd.get_int('VALUE', None)
+        fval = gcmd.get_float('FVAL', None)
         velocity = gcmd.get_float('VELOCITY', None, minval=0.)
-        if (value is None) == (velocity is None):
-            raise gcmd.error("Specify either VALUE or VELOCITY")
+        if all(((value is None), (fval is None), (velocity is None))):
+            raise gcmd.error("Specify one of VALUE, FVAL, or VELOCITY")
+        if fval is not None:
+            convert = self.fields.field_setters.get(field_name)
+            if convert is None:
+                raise gcmd.error("FVAL parameters not supported by %s" % (field_name,))
+            value = convert(fval)
         if velocity is not None:
             if self.mcu_tmc.get_tmc_frequency() is None:
                 raise gcmd.error(
