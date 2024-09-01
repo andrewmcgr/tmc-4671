@@ -815,6 +815,8 @@ DumpGroups = {
             "PID_TORQUE_FLUX_ACTUAL",
             "INTERIM_PIDIN_TARGET_TORQUE", "PID_VELOCITY_ACTUAL", "INTERIM_PIDIN_TARGET_VELOCITY",
             "PID_POSITION_ACTUAL",
+            "PID_ERROR_PID_POSITION_ERROR",
+            "PID_ERROR_PID_VELOCITY_ERROR",
     ],
     "PID": ["PID_FLUX_P_FLUX_I", "PID_TORQUE_P_TORQUE_I",
             "PID_VELOCITY_P_VELOCITY_I", "PID_POSITION_P_POSITION_I",
@@ -1071,10 +1073,15 @@ class CurrentHelper:
         self.homing_current = config.getfloat('homing_current', above=0.,
                                               maxval=MAX_CURRENT,
                                               default=self.run_current)
+        self.flux_current = config.getfloat('flux_current', above=0.,
+                                              maxval=MAX_CURRENT,
+                                              default=0.)
         self.current_scale = config.getfloat('current_scale_ma_lsb', 1.272,
                                        above=0., maxval=10)
         self.flux_limit = self._calc_flux_limit(self.run_current)
         self.fields.set_field("PID_TORQUE_FLUX_LIMITS", self.flux_limit)
+        self.flux_limit = self._calc_flux_limit(self.flux_current)
+        self.fields.set_field("PID_FLUX_OFFSET", self.flux_limit)
     def _calc_flux_limit(self, current):
         flux_limit = round(current * 1e3 / self.current_scale)
         return flux_limit
@@ -1094,6 +1101,11 @@ class CurrentHelper:
         self.run_current = run_current
         self.flux_limit = self._calc_flux_limit(self.run_current)
         self._write_field("PID_TORQUE_FLUX_LIMITS", self.flux_limit)
+        return self.flux_limit
+    def set_flux_current(self, current):
+        self.flux_current = current
+        self.flux_limit = self._calc_flux_limit(self.flux_current)
+        self._write_field("PID_FLUX_OFFSET", self.flux_limit)
         return self.flux_limit
     def _read_field(self, field):
         reg_name = self.fields.lookup_register(field)
@@ -1277,13 +1289,13 @@ class TMCVirtualPinHelper:
         # Include the reference switches so can connect endstops
         # to driver boards.
         self.status_mask_entries = config.getlist("homing_mask",
-                                                  ["PID_IQ_OUTPUT_LIMIT",
-                                                   #"PID_ID_OUTPUT_LIMIT",
+                                                  [#"PID_IQ_OUTPUT_LIMIT",
+                                                   "PID_ID_OUTPUT_LIMIT",
                                                    #"PID_IQ_ERRSUM_LIMIT",
-                                                   #"PID_ID_ERRSUM_LIMIT",
-                                                   "PID_IQ_TARGET_LIMIT",
+                                                   "PID_ID_ERRSUM_LIMIT",
+                                                   #"PID_IQ_TARGET_LIMIT",
                                                    "PID_ID_TARGET_LIMIT",
-                                                   #"PID_X_OUTPUT_LIMIT",
+                                                   "PID_X_OUTPUT_LIMIT",
                                                    #"PID_V_OUTPUT_LIMIT",
                                                    "REF_SW_R",
                                                    "REF_SW_L"])
@@ -1295,8 +1307,9 @@ class TMCVirtualPinHelper:
         # Register virtual_endstop pin
         name_parts = config.get_name().split()
         self.name = "_".join(name_parts)
+        logging.info("TMC virtual endstop %s, mask is %x", self.name, self.status_mask)
         ppins = self.printer.lookup_object("pins")
-        ppins.register_chip("%s_%s" % (name_parts[0], name_parts[-1]), self)
+        ppins.register_chip("%s" % (self.name), self)
     def setup_pin(self, pin_type, pin_params):
         # Validate pin
         ppins = self.printer.lookup_object('pins')
@@ -1314,12 +1327,14 @@ class TMCVirtualPinHelper:
         self.mcu_endstop = ppins.setup_pin('endstop', self.diag_pin)
         return self.mcu_endstop
     def handle_homing_move_begin(self, hmove):
-        if self.mcu_endstop not in hmove.get_mcu_endstops():
-            return
+        #if self.mcu_endstop not in hmove.get_mcu_endstops():
+        #    return
         #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 3000)
         self.current_helper.set_current(self.current_helper.get_homing_current())
         self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
+        self.printer.lookup_object('toolhead').dwell(0.0005)
         self.mcu_tmc.write_field("STATUS_MASK", self.status_mask)
+        self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         status = self.mcu_tmc.get_register("STATUS_FLAGS")
         fmt = self.fields.pretty_format("STATUS_FLAGS", status)
         logging.info("TMC 4671 '%s' status at homing start %s", self.name, fmt)
@@ -1327,9 +1342,10 @@ class TMCVirtualPinHelper:
         status = self.mcu_tmc.get_register("STATUS_FLAGS")
         fmt = self.fields.pretty_format("STATUS_FLAGS", status)
         logging.info("TMC 4671 '%s' status at homing end %s", self.name, fmt)
-        if self.mcu_endstop not in hmove.get_mcu_endstops():
-            return
+        #if self.mcu_endstop not in hmove.get_mcu_endstops():
+        #    return
         #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 0x300000)
+        self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         self.current_helper.set_current(self.current_helper.get_run_current())
         self.mcu_tmc.write_field("STATUS_MASK", 0)
         self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
@@ -1485,7 +1501,7 @@ class TMC4671:
         self.step_helper = StepHelper(config, self.mcu_tmc)
         self.current_helper = CurrentHelper(config, self.mcu_tmc)
         self.error_helper = TMCErrorCheck(config, self.mcu_tmc)
-        #TMCVirtualPinHelper(config, self.mcu_tmc, self.current_helper)
+        TMCVirtualPinHelper(config, self.mcu_tmc, self.current_helper)
         gcode.register_mux_command("SET_TMC_FIELD", "STEPPER", self.name,
                                    self.cmd_SET_TMC_FIELD,
                                    desc=self.cmd_SET_TMC_FIELD_help)
