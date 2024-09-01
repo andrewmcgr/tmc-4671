@@ -1590,7 +1590,6 @@ class TMC4671:
         set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x10000000)
         # TODO: Units, what should this be anyway?
         set_config_field(config, "PID_VELOCITY_LIMIT", 0x100000)
-        set_config_field(config, "PID_FLUX_OFFSET", 0)
         pid_defaults = [
             ("FLUX_P", 9.4, "CURRENT_P_n", 0),
             ("FLUX_I", 0.087, "CURRENT_I_n", 1),
