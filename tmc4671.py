@@ -1937,6 +1937,13 @@ class TMC4671:
             if not test_existing:
                 self._write_field("PID_%s_P"%X, self.pid_helpers["%s_P"%X].to_f(Kc))
                 self._write_field("PID_%s_I"%X, self.pid_helpers["%s_I"%X].to_f(Ki))
+                # Store results for SAVE_CONFIG
+                cfgname = "tmc4671 %s" % (self.name,)
+                configfile = self.printer.lookup_object('configfile')
+                configfile.set(cfgname, 'foc_PID_FLUX_P', "%.3f" % (Kc,))
+                configfile.set(cfgname, 'foc_PID_FLUX_I', "%.3f" % (Ki,))
+                configfile.set(cfgname, 'foc_PID_TORQUE_P', "%.3f" % (Kc,))
+                configfile.set(cfgname, 'foc_PID_TORQUE_I', "%.3f" % (Ki,))
         return Kc, Ki
 
     def _dump_pid(self, n, X):
@@ -2033,6 +2040,10 @@ class TMC4671:
         P, I = self._tune_flux_pid(test_existing, derate, print_time)
         self._write_field("PID_TORQUE_P", self.pid_helpers["TORQUE_P"].to_f(P))
         self._write_field("PID_TORQUE_I", self.pid_helpers["TORQUE_I"].to_f(I))
+        gcmd.respond_info(
+            "PID %s parameters: Kc=%.2f Ki=%.3f\n"
+            "The SAVE_CONFIG command will update the printer config file\n"
+            "with these parameters and restart the printer." % (self.name, P, I))
 
     cmd_TMC_DEBUG_MOVE_help = "Test TMC motion mode (motor must be free to move)"
     def cmd_TMC_DEBUG_MOVE(self, gcmd):
