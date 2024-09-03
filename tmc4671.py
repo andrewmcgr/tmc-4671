@@ -1295,11 +1295,11 @@ class TMCVirtualPinHelper:
         # Include the reference switches so can connect endstops
         # to driver boards.
         self.status_mask_entries = config.getlist("homing_mask",
-                                                  [#"PID_IQ_OUTPUT_LIMIT",
+                                                  ["PID_IQ_OUTPUT_LIMIT",
                                                    "PID_ID_OUTPUT_LIMIT",
-                                                   #"PID_IQ_ERRSUM_LIMIT",
+                                                   "PID_IQ_ERRSUM_LIMIT",
                                                    "PID_ID_ERRSUM_LIMIT",
-                                                   #"PID_IQ_TARGET_LIMIT",
+                                                   "PID_IQ_TARGET_LIMIT",
                                                    "PID_ID_TARGET_LIMIT",
                                                    "PID_X_OUTPUT_LIMIT",
                                                    #"PID_V_OUTPUT_LIMIT",
@@ -1333,12 +1333,12 @@ class TMCVirtualPinHelper:
         self.mcu_endstop = ppins.setup_pin('endstop', self.diag_pin)
         return self.mcu_endstop
     def handle_homing_move_begin(self, hmove):
-        #if self.mcu_endstop not in hmove.get_mcu_endstops():
-        #    return
+        if self.mcu_endstop not in hmove.get_mcu_endstops():
+            return
         #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 3000)
         self.current_helper.set_current(self.current_helper.get_homing_current())
         self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
-        self.printer.lookup_object('toolhead').dwell(0.0005)
+        self.printer.lookup_object('toolhead').dwell(0.005)
         self.mcu_tmc.write_field("STATUS_MASK", self.status_mask)
         self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         status = self.mcu_tmc.get_register("STATUS_FLAGS")
@@ -1348,8 +1348,8 @@ class TMCVirtualPinHelper:
         status = self.mcu_tmc.get_register("STATUS_FLAGS")
         fmt = self.fields.pretty_format("STATUS_FLAGS", status)
         logging.info("TMC 4671 '%s' status at homing end %s", self.name, fmt)
-        #if self.mcu_endstop not in hmove.get_mcu_endstops():
-        #    return
+        if self.mcu_endstop not in hmove.get_mcu_endstops():
+            return
         #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 0x300000)
         self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         self.current_helper.set_current(self.current_helper.get_run_current())
@@ -1842,7 +1842,7 @@ class TMC4671:
             logging.info("TMC 4671 '%s' initial I %s", self.stepper_name, str(self.current_helper.get_current()))
             if max(abs(iux), abs(iwy)) < 1e-6:
                 # something is horribly wrong
-                return
+                 raise self.printer.command_error("TMC 4671 is seeing no motor current. Check wiring.")
             # Ok, calculate a voltage that will give us about a third of the configured current limit
             test2_U = round((c / 3.0) * test_U / max(abs(iux), abs(iwy)))
             logging.info("TMC 4671 '%s' test U %g %g", self.stepper_name, test_U, test2_U)
