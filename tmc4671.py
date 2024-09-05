@@ -1642,18 +1642,23 @@ class TMC4671:
         try:
             with self.mutex:
                 # Only need to do this once.
-                if not self.alignment_done:
-                    # Just test the PID, as it also sets up the encoder offsets
-                    self._write_field("PID_FLUX_TARGET", 0)
-                    self._write_field("PID_TORQUE_TARGET", 0)
-                    self._write_field("PID_VELOCITY_TARGET", 0)
-                    P, I = self._tune_flux_pid(True, 1.0, print_time)
-                    self._write_field("ABN_DECODER_COUNT", 0)
-                    self._write_field("PID_POSITION_TARGET", 0)
-                    self.alignment_done = True
+#                if not self.alignment_done:
+#                    # Just test the PID, as it also sets up the encoder offsets
+#                    self._write_field("PID_FLUX_TARGET", 0)
+#                    self._write_field("PID_TORQUE_TARGET", 0)
+#                    self._write_field("PID_VELOCITY_TARGET", 0)
+#                    self._write_field("PID_POSITION_TARGET", 0)
+#                    self._write_field("ABN_DECODER_COUNT", 0)
+#                    self._write_field("PID_POSITION_ACTUAL", 0)
+#                    P, I = self._tune_flux_pid(True, 1.0, print_time)
+#                    self._write_field("ABN_DECODER_COUNT", 0)
+#                    self._write_field("PID_POSITION_TARGET", 0)
+#                    self.alignment_done = True
                 # Do this every time, may have moved while disabled
+                self._write_field("MODE_MOTION", MotionMode.stopped_mode)
                 self._write_field("PID_TORQUE_TARGET", 0)
                 self._write_field("PID_VELOCITY_TARGET", 0)
+                self._write_field("ABN_DECODER_COUNT", 0)
                 self._write_field("PID_POSITION_TARGET", 0)
                 self._write_field("PID_POSITION_ACTUAL", 0)
                 self.error_helper.start_checks()
@@ -1703,6 +1708,14 @@ class TMC4671:
     def _handle_ready(self):
         with self.mutex:
             print_time = self.printer.lookup_object('toolhead').get_last_move_time()
+            # Set these before setting enable to avoid yeeting the toolhead
+            self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+            self._write_field("STATUS_MASK", 0)
+            self._write_field("PID_FLUX_TARGET", 0)
+            self._write_field("PID_TORQUE_TARGET", 0)
+            self._write_field("PID_VELOCITY_TARGET", 0)
+            self._write_field("ABN_DECODER_COUNT", 0)
+            self._write_field("PID_POSITION_TARGET", 0)
             # Now enable 6100
             if self.fields6100 is not None:
                 self.mcu_tmc6100.set_register("GCONF",
@@ -1711,9 +1724,6 @@ class TMC4671:
             enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
             enable_line.motor_enable(print_time)
             # Just test the PID, as it also sets up the encoder offsets
-            self._write_field("PID_FLUX_TARGET", 0)
-            self._write_field("PID_TORQUE_TARGET", 0)
-            self._write_field("PID_VELOCITY_TARGET", 0)
             P, I = self._tune_flux_pid(True, 1.0, print_time)
             self._write_field("ABN_DECODER_COUNT", 0)
             self._write_field("PID_POSITION_TARGET", 0)
@@ -1843,7 +1853,7 @@ class TMC4671:
             # something is horribly wrong
              raise self.printer.command_error("TMC 4671 is seeing no motor current. Check wiring.")
         # Ok, calculate a voltage that will give us about a third of the configured current limit
-        test2_U = round((c / 3.0) * test_U / max(abs(iux), abs(iwy)))
+        test2_U = round((c / 2.0) * test_U / max(abs(iux), abs(iwy)))
         logging.info("TMC 4671 '%s' test U %g %g", self.stepper_name, test_U, test2_U)
         # Switch back on, and this time motor should self-align
         self._write_field("UD_EXT", test2_U)
@@ -1854,7 +1864,7 @@ class TMC4671:
         test2_U/(self.vm_range/self.voltage_scale)
         R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
         logging.info("TMC 4671 '%s' est. motor R=%g", self.stepper_name, R)
-        for i in range(3):
+        for i in range(5):
             dwell(0.2)
             self._write_field("PWM_CHOP", 0)
             # Give it some time to settle
