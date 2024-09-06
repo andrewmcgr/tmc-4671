@@ -1171,8 +1171,8 @@ class TMCErrorCheck:
                                                  "REF_SW_L"])
         # Useful for debugging
         #self.status_warn_mask = 0xffffffff
-        self.status_error_mask = self._make_mask(["PWM_MIN",
-                                                  "PWM_MAX",
+        self.status_error_mask = self._make_mask([#"PWM_MIN",
+                                                  #"PWM_MAX",
                                                   "ADC_I_CLIPPED",
                                                   "AENC_CLIPPED"])
         self.last_status = 0
