@@ -1498,6 +1498,8 @@ class TMC4671:
                                             self._handle_connect)
         self.printer.register_event_handler("klippy:ready",
                                             self._handle_ready)
+        #self.printer.register_event_handler("idle_timeout:ready",
+        #                                    self._handle_ready)
         self.stepper = None
         self.stepper_enable = self.printer.load_object(config, "stepper_enable")
         self.printer.register_event_handler("klippy:mcu_identify",
@@ -1641,26 +1643,9 @@ class TMC4671:
     def _do_enable(self, print_time):
         try:
             with self.mutex:
-                # Only need to do this once.
-#                if not self.alignment_done:
-#                    # Just test the PID, as it also sets up the encoder offsets
-#                    self._write_field("PID_FLUX_TARGET", 0)
-#                    self._write_field("PID_TORQUE_TARGET", 0)
-#                    self._write_field("PID_VELOCITY_TARGET", 0)
-#                    self._write_field("PID_POSITION_TARGET", 0)
-#                    self._write_field("ABN_DECODER_COUNT", 0)
-#                    self._write_field("PID_POSITION_ACTUAL", 0)
-#                    P, I = self._tune_flux_pid(True, 1.0, print_time)
-#                    self._write_field("ABN_DECODER_COUNT", 0)
-#                    self._write_field("PID_POSITION_TARGET", 0)
-#                    self.alignment_done = True
-                # Do this every time, may have moved while disabled
-                self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-                self._write_field("PID_TORQUE_TARGET", 0)
-                self._write_field("PID_VELOCITY_TARGET", 0)
-                self._write_field("ABN_DECODER_COUNT", 0)
-                self._write_field("PID_POSITION_TARGET", 0)
-                self._write_field("PID_POSITION_ACTUAL", 0)
+                # If we were manually moved, we don't want any motion now
+                self._write_field("PID_POSITION_TARGET",
+                                  self._read_field("PID_POSITION_ACTUAL"))
                 self.error_helper.start_checks()
                 self._write_field("MODE_MOTION", MotionMode.position_mode)
         except self.printer.command_error as e:
@@ -1673,10 +1658,6 @@ class TMC4671:
                 # Switching off the enable line will turn off the drivers
                 # but, belt and braces, stop the controller as well.
                 self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-                self._write_field("PID_TORQUE_TARGET", 0)
-                self._write_field("PID_VELOCITY_TARGET", 0)
-                self._write_field("PID_POSITION_TARGET", 0)
-                self._write_field("PID_POSITION_ACTUAL", 0)
         except self.printer.command_error as e:
             self.printer.invoke_shutdown(str(e))
 
@@ -1705,9 +1686,11 @@ class TMC4671:
             logging.info("TMC %s failed to init: %s", self.name, str(e))
         enable_line.register_state_callback(self._handle_stepper_enable)
 
-    def _handle_ready(self):
+    def _handle_ready(self, print_time=None):
         with self.mutex:
-            print_time = self.printer.lookup_object('toolhead').get_last_move_time()
+            if print_time is None:
+                print_time = self.printer.lookup_object('toolhead').get_last_move_time()
+            dwell = self.printer.lookup_object('toolhead').dwell
             # Set these before setting enable to avoid yeeting the toolhead
             self._write_field("MODE_MOTION", MotionMode.stopped_mode)
             self._write_field("STATUS_MASK", 0)
