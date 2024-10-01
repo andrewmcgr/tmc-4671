@@ -1542,8 +1542,9 @@ class TMC4671:
         # therefore not providing convenience interface
         #maxcnt = 3999 # 25 kHz
         #maxcnt = 1999 # 50 kHz
+        #maxcnt = 1599 # 62.5 kHz
         maxcnt = 999 # 100 kHz
-        maxcnt = 699 # ~143 kHz
+        #maxcnt = 699 # ~143 kHz
         set_config_field(config, "PWM_MAXCNT", maxcnt)
         # These are used later by filter definitions
         self.pwmfreq = 4.0 * TMC_FREQUENCY / (maxcnt + 1.0)
@@ -1595,7 +1596,7 @@ class TMC4671:
         set_config_field(config, "PID_POSITION_LIMIT_LOW", -0x10000000)
         set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x10000000)
         # TODO: Units, what should this be anyway?
-        set_config_field(config, "PID_VELOCITY_LIMIT", 0x100000)
+        set_config_field(config, "PID_VELOCITY_LIMIT", 0x1000000)
         pid_defaults = [
             ("FLUX_P", 9.4, "CURRENT_P_n", 0),
             ("FLUX_I", 0.087, "CURRENT_I_n", 1),
@@ -1979,19 +1980,19 @@ class TMC4671:
             self._calibrate_adc(print_time)
             # setup filters
             self.enable_biquad("CONFIG_BIQUAD_F_ENABLE",
-                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 9600, 2**-0.5)))
+                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 1600, 1.0/2.0**0.5)))
             self.enable_biquad("CONFIG_BIQUAD_T_ENABLE",
-                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 9600, 2**-0.5)))
+                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 1600, 1.0/2.0**0.5)))
             self.enable_biquad("CONFIG_BIQUAD_X_ENABLE",
                                *biquad_tmc(*biquad_lpf(
                                    self.pwmfreq/(self._read_field("MODE_PID_SMPL")+1.0),
-                                   3200, 2**-0.5)))
+                                   3200, 1.0/2**0.5)))
             self.enable_biquad("CONFIG_BIQUAD_V_ENABLE",
-                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 8000, 2**-0.5)))
+                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 8000, 1.0/2**0.5)))
                                #*biquad_tmc(*biquad_lpf_tmc(self.pwmfreq, 4500, 2.0)))
                                #*biquad_tmc(*biquad_apf(self.pwmfreq, 296, 2**-0.5)))
-            self._write_field("CONFIG_BIQUAD_F_ENABLE", 0)
-            self._write_field("CONFIG_BIQUAD_T_ENABLE", 0)
+            self._write_field("CONFIG_BIQUAD_F_ENABLE", 1)
+            self._write_field("CONFIG_BIQUAD_T_ENABLE", 1)
             self._write_field("CONFIG_BIQUAD_V_ENABLE", 0)
             self._write_field("CONFIG_BIQUAD_X_ENABLE", 0)
 
