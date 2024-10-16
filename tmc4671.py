@@ -945,10 +945,12 @@ def biquad_tmc(b0, b1, b2, a0, a1, a2):
     # return in the same order as the config registers
     return a1, a2, b0, b1, b2
 
-# S-IMC PI controller design
+# S-IMC PI controller design, "Improved Method"
+# See https://folk.ntnu.no/skoge/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf
+# and http://npcw17.imm.dtu.dk/Proceedings/Session%207%20Control%20Theory/The%20improved%20SIMC%20method%20for%20PI%20controller%20tuning.pdf
 def simc(k, theta, tau1, tauc):
-    Kc = (1.0/k) * (tau1/(tauc + theta))
-    taui = min(tau1, 4*(tauc + theta))
+    Kc = (1.0/k) * ((tau1 + theta / 3.0) / (tauc + theta))
+    taui = min((tau1 + theta / 3.0), 4*(tauc + theta))
     return Kc, taui
 
 
@@ -1808,6 +1810,8 @@ class TMC4671:
     def _tune_torque_pid(self, test_existing, derate, print_time):
         return self._tune_pid("TORQUE", 1.0, derate, True, test_existing, print_time)
 
+    # Align motors and tune PID via a setpoint change experiment
+    # See https://folk.ntnu.no/skoge/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf
     def _tune_pid(self, X, Kc, derate, offsets, test_existing, print_time):
         ch = self.current_helper
         dwell = self.printer.lookup_object('toolhead').dwell
