@@ -1299,12 +1299,12 @@ class TMCVirtualPinHelper:
         self.status_mask_entries = config.getlist("homing_mask",
                                                   ["PID_IQ_OUTPUT_LIMIT",
                                                    "PID_ID_OUTPUT_LIMIT",
-                                                   "PID_IQ_ERRSUM_LIMIT",
-                                                   "PID_ID_ERRSUM_LIMIT",
-                                                   "PID_IQ_TARGET_LIMIT",
+                                                   #"PID_IQ_ERRSUM_LIMIT",
+                                                   #"PID_ID_ERRSUM_LIMIT",
+                                                   #"PID_IQ_TARGET_LIMIT",
                                                    "PID_ID_TARGET_LIMIT",
-                                                   "PID_X_OUTPUT_LIMIT",
-                                                   #"PID_V_OUTPUT_LIMIT",
+                                                   #"PID_X_OUTPUT_LIMIT",
+                                                   "PID_V_OUTPUT_LIMIT",
                                                    "REF_SW_R",
                                                    "REF_SW_L"])
         self.status_mask = 0
@@ -1491,7 +1491,7 @@ class TMC4671:
         self.vm_range = round(32767/2.5)
         # Correct for the OpenFFBoard
         self.voltage_scale = config.getfloat('voltage_scale_ratio', 43.64,
-                                       above=0., maxval=10)
+                                       above=0.)
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
                                    TMC_FREQUENCY, pin_option="cs_pin")
         self.read_translate = None
@@ -1757,17 +1757,19 @@ class TMC4671:
         #self.vm_range = self.vm_offset - round(mean((vml, vmh)))
         #self._write_field("CFG_ADC_VM", 4)
         logging.info("TMC 4671 %s ADC offsets I0=%d I1=%d", self.name, i0_off, i1_off)
-        logging.info("TMC 4671 %s ADC VM offset=%d range=%s VM=%g", self.name,
-                     self.vm_offset, self.vm_range, self._read_vm())
+        #logging.info("TMC 4671 %s ADC VM offset=%d range=%s VM=%g", self.name,
+        #             self.vm_offset, self.vm_range, self._read_vm())
         # Now calibrate for brake chopper
         vml, vmh = self._sample_vm()
         vmr = abs(vmh - vml)
-        high = (vmh-self.vm_offset)//20 + 2*vmr + vmh
+        logging.info("TMC 4671 %s VM samples low=%d high=%d", self.name, vml, vmh)
+        high = math.ceil(0.15*self.voltage_scale) + vmr + vmh
         if high < 65536:
             self._write_field("ADC_VM_LIMIT_HIGH", high)
             self._write_field("ADC_VM_LIMIT_LOW", vmr + vmh)
-            logging.info("TMC 4671 %s brake thresholds low=%g V high=%g V", self.name,
-                         self._convert_vm(vmr+vmh), self._convert_vm(high))
+            logging.info("TMC 4671 %s brake thresholds low=%d(%g V) high=%d(%g V)", self.name,
+                         vmr+vmh, self._convert_vm(vmr+vmh),
+                         high, self._convert_vm(high))
         else:
             # What else can we do but turn the brake off?
             self._write_field("ADC_VM_LIMIT_HIGH", 0)
