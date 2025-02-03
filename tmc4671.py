@@ -12,7 +12,7 @@ import math
 from time import monotonic_ns
 from enum import IntEnum
 from statistics import median_low, mean
-from . import bus, tmc
+from extras import bus, tmc, thermistor
 
 # The 4671 has a 25 MHz external clock
 TMC_FREQUENCY=25000000.
@@ -811,13 +811,9 @@ DumpGroups = {
                 "PID_VELOCITY_P_VELOCITY_I", "PID_POSITION_P_POSITION_I",
                 ],
     "monitor": [
-            "ADC_IWY_IUX",
-            "ADC_IV",
-            "PID_TORQUE_FLUX_ACTUAL",
-            "INTERIM_PIDIN_TARGET_TORQUE", "PID_VELOCITY_ACTUAL", "INTERIM_PIDIN_TARGET_VELOCITY",
-            "PID_POSITION_ACTUAL",
-            "PID_ERROR_PID_POSITION_ERROR",
-            "PID_ERROR_PID_VELOCITY_ERROR",
+            #"PID_VELOCITY_ACTUAL",
+            #"PID_ERROR_PID_POSITION_ERROR",
+            #"PID_ERROR_PID_VELOCITY_ERROR",
     ],
     "pid": ["PID_FLUX_P_FLUX_I", "PID_TORQUE_P_TORQUE_I",
             "PID_VELOCITY_P_VELOCITY_I", "PID_POSITION_P_POSITION_I",
@@ -921,7 +917,6 @@ def biquad_Z_tmc(T, b0, b1, b2, a0, a1, a2):
     b0z = (b0*(T**2) - 2*b1*T + 4*b2) / den
     a2z = (T**2 + 2*a1*T + 4*a2) / den
     a1z = (2*(T**2) - 8*a2) / den
-    #dcgain = (b0z + b1z + b2z) / (a0z + a1z + a2z)
     dcgain = 1.0
     e29 = 2**29
     b0 = round(b0z/(a0*dcgain) * e29)
@@ -1183,6 +1178,11 @@ class TMCErrorCheck:
                              for n in self.fields.get_reg_fields(reg_name, 0)
                              }
         # Setup for temperature query
+        # Per the OpenFFBoard firmware source
+        #[thermistor ffboard]
+        #temperature1: 25
+        #resistance1: 10000
+        #beta: 4300
         self.adc_temp = None
         self.adc_temp_reg = config.getchoice("adc_temp_reg",
                                              ADC_GPIO_FIELDS,
@@ -1196,34 +1196,30 @@ class TMCErrorCheck:
             mask = self.fields.set_field(f, 1, mask, "STATUS_FLAGS")
         return mask
     def _query_status(self):
-        try:
-            status = self.mcu_tmc.get_register("STATUS_FLAGS")
+        status = self.mcu_tmc.get_register("STATUS_FLAGS")
+        # fmt = self.fields.pretty_format("STATUS_FLAGS", status)
+        # logging.info("TMC 4671 '%s' raw %s", self.stepper_name, fmt)
+        if status & self.status_warn_mask != self.last_status & self.status_warn_mask:
             fmt = self.fields.pretty_format("STATUS_FLAGS", status)
-            #logging.info("TMC 4671 '%s' raw %s", self.stepper_name, fmt)
-            if status & self.status_warn_mask != self.last_status & self.status_warn_mask:
-                fmt = self.fields.pretty_format("STATUS_FLAGS", status)
-                logging.info("TMC 4671 '%s' reports %s", self.stepper_name, fmt)
-            self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
-            status = self.mcu_tmc.get_register("STATUS_FLAGS")
-            self.last_status = status
-            if status & self.status_error_mask:
-                fmt = self.fields.pretty_format("STATUS_FLAGS", status)
-                raise self.printer.command_error("TMC 4671 '%s' reports error: %s"
-                                                 % (self.stepper_name, fmt))
-            #for reg_name in DumpGroups["monitor"]:
-            #    val = self.mcu_tmc.get_register(reg_name)
-            #    self.monitor_data.update(self.fields.get_reg_fields(reg_name, val))
-            #    logging.info("TMC 4671 '%s' %s: %s", self.stepper_name,
-            #                 reg_name, self.fields.pretty_format(reg_name, val))
-        except self.printer.command_error as e:
-            self.printer.invoke_shutdown(str(e))
-            return self.printer.get_reactor().NEVER
+            logging.info("TMC 4671 '%s' reports %s", self.stepper_name, fmt)
+        self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
+        status = self.mcu_tmc.get_register("STATUS_FLAGS")
+        self.last_status = status
+        if status & self.status_error_mask:
+            fmt = self.fields.pretty_format("STATUS_FLAGS", status)
+            raise self.printer.command_error("TMC 4671 '%s' reports error: %s"
+                                             % (self.stepper_name, fmt))
+        #for reg_name in DumpGroups["monitor"]:
+        #    val = self.mcu_tmc.get_register(reg_name)
+        #    self.monitor_data.update(self.fields.get_reg_fields(reg_name, val))
+        #    logging.info("TMC 4671 '%s' %s: %s", self.stepper_name,
+        #                 reg_name, self.fields.pretty_format(reg_name, val))
     def _query_temperature(self):
         try:
             if self.adc_temp_reg is not None:
                 self.adc_temp = self.mcu_tmc.read_field(self.adc_temp_reg)
                 # TODO: remove this, just temp logging
-                #self._convert_temp(self.adc_temp)
+                self._convert_temp(self.adc_temp)
         except self.printer.command_error as e:
             # Ignore comms error for temperature
             self.adc_temp = None
@@ -1231,7 +1227,7 @@ class TMCErrorCheck:
     def _do_periodic_check(self, eventtime):
         try:
             self._query_status()
-            self._query_temperature()
+            # self._query_temperature()
         except self.printer.command_error as e:
             self.printer.invoke_shutdown(str(e))
             return self.printer.get_reactor().NEVER
@@ -1249,26 +1245,22 @@ class TMCErrorCheck:
         self.check_timer = reactor.register_timer(self._do_periodic_check,
                                                   curtime + 1.)
         return True
-    # Per the OpenFFBoard firmware source
-    #[thermistor ffboard]
-    #temperature1: 25
-    #resistance1: 10000
-    #beta: 4300
     def _convert_temp(self, adc):
         v = adc - 0x7fff
         if v < 0:
             temp = 0.0
         else:
             #temp = 1500.0 * 43252.0 / float(v)
-            temp = 64878000.0 / float(v)
+            #temp = 64878000.0 / float(v)
+            temp = 129756000.0 / float(v)
             #temp = (1.0/298.15) + math.log(temp / 10000.0) / 4300.0
             temp = (0.003354016) + math.log(temp / 10000.0) / 4300.0
             temp = 1.0 / temp
             temp -= 273.15
-        #logging.info("TMC %s temp: %g", self.stepper_name, temp)
+        logging.info("TMC %s temp: %g", self.stepper_name, temp)
     def get_status(self, eventtime=None):
         res = {'drv_status': None, 'temperature': None}
-        #res.update(self.monitor_data)
+        res.update(self.monitor_data)
         if self.check_timer is None:
             return res
         temp = None
@@ -1299,6 +1291,7 @@ class TMCVirtualPinHelper:
         self.status_mask_entries = config.getlist("homing_mask",
                                                   ["PID_IQ_OUTPUT_LIMIT",
                                                    "PID_ID_OUTPUT_LIMIT",
+                                                   "PID_X_ERRSUM_LIMIT",
                                                    #"PID_IQ_ERRSUM_LIMIT",
                                                    #"PID_ID_ERRSUM_LIMIT",
                                                    #"PID_IQ_TARGET_LIMIT",
@@ -1488,7 +1481,7 @@ class TMC4671:
             self.mcu_tmc6100 = None
         # These will be calibrated later, but this is roughly correct
         self.vm_offset = 32768
-        self.vm_range = round(32767/2.5)
+        self.vm_range = round(32767/1.25)
         # Correct for the OpenFFBoard
         self.voltage_scale = config.getfloat('voltage_scale_ratio', 43.64,
                                        above=0.)
@@ -1545,8 +1538,8 @@ class TMC4671:
         #maxcnt = 3999 # 25 kHz
         #maxcnt = 1999 # 50 kHz
         #maxcnt = 1599 # 62.5 kHz
-        maxcnt = 999 # 100 kHz
-        #maxcnt = 699 # ~143 kHz
+        #maxcnt = 999 # 100 kHz
+        maxcnt = 699 # ~143 kHz
         set_config_field(config, "PWM_MAXCNT", maxcnt)
         # These are used later by filter definitions
         self.pwmfreq = 4.0 * TMC_FREQUENCY / (maxcnt + 1.0)
@@ -1598,7 +1591,7 @@ class TMC4671:
         set_config_field(config, "PID_POSITION_LIMIT_LOW", -0x10000000)
         set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x10000000)
         # TODO: Units, what should this be anyway?
-        set_config_field(config, "PID_VELOCITY_LIMIT", 0x1000000)
+        set_config_field(config, "PID_VELOCITY_LIMIT", 0x10000000)
         pid_defaults = [
             ("FLUX_P", 9.4, "CURRENT_P_n", 0),
             ("FLUX_I", 0.087, "CURRENT_I_n", 1),
@@ -1689,11 +1682,15 @@ class TMC4671:
             logging.info("TMC %s failed to init: %s", self.name, str(e))
         enable_line.register_state_callback(self._handle_stepper_enable)
 
+    #def _handle_ready(self):
+    #    # klippy:ready handlers are limited in what they may do. Communicating with a MCU
+    #    # will pause the reactor and is thus forbidden. That code has to run outside of the event handler.
+    #    self.printer.reactor.register_callback(self._handle_ready_deferred)
+
     def _handle_ready(self, print_time=None):
         with self.mutex:
             if print_time is None:
                 print_time = self.printer.lookup_object('toolhead').get_last_move_time()
-            dwell = self.printer.lookup_object('toolhead').dwell
             # Set these before setting enable to avoid yeeting the toolhead
             self._write_field("MODE_MOTION", MotionMode.stopped_mode)
             self._write_field("STATUS_MASK", 0)
@@ -1763,12 +1760,12 @@ class TMC4671:
         vml, vmh = self._sample_vm()
         vmr = abs(vmh - vml)
         logging.info("TMC 4671 %s VM samples low=%d high=%d", self.name, vml, vmh)
-        high = math.ceil(0.15*self.voltage_scale) + vmr + vmh
+        high = math.ceil(0.1*self.voltage_scale) + vmr//2 + vmh
         if high < 65536:
             self._write_field("ADC_VM_LIMIT_HIGH", high)
-            self._write_field("ADC_VM_LIMIT_LOW", vmr + vmh)
+            self._write_field("ADC_VM_LIMIT_LOW", vmr//2 + vmh)
             logging.info("TMC 4671 %s brake thresholds low=%d(%g V) high=%d(%g V)", self.name,
-                         vmr+vmh, self._convert_vm(vmr+vmh),
+                         vmr//2+vmh, self._convert_vm(vmr//2+vmh),
                          high, self._convert_vm(high))
         else:
             # What else can we do but turn the brake off?
@@ -1986,20 +1983,23 @@ class TMC4671:
             self._calibrate_adc(print_time)
             # setup filters
             self.enable_biquad("CONFIG_BIQUAD_F_ENABLE",
-                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 1600, 1.0/2.0**0.5)))
+                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 2000, 2**-0.5)))
             self.enable_biquad("CONFIG_BIQUAD_T_ENABLE",
-                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 1600, 1.0/2.0**0.5)))
+                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 2000, 2**-0.5)))
             self.enable_biquad("CONFIG_BIQUAD_X_ENABLE",
-                               *biquad_tmc(*biquad_lpf(
-                                   self.pwmfreq/(self._read_field("MODE_PID_SMPL")+1.0),
-                                   3200, 1.0/2**0.5)))
+                               *biquad_Z_tmc(
+                                   1.0/(self.pwmfreq/(self._read_field("MODE_PID_SMPL")+1.0)),
+                                   *biquad_lpf(
+                                       self.pwmfreq/(self._read_field("MODE_PID_SMPL")+1.0),
+                                       800, 1.0/2**0.5)))
             self.enable_biquad("CONFIG_BIQUAD_V_ENABLE",
-                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 8000, 1.0/2**0.5)))
-                               #*biquad_tmc(*biquad_lpf_tmc(self.pwmfreq, 4500, 2.0)))
+                               *biquad_Z_tmc(1.0/self.pwmfreq,
+                                             *biquad_lpf(self.pwmfreq, 2000, 0.5)))
+                               #*biquad_tmc(*biquad_lpf_tmc(self.pwmfreq, 4500, 1.0)))
                                #*biquad_tmc(*biquad_apf(self.pwmfreq, 296, 2**-0.5)))
             self._write_field("CONFIG_BIQUAD_F_ENABLE", 1)
             self._write_field("CONFIG_BIQUAD_T_ENABLE", 1)
-            self._write_field("CONFIG_BIQUAD_V_ENABLE", 0)
+            self._write_field("CONFIG_BIQUAD_V_ENABLE", 1)
             self._write_field("CONFIG_BIQUAD_X_ENABLE", 0)
 
     def get_status(self, eventtime=None):
