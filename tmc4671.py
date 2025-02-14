@@ -929,8 +929,8 @@ def biquad_Z_tmc(T, b0, b1, b2, a0, a1, a2):
 
 # Normalise a biquad filter, according to TMC
 def biquad_tmc(b0, b1, b2, a0, a1, a2):
-    #dcgain = (b0 + b1 + b2) / (a0 + a1 + a2)
-    dcgain = 1.0
+    dcgain = (b0 + b1 + b2) / (a0 + a1 + a2)
+    #dcgain = 1.0
     e29 = 2**29
     b0 = round(b0/(a0*dcgain) * e29)
     b1 = round(b1/(a0*dcgain) * e29)
@@ -1760,7 +1760,7 @@ class TMC4671:
         vml, vmh = self._sample_vm()
         vmr = abs(vmh - vml)
         logging.info("TMC 4671 %s VM samples low=%d high=%d", self.name, vml, vmh)
-        high = math.ceil(0.1*self.voltage_scale) + vmr//2 + vmh
+        high = math.ceil(0.05*self.voltage_scale) + vmr//2 + vmh
         if high < 65536:
             self._write_field("ADC_VM_LIMIT_HIGH", high)
             self._write_field("ADC_VM_LIMIT_LOW", vmr//2 + vmh)
@@ -1985,16 +1985,14 @@ class TMC4671:
             self.enable_biquad("CONFIG_BIQUAD_F_ENABLE",
                                *biquad_tmc(*biquad_lpf(self.pwmfreq, 2000, 2**-0.5)))
             self.enable_biquad("CONFIG_BIQUAD_T_ENABLE",
-                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 2000, 2**-0.5)))
+                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 4000, 2**-0.5)))
             self.enable_biquad("CONFIG_BIQUAD_X_ENABLE",
-                               *biquad_Z_tmc(
-                                   1.0/(self.pwmfreq/(self._read_field("MODE_PID_SMPL")+1.0)),
+                               *biquad_tmc(
                                    *biquad_lpf(
-                                       self.pwmfreq/(self._read_field("MODE_PID_SMPL")+1.0),
-                                       800, 1.0/2**0.5)))
+                                       self.pwmfreq,
+                                       2000, 2**-0.9)))
             self.enable_biquad("CONFIG_BIQUAD_V_ENABLE",
-                               *biquad_Z_tmc(1.0/self.pwmfreq,
-                                             *biquad_lpf(self.pwmfreq, 2000, 0.5)))
+                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 2000, 2**-0.8)))
                                #*biquad_tmc(*biquad_lpf_tmc(self.pwmfreq, 4500, 1.0)))
                                #*biquad_tmc(*biquad_apf(self.pwmfreq, 296, 2**-0.5)))
             self._write_field("CONFIG_BIQUAD_F_ENABLE", 1)
