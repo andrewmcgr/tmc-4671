@@ -1983,16 +1983,16 @@ class TMC4671:
             self._calibrate_adc(print_time)
             # setup filters
             self.enable_biquad("CONFIG_BIQUAD_F_ENABLE",
-                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 2000, 2**-0.5)))
+                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 200, 2**-0.5)))
             self.enable_biquad("CONFIG_BIQUAD_T_ENABLE",
-                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 4000, 2**-0.5)))
+                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 2000, 2**-0.5)))
             self.enable_biquad("CONFIG_BIQUAD_X_ENABLE",
                                *biquad_tmc(
                                    *biquad_lpf(
                                        self.pwmfreq,
                                        2000, 2**-0.9)))
             self.enable_biquad("CONFIG_BIQUAD_V_ENABLE",
-                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 2000, 2**-0.8)))
+                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 1000, 2**-0.5)))
                                #*biquad_tmc(*biquad_lpf_tmc(self.pwmfreq, 4500, 1.0)))
                                #*biquad_tmc(*biquad_apf(self.pwmfreq, 296, 2**-0.5)))
             self._write_field("CONFIG_BIQUAD_F_ENABLE", 1)
