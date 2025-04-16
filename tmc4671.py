@@ -11,6 +11,7 @@ import logging, collections
 import math
 from time import monotonic_ns
 from enum import IntEnum
+from typing import NamedTuple
 from statistics import median_low, mean
 from extras import bus, tmc, thermistor
 
@@ -26,6 +27,11 @@ class MotionMode(IntEnum):
     velocity_mode = 2
     position_mode = 3
     uq_ud_ext_mode = 8
+
+class BiquadFilter(NamedTuple):
+    type: str
+    freq: int
+    slope: float
 
 # Tuple is the address followed by a value to put in the next higher address
 # to select that sub-register, or none to just go straight there.
@@ -856,6 +862,13 @@ DumpGroups = {
 # Biquad filter utilities
 ######################################################################
 
+BIQUAD_FILTER_TYPES = ['lpf', 'notch', 'apf']
+BIQUAD_FILTER_TARGETS = {
+        'flux': 'CONFIG_BIQUAD_F_ENABLE',
+        'torque': 'CONFIG_BIQUAD_T_ENABLE',
+        'velocity': 'CONFIG_BIQUAD_V_ENABLE',
+        'position': 'CONFIG_BIQUAD_X_ENABLE',
+}
 
 # Filter design formula from 4671 datasheet
 def biquad_lpf_tmc(fs, f, D):
@@ -1524,6 +1537,13 @@ class TMC4671:
         gcode.register_mux_command("SET_TMC_CURRENT", "STEPPER", self.name,
                                    self.cmd_SET_TMC_CURRENT,
                                    desc=self.cmd_SET_TMC_CURRENT_help)
+        gcode.register_mux_command(
+            "SET_TMC_BIQUAD_FILTER",
+            "STEPPER",
+            self.name,
+            self.cmd_SET_TMC_BIQUAD_FILTER,
+            desc=self.cmd_SET_TMC_BIQUAD_FILTER_help,
+        )
         # Allow other registers to be set from the config
         set_config_field = self.fields.set_config_field
         if self.fields6100 is not None:
@@ -1608,6 +1628,29 @@ class TMC4671:
                              for reg_name in DumpGroups["monitor"]
                              for n in self.fields.get_reg_fields(reg_name, 0)
                              }
+
+        self.biquad_filters = {}
+        for target in BIQUAD_FILTER_TARGETS.keys():
+            filter_type = config.getchoice(
+                f"biquad_{target}_filter",
+                BIQUAD_FILTER_TYPES,
+                default="lpf",
+            )
+            freq = config.getint(
+                f"biquad_{target}_frequency",
+                minval=0,
+                maxval=4.0 * TMC_FREQUENCY,
+            )
+            slope = config.getfloat(
+                f"biquad_{target}_slope",
+                above=0.0,
+                default=2**-0.5,
+            )
+            self.biquad_filters[target] = BiquadFilter(
+                type=filter_type,
+                freq=freq,
+                slope=slope,
+            )
 
     def _read_field(self, field):
         reg_name = self.fields.lookup_register(field)
@@ -1981,24 +2024,39 @@ class TMC4671:
                 val = self.fields.registers[reg_name] # Val may change during loop
                 self.mcu_tmc.set_register(reg_name, val, print_time)
             self._calibrate_adc(print_time)
-            # setup filters
-            self.enable_biquad("CONFIG_BIQUAD_F_ENABLE",
-                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 5000, 2**-0.5)))
-            self.enable_biquad("CONFIG_BIQUAD_T_ENABLE",
-                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 5000, 2**-0.5)))
-            self.enable_biquad("CONFIG_BIQUAD_X_ENABLE",
-                               *biquad_tmc(
-                                   *biquad_lpf(
-                                       self.pwmfreq,
-                                       2000, 2**-0.9)))
-            self.enable_biquad("CONFIG_BIQUAD_V_ENABLE",
-                               *biquad_tmc(*biquad_lpf(self.pwmfreq, 1000, 2**-0.5)))
-                               #*biquad_tmc(*biquad_lpf_tmc(self.pwmfreq, 4500, 1.0)))
-                               #*biquad_tmc(*biquad_apf(self.pwmfreq, 296, 2**-0.5)))
-            self._write_field("CONFIG_BIQUAD_F_ENABLE", 1)
-            self._write_field("CONFIG_BIQUAD_T_ENABLE", 1)
-            self._write_field("CONFIG_BIQUAD_V_ENABLE", 0)
-            self._write_field("CONFIG_BIQUAD_X_ENABLE", 0)
+            self._setup_filters()
+
+    def _setup_filter(self, register: str, biquad_filter: BiquadFilter) -> None:
+        enabled = int(biquad_filter.freq > 0)
+        params = None
+
+        logging.info(
+            "Setting up biquad filter: register=%s, enabled=%s, filter=%s",
+            register,
+            enabled,
+            biquad_filter,
+        )
+
+        freq_s = self.pwmfreq
+        if register == "CONFIG_BIQUAD_X_ENABLE":
+            freq_s = self.pwmfreq/(self._read_field("MODE_PID_SMPL")+1.0)
+
+        if biquad_filter.type == "lpf":
+            params = biquad_lpf(freq_s, biquad_filter.freq, biquad_filter.slope)
+        elif biquad_filter.type == "notch":
+            params = biquad_notch(freq_s, biquad_filter.freq, biquad_filter.slope)
+        elif biquad_filter.type == "apf":
+            params = biquad_apf(freq_s, biquad_filter.freq, biquad_filter.slope)
+
+        if enabled and params is not None:
+            self.enable_biquad(register, *biquad_tmc(*params))
+
+        self._write_field(register, enabled)
+
+    def _setup_filters(self) -> None:
+        for target, biquad_filter in self.biquad_filters.items():
+            register = BIQUAD_FILTER_TARGETS[target]
+            self._setup_filter(register, biquad_filter)
 
     def get_status(self, eventtime=None):
         if not self.init_done:
@@ -2258,6 +2316,42 @@ class TMC4671:
                 self.mcu_tmc.set_register("PID_TORQUE_FLUX_LIMITS", reg_val, print_time)
         gcmd.respond_info("Run Current: %0.2fA" % (prev_cur,))
 
+    cmd_SET_TMC_BIQUAD_FILTER_help = ("Set the cutoff frequency of one of the biquad filters")
+    def cmd_SET_TMC_BIQUAD_FILTER(self, gcmd):
+        biquad_target = gcmd.get("FILTER").lower()
+        if biquad_target not in BIQUAD_FILTER_TARGETS.keys():
+            raise gcmd.error(
+                "Invalid FILTER '%s': must be one of %s"
+                % (biquad_target, ", ".join(BIQUAD_FILTER_TARGETS.keys()))
+            )
+
+        current_filter = self.biquad_filters[biquad_target]
+
+        filter_type = gcmd.get("TYPE", default=current_filter.type).lower()
+        if filter_type not in BIQUAD_FILTER_TYPES:
+            raise gcmd.error(
+                "Invalid FILTER '%s': must be one of %s"
+                % (filter_type, ", ".join(BIQUAD_FILTER_TYPES))
+            )
+
+        freq = gcmd.get_int(
+            "FREQUENCY", minval=0, maxval=4 * TMC_FREQUENCY, default=current_filter.freq,
+        )
+        slope = gcmd.get_float("SLOPE", above=0.0, default=current_filter.slope)
+        enabled = str(freq > 0)
+
+        self.biquad_filters[biquad_target] = BiquadFilter(
+            type=filter_type, freq=freq, slope=slope,
+        )
+
+        self._setup_filter(
+            BIQUAD_FILTER_TARGETS[biquad_target], self.biquad_filters[biquad_target]
+        )
+        self.printer.lookup_object('toolhead').dwell(0.2)
+        gcmd.respond_info(
+            f"Configured {biquad_target} biquad filter: filter={filter_type}, "
+            f"freq={freq}, slope={slope}, enabled={enabled}"
+        )
 
 def load_config_prefix(config):
     return TMC4671(config)
