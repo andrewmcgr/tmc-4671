@@ -91,6 +91,10 @@ foc_pid_torque_i: 0.485
 foc_pid_torque_p: 9.66
 foc_pid_velocity_p: 3.2
 foc_pid_position_p: 3.0
+biquad_flux_frequency: 5000
+biquad_torque_frequency: 5000
+biquad_velocity_frequency: 0
+biquad_position_frequency: 0
 ```
 
 The OpenFFBoard STM32f407 controller board (v1.2.3 or later) can run Klipper. Configure Klipper for STM32407, no bootloader, 8 MHz crystal, USB on PA11/PA12, and set pin PD7 on startup:
