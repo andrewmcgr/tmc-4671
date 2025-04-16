@@ -1537,6 +1537,13 @@ class TMC4671:
         gcode.register_mux_command("SET_TMC_CURRENT", "STEPPER", self.name,
                                    self.cmd_SET_TMC_CURRENT,
                                    desc=self.cmd_SET_TMC_CURRENT_help)
+        gcode.register_mux_command(
+            "SET_TMC_BIQUAD_FILTER",
+            "STEPPER",
+            self.name,
+            self.cmd_SET_TMC_BIQUAD_FILTER,
+            desc=self.cmd_SET_TMC_BIQUAD_FILTER_help,
+        )
         # Allow other registers to be set from the config
         set_config_field = self.fields.set_config_field
         if self.fields6100 is not None:
@@ -2309,6 +2316,42 @@ class TMC4671:
                 self.mcu_tmc.set_register("PID_TORQUE_FLUX_LIMITS", reg_val, print_time)
         gcmd.respond_info("Run Current: %0.2fA" % (prev_cur,))
 
+    cmd_SET_TMC_BIQUAD_FILTER_help = ("Set the cutoff frequency of one of the biquad filters")
+    def cmd_SET_TMC_BIQUAD_FILTER(self, gcmd):
+        biquad_target = gcmd.get("FILTER").lower()
+        if biquad_target not in BIQUAD_FILTER_TARGETS.keys():
+            raise gcmd.error(
+                "Invalid FILTER '%s': must be one of %s"
+                % (biquad_target, ", ".join(BIQUAD_FILTER_TARGETS.keys()))
+            )
+
+        current_filter = self.biquad_filters[biquad_target]
+
+        filter_type = gcmd.get("TYPE", default=current_filter.type).lower()
+        if filter_type not in BIQUAD_FILTER_TYPES:
+            raise gcmd.error(
+                "Invalid FILTER '%s': must be one of %s"
+                % (filter_type, ", ".join(BIQUAD_FILTER_TYPES))
+            )
+
+        freq = gcmd.get_int(
+            "FREQUENCY", minval=0, maxval=4 * TMC_FREQUENCY, default=current_filter.freq,
+        )
+        slope = gcmd.get_float("SLOPE", above=0.0, default=current_filter.slope)
+        enabled = str(freq > 0)
+
+        self.biquad_filters[biquad_target] = BiquadFilter(
+            type=filter_type, freq=freq, slope=slope,
+        )
+
+        self._setup_filter(
+            BIQUAD_FILTER_TARGETS[biquad_target], self.biquad_filters[biquad_target]
+        )
+        self.printer.lookup_object('toolhead').dwell(0.2)
+        gcmd.respond_info(
+            f"Configured {biquad_target} biquad filter: filter={filter_type}, "
+            f"freq={freq}, slope={slope}, enabled={enabled}"
+        )
 
 def load_config_prefix(config):
     return TMC4671(config)
