@@ -1,7 +1,7 @@
 # tmc-4671
 TMC 4671 driver for Klipper
 
-The [TMC 4671](https://www.analog.com/media/en/technical-documentation/data-sheets/TMC4671_datasheet_v1.06.pdf
+The [TMC 4671](https://www.analog.com/media/en/technical-documentation/data-sheets/TMC4671-LA_datasheet_rev2.08.pdf)
 is a closed-loop field-oriented-control servo driver for brushed and brushless DC motors and stepper motors.
 
 This driver allows use of TMC 4671 driver boards with Klipper, in closed-loop mode.
