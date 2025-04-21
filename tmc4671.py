@@ -1095,7 +1095,7 @@ class PIDHelper:
         set_config_field(config, fvar, def_v, convert=self.to_f)
 
 class FFHelper:
-    def __init__(self, config, mcu_tmc, var, def_v):
+    def __init__(self, config, mcu_tmc):
         self.mcu_tmc = mcu_tmc
         self.fields = mcu_tmc.get_fields()
         logging.info("TMC: %s", ','.join((str(i) for i in [var, def_v])))
