@@ -1095,7 +1095,7 @@ class PIDHelper:
         set_config_field(config, fvar, def_v, convert=self.to_f)
 
 class FFHelper:
-    def __init__(self, config, mcu_tmc):
+    def __init__(self, config, mcu_tmc, var, def_v):
         self.mcu_tmc = mcu_tmc
         self.fields = mcu_tmc.get_fields()
         logging.info("TMC: %s", ','.join((str(i) for i in [var, def_v])))
@@ -1660,7 +1660,7 @@ class TMC4671:
                             for n, v, nn, nv in pid_defaults}
 
         set_config_field(config, "MODE_FF", 0) # Feed forward off
-        self.ff_helpers = {n: FFHelper(config, self.mcu_tmc)
+        self.ff_helpers = {n: FFHelper(config, self.mcu_tmc, n, v)
                            for n, v in [
                                         ("FEED_FORWARD_VELOCITY_GAIN", 0.0),
                                         ("FEED_FORWARD_VELOCITY_FILTER_CONSTANT", 0.0),
