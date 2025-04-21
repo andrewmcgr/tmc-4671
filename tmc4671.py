@@ -652,8 +652,12 @@ Fields["STATUS_FLAGS"] = {
 
 # Mask has same structure as the status field
 FloatFields = {"PID_FLUX_I", "PID_FLUX_P",
-                "PID_TORQUE_I", "PID_TORQUE_P", "PID_VELOCITY_I",
-                "PID_VELOCITY_P", "PID_POSITION_I", "PID_POSITION_P",
+               "PID_TORQUE_I", "PID_TORQUE_P", "PID_VELOCITY_I",
+               "PID_VELOCITY_P", "PID_POSITION_I", "PID_POSITION_P",
+               "FEED_FORWARD_VELOCITY_GAIN",
+               "FEED_FORWARD_VELOCITY_FILTER_CONSTANT",
+               "FEED_FORWARD_TORQUE_GAIN",
+               "FEED_FORWARD_TORQUE_FILTER_CONSTANT",
 }
 SignedFields = {"ADC_I1_SCALE", "ADC_I0_SCALE", "AENC_0_SCALE", "AENC_1_SCALE",
                 "AENC_2_SCALE", "ADC_IUX", "ADC_IWY", "ADC_IV", "AENC_UX",
