@@ -1659,12 +1659,13 @@ class TMC4671:
         self.pid_helpers = {n: PIDHelper(config, self.mcu_tmc, n, v, nn, nv)
                             for n, v, nn, nv in pid_defaults}
 
+        set_config_field(config, "MODE_FF", 0) # Feed forward off
         self.ff_helpers = {n: FFHelper(config, self.mcu_tmc)
                            for n, v in [
-                                        "FEED_FORWARD_VELOCITY_GAIN", 0.0,
-                                        "FEED_FORWARD_VELOCITY_FILTER_CONSTANT", 0.0,
-                                        "FEED_FORWARD_TORQUE_GAIN", 0.0,
-                                        "FEED_FORWARD_TORQUE_FILTER_CONSTANT", 0.0
+                                        ("FEED_FORWARD_VELOCITY_GAIN", 0.0),
+                                        ("FEED_FORWARD_VELOCITY_FILTER_CONSTANT", 0.0),
+                                        ("FEED_FORWARD_TORQUE_GAIN", 0.0),
+                                        ("FEED_FORWARD_TORQUE_FILTER_CONSTANT", 0.0)
                                        ]
                            }
 
@@ -2045,6 +2046,9 @@ class TMC4671:
             if ping != 0x34363731:
                 raise self.printer.command_error(
                     "TMC 4671 not identified, identification register returned %x" % (ping,))
+            ping = self.mcu_tmc.get_register("CHIPINFO_SI_VERSION")
+            logging.info("TMC 4671 detected, version is 0x%x", ping)
+
             # Disable 6100
             if self.fields6100 is not None:
                 self.mcu_tmc6100.set_register("GCONF",
