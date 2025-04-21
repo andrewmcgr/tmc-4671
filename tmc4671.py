@@ -1103,7 +1103,7 @@ class FFHelper:
         self.to_f = to_q2_30
         self.from_f = from_q2_30
         FieldFormatters[fvar] = self.from_f
-        set_config_field(config, fvar, def_v, convert=self.to_f)
+        set_config_field(config, var, def_v, convert=self.to_f)
 
 ######################################################################
 # Current control
