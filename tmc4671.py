@@ -1094,6 +1094,17 @@ class PIDHelper:
         FieldFormatters[fvar] = self.from_f
         set_config_field(config, fvar, def_v, convert=self.to_f)
 
+class FFHelper:
+    def __init__(self, config, mcu_tmc, var, def_v):
+        self.mcu_tmc = mcu_tmc
+        self.fields = mcu_tmc.get_fields()
+        logging.info("TMC: %s", ','.join((str(i) for i in [var, def_v])))
+        set_config_field = self.fields.set_config_field
+        self.to_f = to_q2_30
+        self.from_f = from_q2_30
+        FieldFormatters[fvar] = self.from_f
+        set_config_field(config, fvar, def_v, convert=self.to_f)
+
 ######################################################################
 # Current control
 ######################################################################
@@ -1647,6 +1658,16 @@ class TMC4671:
             ]
         self.pid_helpers = {n: PIDHelper(config, self.mcu_tmc, n, v, nn, nv)
                             for n, v, nn, nv in pid_defaults}
+
+        self.ff_helpers = {n: FFHelper(config, self.mcu_tmc)
+                           for n, v in [
+                                        "FEED_FORWARD_VELOCITY_GAIN", 0.0,
+                                        "FEED_FORWARD_VELOCITY_FILTER_CONSTANT", 0.0,
+                                        "FEED_FORWARD_TORQUE_GAIN", 0.0,
+                                        "FEED_FORWARD_TORQUE_FILTER_CONSTANT", 0.0
+                                       ]
+                           }
+
         self.monitor_data = {n: None
                              for reg_name in DumpGroups["monitor"]
                              for n in self.fields.get_reg_fields(reg_name, 0)
