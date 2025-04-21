@@ -750,6 +750,15 @@ def to_q8_8(val):
 def format_q3_29(val):
     return "%.9f" % (val * 2**-29)
 
+def to_q2_30(val):
+    return round(val * 2**30) & 0xffffffff
+
+def from_q2_30(val):
+    return val * 2**-30
+
+def format_q2_30(val):
+    return "%.9f" % (val * 2**-30)
+
 FieldFormatters = {
     "CONFIG_BIQUAD_X_A_1": format_q3_29,
     "CONFIG_BIQUAD_X_A_2": format_q3_29,
