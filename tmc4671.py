@@ -1102,7 +1102,7 @@ class FFHelper:
         set_config_field = self.fields.set_config_field
         self.to_f = to_q2_30
         self.from_f = from_q2_30
-        FieldFormatters[fvar] = self.from_f
+        FieldFormatters[var] = self.from_f
         set_config_field(config, var, def_v, convert=self.to_f)
 
 ######################################################################
