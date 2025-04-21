@@ -28,7 +28,6 @@ Supported hardware:
 Klipper driver features:
 * PID autotuning for the current and torque control loops
 * PID configuration for the velocity and position loops (manual tuning required, for now)
-* Feed-forward coefficient configuration (manual tuning required)
 * ADC autocalibration
 * Encoder autoinitialisation for relative encoders, or absolute encoders not indexed to the electrical phase of the motor
 * Sensorless homing (not currently working) by setting a low homing current and detecting failure to track the commanded position within the driver
@@ -93,11 +92,6 @@ foc_pid_torque_i: 0.485
 foc_pid_torque_p: 9.66
 foc_pid_velocity_p: 3.2
 foc_pid_position_p: 3.0
-foc_mode_ff: 2
-foc_feed_forward_velocity_gain: 1.8
-foc_feed_forward_velocity_filter_constant: 0.5
-foc_feed_forward_torque_gain: 1.8
-foc_feed_forward_torque_filter_constant: 0.5
 biquad_flux_frequency: 5000
 biquad_torque_frequency: 5000
 biquad_velocity_frequency: 0
