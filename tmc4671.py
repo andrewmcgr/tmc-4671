@@ -2013,7 +2013,7 @@ class TMC4671:
         theta = tp * (0.309 + 0.209 * math.exp(-0.61*r))
         tau1 = r*theta
         logging.info("TMC 4671 %s %s PID system model k=%g, theta=%g, tau1=%g"%(self.name, X, k, theta, tau1,))
-        Kc, taui = simc(k, theta, tau1, 2.0*derate/self.pwmfreq)
+        Kc, taui = simc(k, theta, tau1, theta)
         # Account for sampling frequency etc
         Kc *= 2.0
         Ki = 2.0*Kc/(taui*self.pwmfreq)
