@@ -1587,15 +1587,13 @@ class TMC4671:
             set_config6100_field(config, "normal", 1)
             set_config6100_field(config, "DRVSTRENGTH", 0)
             set_config6100_field(config, "BBMCLKS", 10)
-        # This should not really be set to anything else
-        # therefore not providing convenience interface
-        #maxcnt = 3999 # 25 kHz
-        #maxcnt = 1999 # 50 kHz
-        #maxcnt = 1599 # 62.5 kHz
-        #maxcnt = 999 # 100 kHz
-        maxcnt = 699 # ~143 kHz
+        self.pwm_freq_target = config.getfloat('pwm_freq_target',
+                                               default=120e3,
+                                               minval=10e3, maxval=150e3)
+        maxcnt = int((4.0 * TMC_FREQUENCY / self.pwm_freq_target) - 1)
         set_config_field(config, "PWM_MAXCNT", maxcnt)
         # These are used later by filter definitions
+        # Actual frequency
         self.pwmfreq = 4.0 * TMC_FREQUENCY / (maxcnt + 1.0)
         self.pwmT = (maxcnt + 1.0) * 10e-9
         self.mdec = round(self.pwmT / (3.0 * 40e-9) - 2)
