@@ -1621,7 +1621,7 @@ class TMC4671:
         set_config_field(config, "ABN_USE_ABN_AS_N", 0)
         set_config_field(config, "ABN_CLN", 0)
         set_config_field(config, "ABN_DIRECTION", 0)
-        set_config_field(config, "ABN_DECODER_PPR", 1600)
+        set_config_field(config, "ABN_DECODER_PPR", 4000)
         set_config_field(config, "HALL_INTERP", 0)
         set_config_field(config, "HALL_SYNC", 1)
         set_config_field(config, "HALL_POLARITY", 0)
