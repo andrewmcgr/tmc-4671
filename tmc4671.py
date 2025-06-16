@@ -2013,8 +2013,8 @@ class TMC4671:
         logging.info("TMC 4671 %s %s PID system model k=%g, theta=%g, tau1=%g"%(self.name, X, k, theta, tau1,))
         Kc, taui = simc(k, theta, tau1, theta)
         # Account for sampling frequency etc
-        Kc *= 2.0
-        Ki = 2.0*Kc/(taui*self.pwmfreq)
+        Kc *= 0.8
+        Ki = Kc/(taui*self.pwmfreq)
         logging.info("TMC 4671 %s %s PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, X, Kc, taui, Ki))
         if not test_existing:
             self._write_field("PID_%s_P"%X, self.pid_helpers["%s_P"%X].to_f(Kc))
