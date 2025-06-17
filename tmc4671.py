@@ -984,6 +984,11 @@ def simc(k, theta, tau1, tauc):
     taui = min((tau1 + theta / 3.0), 4*(tauc + theta))
     return Kc, taui
 
+# https://scispace.com/pdf/simple-analytic-pid-controller-tuning-rules-revisited-1u8b0a7xv6.pdf
+def sapc(k, theta, tau1, tauc):
+    Kc = (1.0/k) * ((tau1 + theta / 3.0) / (tauc + theta))
+    taui = min(tau1, 5.0*tauc)
+    return Kc, taui
 
 ######################################################################
 # Field manipulation helpers
@@ -2011,9 +2016,9 @@ class TMC4671:
         theta = tp * (0.309 + 0.209 * math.exp(-0.61*r))
         tau1 = r*theta
         logging.info("TMC 4671 %s %s PID system model k=%g, theta=%g, tau1=%g"%(self.name, X, k, theta, tau1,))
-        Kc, taui = simc(k, theta, tau1, theta)
+        Kc, taui = sapc(k, theta, tau1, theta)
         # Account for sampling frequency etc
-        Kc *= 0.8
+        #Kc *= 0.8
         Ki = Kc/(taui*self.pwmfreq)
         logging.info("TMC 4671 %s %s PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, X, Kc, taui, Ki))
         if not test_existing:
