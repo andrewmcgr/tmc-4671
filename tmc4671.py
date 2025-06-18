@@ -1997,8 +1997,9 @@ class TMC4671:
             yinf *= -1.0
             c = [(t, -y) for t, y in c]
         yp = -100000 # Not a possible value
-        tp = 0
-        for tpt, ypt in c[n+1:-1]:
+        tp, ypt = c[n+1]
+        for tpt, ypr in c[n+2:-1]:
+            ypt += 0.99*(ypr-ypt)
             if ypt < yp:
                 break
             yp, tp = ypt, tpt
