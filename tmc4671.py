@@ -1895,7 +1895,7 @@ class TMC4671:
         return self._convert_vm(self._read_field("ADC_VM_RAW"))
 
     def _tune_flux_pid(self, test_existing, derate, print_time):
-        return self._tune_pid("FLUX", 2.5, derate, True, test_existing, print_time)
+        return self._tune_pid("FLUX", 4.5, derate, True, test_existing, print_time)
 
     def _tune_torque_pid(self, test_existing, derate, print_time):
         return self._tune_pid("TORQUE", 1.0, derate, True, test_existing, print_time)
@@ -2004,23 +2004,21 @@ class TMC4671:
                 break
             yp, tp = ypt, tpt
         yp -= y0
-        # It is better to overestimate tp than under.
-        #tp -= float(c[n][0] + c[n+1][0])/2.0
-        tp -= c[n][0]
+        tp -= float(c[n][0] + c[n+1][0])/2.0
         tp *= 1e-9 # it was in nanoseconds, we want seconds
         D = (yp - yinf) / yinf
         B = abs((test_cur-yinf) / yinf)
         A = 1.152*D**2 - 1.607*D + 1
         r = 2*A / B
-        logging.info("yinf = %g, yp = %g, tp = %g"%(yinf, yp, tp))
+        logging.info("yinf = %g, yp = %g, tp = %g, dt = %g"%(yinf, yp, tp, c[n+1][0]-c[n][0]))
         k = 1.0 / (Kc0*B)
         theta = tp * (0.309 + 0.209 * math.exp(-0.61*r))
         tau1 = r*theta
         logging.info("TMC 4671 %s %s PID system model k=%g, theta=%g, tau1=%g"%(self.name, X, k, theta, tau1,))
         Kc, taui = sapc(k, theta, tau1, theta)
         # Account for sampling frequency etc
-        #Kc *= 0.8
-        Ki = Kc/(taui*self.pwmfreq)
+        Kc *= 2.0 * 1.58
+        Ki = 2.0 * Kc/(taui*self.pwmfreq)
         logging.info("TMC 4671 %s %s PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, X, Kc, taui, Ki))
         if not test_existing:
             self._write_field("PID_%s_P"%X, self.pid_helpers["%s_P"%X].to_f(Kc))
