@@ -12,7 +12,7 @@ import math
 from time import monotonic_ns
 from enum import IntEnum
 from typing import NamedTuple
-from statistics import median_low, mean
+from statistics import median_low, mean, fmean, harmonic_mean
 from extras import bus, tmc, thermistor
 
 # The 4671 has a 25 MHz external clock
@@ -1128,7 +1128,7 @@ class CurrentHelper:
         self.homing_current = config.getfloat('homing_current', above=0.,
                                               maxval=MAX_CURRENT,
                                               default=self.run_current)
-        self.flux_current = config.getfloat('flux_current', above=0.,
+        self.flux_current = config.getfloat('flux_current',
                                               maxval=MAX_CURRENT,
                                               default=0.)
         self.current_scale = config.getfloat('current_scale_ma_lsb', 1.272,
@@ -1895,7 +1895,7 @@ class TMC4671:
         return self._convert_vm(self._read_field("ADC_VM_RAW"))
 
     def _tune_flux_pid(self, test_existing, derate, print_time):
-        return self._tune_pid("FLUX", 4.5, derate, True, test_existing, print_time)
+        return self._tune_pid("FLUX", 2.5, derate, True, test_existing, print_time)
 
     def _tune_torque_pid(self, test_existing, derate, print_time):
         return self._tune_pid("TORQUE", 1.0, derate, True, test_existing, print_time)
@@ -1923,7 +1923,7 @@ class TMC4671:
         self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
         # Turn on the chopper and wait a bit to measure the resistance
         self._write_field("PWM_CHOP", 7)
-        dwell(0.1)
+        dwell(0.2)
         c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
         self._write_field("PWM_CHOP", 0)
         logging.info("TMC 4671 '%s' initial I %s", self.stepper_name, str(self.current_helper.get_current()))
@@ -1936,7 +1936,7 @@ class TMC4671:
         # Switch back on, and this time motor should self-align
         self._write_field("UD_EXT", test2_U)
         self._write_field("PWM_CHOP", 7)
-        dwell(0.1)
+        dwell(0.2)
         c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
         logging.info("TMC 4671 '%s' alignment I %s", self.stepper_name, str(self.current_helper.get_current()))
         test2_U/(self.vm_range/self.voltage_scale)
@@ -1946,7 +1946,7 @@ class TMC4671:
             dwell(0.2)
             self._write_field("PWM_CHOP", 0)
             # Give it some time to settle
-            dwell(0.1)
+            dwell(0.2)
             self._write_field("PWM_CHOP", 7)
         # Give it some time to settle
         dwell(0.2)
@@ -1958,26 +1958,31 @@ class TMC4671:
             self._write_field("ABN_DECODER_PHI_E_OFFSET", 0)
         self._write_field("MODE_MOTION", MotionMode.stopped_mode)
         # Give it some time to settle
-        dwell(0.1)
+        dwell(0.2)
         self._write_field("MODE_MOTION", MotionMode.torque_mode)
         test_cur = limit_cur #// 2
         old_cur = self._read_field("PID_%s_ACTUAL"%X)
-        dwell(0.1)
+        dwell(0.2)
         if not test_existing:
             Kc0 = Kc
             self._write_field("PID_%s_P"%X, self.pid_helpers["%s_P"%X].to_f(Kc0))
             self._write_field("PID_%s_I"%X, self.pid_helpers["%s_I"%X].to_f(0.0))
         else:
             Kc0 = from_q4_12(self._read_field("PID_%s_P"%X))
-        # Do a setpoint change experiment
-        self._write_field("PID_%s_TARGET"%X, 0)
         logging.info("test_cur = %d"%test_cur)
-        n = 100
-        c = self._dump_pid(n, X)
-        self._write_field("PID_%s_TARGET"%X, test_cur)
-        c += self._dump_pid(n, X)
-        # Experiment over, switch off
-        self._write_field("PID_%s_TARGET"%X, 0)
+        n = 20
+        tests = []
+        nt = 5
+        for i in range(nt):
+            # Do a setpoint change experiment
+            self._write_field("PID_%s_TARGET"%X, 0)
+            c = self._dump_pid(n, X)
+            self._write_field("PID_%s_TARGET"%X, test_cur)
+            c += self._dump_pid(n, X)
+            # Experiment over, switch off
+            self._write_field("PID_%s_TARGET"%X, 0)
+            tests.append(c)
+            dwell(0.2)
         # Put motion config back how it was
         self._write_field("PID_TORQUE_TARGET", 0)
         self._write_field("PID_VELOCITY_TARGET", 0)
@@ -1987,37 +1992,45 @@ class TMC4671:
         self._write_field("PID_FLUX_OFFSET", old_flux_offset)
         self._write_field("PHI_E_SELECTION", old_phi_e_selection)
         # Analysis and logging
-        #for r in c:
-        #    logging.info("%g,%s"%(float(r[0]-c[0][0])/1e9,','.join(map(str, r[1:]))))
         # At this point we can determine system model
-        y0 = sum(float(a[1]) for a in c[0:n])/float(n)
-        yinf = sum(float(a[1]) for a in c[3*n//2:2*n])/float(2*n - 3*n//2) - y0
-        if yinf < 0.0:
-            # Wups, turned out negative...
-            yinf *= -1.0
-            c = [(t, -y) for t, y in c]
-        yp = -100000 # Not a possible value
-        tp, ypt = c[n+1]
-        for tpt, ypr in c[n+2:-1]:
-            ypt += 0.99*(ypr-ypt)
-            if ypt < yp:
-                break
-            yp, tp = ypt, tpt
-        yp -= y0
-        tp -= float(c[n][0] + c[n+1][0])/2.0
-        tp *= 1e-9 # it was in nanoseconds, we want seconds
+        res = []
+        for c in tests:
+            for r in c:
+                logging.info("%g,%s"%(float(r[0]-c[0][0])/1e9,','.join(map(str, r[1:]))))
+            y0 = sum(float(a[1]) for a in c[0:n])/float(n)
+            yinf = sum(float(a[1]) for a in c[3*n//2:2*n])/float(2*n - 3*n//2) - y0
+            if yinf < 0.0:
+                # Wups, turned out negative...
+                yinf *= -1.0
+                c = [(t, -y) for t, y in c]
+            yp = -100000 # Not a possible value
+            tp, ypt = c[n+1]
+            for tpt, ypr in c[n+2:-1]:
+                ypt += 0.99*(ypr-ypt)
+                if ypt < yp:
+                    break
+                yp, tp = ypt, tpt
+            yp -= y0
+            tp -= float(c[n][0] + c[n+1][0])/2.0
+            tp *= 1e-9 # it was in nanoseconds, we want seconds
+            logging.info("yinf = %g, yp = %g, tp = %g, dt = %g"%(yinf, yp, tp, c[n+1][0]-c[n][0]))
+            res.append((yinf, yp, tp))
+
+        yinf = fmean(s[0] for s in res)
+        yp = fmean(s[1] for s in res)
+        tp = harmonic_mean(s[2] for s in res)
+
         D = (yp - yinf) / yinf
         B = abs((test_cur-yinf) / yinf)
         A = 1.152*D**2 - 1.607*D + 1
         r = 2*A / B
-        logging.info("yinf = %g, yp = %g, tp = %g, dt = %g"%(yinf, yp, tp, c[n+1][0]-c[n][0]))
         k = 1.0 / (Kc0*B)
         theta = tp * (0.309 + 0.209 * math.exp(-0.61*r))
         tau1 = r*theta
         logging.info("TMC 4671 %s %s PID system model k=%g, theta=%g, tau1=%g"%(self.name, X, k, theta, tau1,))
         Kc, taui = sapc(k, theta, tau1, theta)
         # Account for sampling frequency etc
-        Kc *= 2.0 * 1.58
+        Kc *= 1.58
         Ki = 2.0 * Kc/(taui*self.pwmfreq)
         logging.info("TMC 4671 %s %s PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, X, Kc, taui, Ki))
         if not test_existing:
