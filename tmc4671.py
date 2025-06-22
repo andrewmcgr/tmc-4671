@@ -1970,7 +1970,7 @@ class TMC4671:
         else:
             Kc0 = from_q4_12(self._read_field("PID_%s_P"%X))
         logging.info("test_cur = %d"%test_cur)
-        n = 20
+        n = 40
         tests = []
         nt = 5
         for i in range(nt):
@@ -2006,12 +2006,14 @@ class TMC4671:
             yp = -100000 # Not a possible value
             tp, ypt = c[n+1]
             for tpt, ypr in c[n+2:-1]:
-                ypt += 0.99*(ypr-ypt)
+                #ypt += 0.99*(ypr-ypt)
+                ypt = ypr
                 if ypt < yp:
                     break
                 yp, tp = ypt, tpt
             yp -= y0
-            tp -= float(c[n][0] + c[n+1][0])/2.0
+            # estimate the actual start time of the experiment.
+            tp -= float(c[n][0] + c[n+2][0] - c[n+1][0])
             tp *= 1e-9 # it was in nanoseconds, we want seconds
             logging.info("yinf = %g, yp = %g, tp = %g, dt = %g"%(yinf, yp, tp, c[n+1][0]-c[n][0]))
             res.append((yinf, yp, tp))
@@ -2046,12 +2048,11 @@ class TMC4671:
         return Kc, Ki
 
     def _dump_pid(self, n, X):
-        f = "PID_%s_ACTUAL"%X
-        c = [(0,0)]*(n)
-        for i in range(n):
-            cur = self._read_field(f)
-            c[i]=(monotonic_ns(), cur,)
-        return c
+        field = "PID_%s_ACTUAL"%X
+        reg_name = self.fields.lookup_register(field)
+        getr = lambda: self.mcu_tmc.get_register(reg_name)
+        c = [(monotonic_ns(), getr(),) for _ in range(n)]
+        return [(t, self.fields.get_field(field, reg_value=v, reg_name=reg_name)) for t,v in c]
 
     def _init_registers(self, print_time=None):
         with self.mutex:
