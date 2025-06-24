@@ -35,6 +35,26 @@ Klipper driver features:
 * Optional TMC6100 output driver initialisation support (requred for the eval board, not used for OpenFFBoard)
 * Virtual steps-per-revolution and microsteps. Klipper treats the TMC 4671 as if it were a conventional stepper driver, all servo activity takes place in hardware. Thus the steps and microsteps in the configuration have no particular relation to the motor, and instead are translated to position angle targets within the TMC 4671.
 
+## Klipper Installation
+
+To install this plugin, run the installation script using the following command over SSH. This script will download this GitHub repository to your RaspberryPi home directory, and symlink the files in the Klipper extra folder.
+
+```bash
+wget -O - https://raw.githubusercontent.com/andrewmcgr/tmc-4671/main/install.sh | bash
+```
+
+Then, add the following to your `moonraker.conf` to enable automatic updates:
+```ini
+[update_manager tmc-4671]
+type: git_repo
+channel: dev
+path: ~/tmc-4671
+origin: https://github.com/andrewmcgr/tmc-4671.git
+managed_services: klipper
+primary_branch: main
+install_script: install.sh
+```
+
 ## How to use this driver:
 
 Wiring:
