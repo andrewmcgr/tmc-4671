@@ -1798,7 +1798,7 @@ class TMC4671:
             enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
             enable_line.motor_enable(print_time)
             # Just test the PID, as it also sets up the encoder offsets
-            P, I = self._tune_flux_pid(True, 1.0, print_time)
+            self._align(print_time)
             self._write_field("ABN_DECODER_COUNT", 0)
             self._write_field("PID_POSITION_TARGET", 0)
             print_time = self.printer.lookup_object('toolhead').get_last_move_time()
@@ -1893,6 +1893,72 @@ class TMC4671:
 
     def _read_vm(self):
         return self._convert_vm(self._read_field("ADC_VM_RAW"))
+
+    # Align motor
+    def _align(self, print_time):
+        ch = self.current_helper
+        dwell = self.printer.lookup_object('toolhead').dwell
+        old_mode = self._read_field("MODE_MOTION")
+        old_phi_e_selection = self._read_field("PHI_E_SELECTION")
+        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+        limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
+        old_flux_offset = self._read_field("PID_FLUX_OFFSET")
+        self._write_field("PHI_E_EXT", 0) # and, set this to be PHI_E = 0
+        self._write_field("PHI_E_SELECTION", 1) # external mode, so it won't change.
+        # Start at some low voltage and see if we can read a current
+        test_U = round(self.vm_range/self.voltage_scale) # Should be about 1V
+        self._write_field("UQ_EXT", 0)
+        self._write_field("UD_EXT", test_U)
+        self._write_field("PID_TORQUE_TARGET", 0)
+        self._write_field("PID_VELOCITY_TARGET", 0)
+        self._write_field("PID_POSITION_TARGET", 0)
+        self._write_field("PID_POSITION_ACTUAL", 0)
+        self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
+        # Turn on the chopper and wait a bit to measure the resistance
+        self._write_field("PWM_CHOP", 7)
+        dwell(0.1)
+        c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
+        self._write_field("PWM_CHOP", 0)
+        logging.info("TMC 4671 '%s' initial I %s", self.stepper_name, str(self.current_helper.get_current()))
+        if max(abs(iux), abs(iwy)) < 1e-6:
+            # something is horribly wrong
+             raise self.printer.command_error("TMC 4671 is seeing no motor current. Check wiring.")
+        # Ok, calculate a voltage that will give us about a third of the configured current limit
+        test2_U = round((c / 2.0) * test_U / max(abs(iux), abs(iwy)))
+        logging.info("TMC 4671 '%s' test U %g %g", self.stepper_name, test_U, test2_U)
+        # Switch back on, and this time motor should self-align
+        self._write_field("UD_EXT", test2_U)
+        self._write_field("PWM_CHOP", 7)
+        dwell(0.2)
+        c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
+        logging.info("TMC 4671 '%s' alignment I %s", self.stepper_name, str(self.current_helper.get_current()))
+        test2_U/(self.vm_range/self.voltage_scale)
+        R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
+        logging.info("TMC 4671 '%s' est. motor R=%g", self.stepper_name, R)
+        for i in range(5):
+            dwell(0.2)
+            self._write_field("PWM_CHOP", 0)
+            # Give it some time to settle
+            dwell(0.2)
+            self._write_field("PWM_CHOP", 7)
+        # Give it some time to settle
+        dwell(0.2)
+        # Now we should be mechanically aligned
+        # Set the offsets
+        self._write_field("HALL_PHI_E_OFFSET", -self._read_field("HALL_PHI_E")%65536),
+        self._write_field("ABN_DECODER_COUNT", 0)
+        self._write_field("ABN_DECODER_PHI_E_OFFSET", 0)
+        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+        # Give it some time to settle
+        dwell(0.1)
+        # Put motion config back how it was
+        self._write_field("PID_TORQUE_TARGET", 0)
+        self._write_field("PID_VELOCITY_TARGET", 0)
+        self._write_field("PID_POSITION_TARGET", 0)
+        self._write_field("PID_POSITION_ACTUAL", 0)
+        self._write_field("MODE_MOTION", old_mode)
+        self._write_field("PID_FLUX_OFFSET", old_flux_offset)
+        self._write_field("PHI_E_SELECTION", old_phi_e_selection)
 
     def _tune_flux_pid(self, test_existing, derate, print_time):
         return self._tune_pid("FLUX", 2.5, derate, True, test_existing, print_time)
