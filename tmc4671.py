@@ -1935,7 +1935,7 @@ class TMC4671:
         test2_U/(self.vm_range/self.voltage_scale)
         R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
         logging.info("TMC 4671 '%s' est. motor R=%g", self.stepper_name, R)
-        for i in range(2):
+        for i in range(5):
             dwell(0.2)
             self._write_field("PWM_CHOP", 0)
             # Give it some time to settle
@@ -1943,20 +1943,26 @@ class TMC4671:
             self._write_field("PWM_CHOP", 7)
         # Give it some time to settle
         dwell(0.2)
+        align_cur = self._read_field("PID_TORQUE_FLUX_LIMITS") // 2
+        self._write_field("PID_FLUX_TARGET", align_cur)
+        self._write_field("PID_TORQUE_TARGET", 0)
+        self._write_field("MODE_MOTION", MotionMode.torque_mode)
+        # Give it some time to settle
+        dwell(0.4)
         # Now we should be mechanically aligned
         # Set the offsets
         self._write_field("HALL_PHI_E_OFFSET", -self._read_field("HALL_PHI_E")%65536),
         self._write_field("ABN_DECODER_COUNT", 0)
         self._write_field("ABN_DECODER_PHI_E_OFFSET", 0)
-        self._write_field("MODE_MOTION", MotionMode.torque_mode)
-        # Give it some time to settle
-        dwell(0.2)
         self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+        dwell(0.2)
         # Put motion config back how it was
+        self._write_field("PID_FLUX_TARGET", 0)
         self._write_field("PID_TORQUE_TARGET", 0)
         self._write_field("PID_VELOCITY_TARGET", 0)
-        self._write_field("PID_POSITION_TARGET", 0)
-        self._write_field("PID_POSITION_ACTUAL", 0)
+        # Don't do this here... sometimes yeets the toolhead at next switch-on
+        #self._write_field("PID_POSITION_TARGET", 0)
+        #self._write_field("PID_POSITION_ACTUAL", 0)
         self._write_field("MODE_MOTION", old_mode)
         self._write_field("PID_FLUX_OFFSET", old_flux_offset)
         self._write_field("PHI_E_SELECTION", old_phi_e_selection)
@@ -1977,52 +1983,8 @@ class TMC4671:
         self._write_field("MODE_MOTION", MotionMode.stopped_mode)
         limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
         old_flux_offset = self._read_field("PID_FLUX_OFFSET")
-        self._write_field("PHI_E_EXT", 0) # and, set this to be PHI_E = 0
-        self._write_field("PHI_E_SELECTION", 1) # external mode, so it won't change.
-        # Start at some low voltage and see if we can read a current
-        test_U = round(self.vm_range/self.voltage_scale) # Should be about 1V
-        self._write_field("UQ_EXT", 0)
-        self._write_field("UD_EXT", test_U)
-        self._write_field("PID_TORQUE_TARGET", 0)
-        self._write_field("PID_VELOCITY_TARGET", 0)
-        self._write_field("PID_POSITION_TARGET", 0)
-        self._write_field("PID_POSITION_ACTUAL", 0)
-        self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
-        # Turn on the chopper and wait a bit to measure the resistance
-        self._write_field("PWM_CHOP", 7)
-        dwell(0.2)
-        c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
-        self._write_field("PWM_CHOP", 0)
-        logging.info("TMC 4671 '%s' initial I %s", self.stepper_name, str(self.current_helper.get_current()))
-        if max(abs(iux), abs(iwy)) < 1e-6:
-            # something is horribly wrong
-             raise self.printer.command_error("TMC 4671 is seeing no motor current. Check wiring.")
-        # Ok, calculate a voltage that will give us about a third of the configured current limit
-        test2_U = round((c / 2.0) * test_U / max(abs(iux), abs(iwy)))
-        logging.info("TMC 4671 '%s' test U %g %g", self.stepper_name, test_U, test2_U)
-        # Switch back on, and this time motor should self-align
-        self._write_field("UD_EXT", test2_U)
-        self._write_field("PWM_CHOP", 7)
-        dwell(0.2)
-        c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
-        logging.info("TMC 4671 '%s' alignment I %s", self.stepper_name, str(self.current_helper.get_current()))
-        test2_U/(self.vm_range/self.voltage_scale)
-        R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
-        logging.info("TMC 4671 '%s' est. motor R=%g", self.stepper_name, R)
-        for i in range(5):
-            dwell(0.2)
-            self._write_field("PWM_CHOP", 0)
-            # Give it some time to settle
-            dwell(0.2)
-            self._write_field("PWM_CHOP", 7)
-        # Give it some time to settle
-        dwell(0.2)
-        # Now we should be mechanically aligned
-        if offsets:
-            # While we're here, set the offsets
-            self._write_field("HALL_PHI_E_OFFSET", -self._read_field("HALL_PHI_E")%65536),
-            self._write_field("ABN_DECODER_COUNT", 0)
-            self._write_field("ABN_DECODER_PHI_E_OFFSET", 0)
+        self._align(print_time)
+        # We should be mechanically aligned now.
         self._write_field("MODE_MOTION", MotionMode.torque_mode)
         # Give it some time to settle
         dwell(0.2)
