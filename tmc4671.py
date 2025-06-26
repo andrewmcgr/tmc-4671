@@ -1918,7 +1918,7 @@ class TMC4671:
             # something is horribly wrong
              raise self.printer.command_error("TMC 4671 is seeing no motor current. Check wiring.")
         # Ok, calculate a voltage that will give us about a third of the configured current limit
-        test2_U = round((c / 2.0) * test_U / max(abs(iux), abs(iwy)))
+        test2_U = round((c / 3.0) * test_U / max(abs(iux), abs(iwy)))
         logging.info("TMC 4671 '%s' test U %g %g", self.stepper_name, test_U, test2_U)
         # Switch back on, and this time motor should self-align
         self._write_field("UD_EXT", test2_U)
@@ -1936,8 +1936,9 @@ class TMC4671:
             dwell(0.2)
             self._write_field("PWM_CHOP", 7)
         # Give it some time to settle
+        self._write_field("UD_EXT", 0)
         dwell(0.2)
-        align_cur = self._read_field("PID_TORQUE_FLUX_LIMITS") // 2
+        align_cur = self._read_field("PID_TORQUE_FLUX_LIMITS") // 4
         self._write_field("PID_FLUX_TARGET", align_cur)
         self._write_field("PID_TORQUE_TARGET", 0)
         self._write_field("MODE_MOTION", MotionMode.torque_mode)
