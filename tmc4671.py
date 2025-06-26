@@ -1541,10 +1541,6 @@ class TMC4671:
                                    TMC_FREQUENCY, pin_option="cs_pin")
         self.read_translate = None
         self.read_registers = Registers.keys()
-        self.printer.register_event_handler("klippy:ready",
-                                            self._handle_ready)
-        #self.printer.register_event_handler("idle_timeout:ready",
-        #                                    self._handle_ready)
         self.stepper = None
         self.stepper_enable = self.printer.load_object(config, "stepper_enable")
         self.printer.register_event_handler("klippy:mcu_identify",
@@ -1759,9 +1755,6 @@ class TMC4671:
         else:
             cb = (lambda ev: self._do_disable(print_time))
         self.printer.get_reactor().register_callback(cb)
-
-    def _handle_ready(self, print_time=None):
-        pass
 
     def _handle_connect(self):
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
