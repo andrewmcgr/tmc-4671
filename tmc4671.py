@@ -1903,7 +1903,7 @@ class TMC4671:
         self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
         # Turn on the chopper and wait a bit to measure the resistance
         self._write_field("PWM_CHOP", 7)
-        dwell(0.1)
+        dwell(0.3)
         c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
         self._write_field("PWM_CHOP", 0)
         logging.info("TMC 4671 '%s' initial I %s", self.stepper_name, str(self.current_helper.get_current()))
@@ -1943,7 +1943,7 @@ class TMC4671:
         self._write_field("ABN_DECODER_COUNT", 0)
         self._write_field("ABN_DECODER_PHI_E_OFFSET", 0)
         self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-        dwell(0.2)
+        dwell(0.4)
         # Put motion config back how it was
         self._write_field("PID_FLUX_TARGET", 0)
         self._write_field("PID_TORQUE_TARGET", 0)
