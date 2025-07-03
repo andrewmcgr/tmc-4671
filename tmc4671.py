@@ -1905,9 +1905,9 @@ class TMC4671:
             # Turn on the chopper and wait a bit to measure the resistance
             self._write_field("PWM_CHOP", 7)
             dwell(0.3)
-            c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
+            c, MAX_I, iux, iv, iwy = II = self.current_helper.get_current()
             self._write_field("PWM_CHOP", 0)
-            logging.info("TMC 4671 '%s' initial I %s", self.stepper_name, str(self.current_helper.get_current()))
+            logging.info("TMC 4671 '%s' initial I %s", self.stepper_name, str(II))
             if max(abs(iux), abs(iwy)) < 1e-6:
                 # something is horribly wrong
                  raise self.printer.command_error("TMC 4671 is seeing no motor current. Check wiring.")
@@ -1918,8 +1918,8 @@ class TMC4671:
             self._write_field("UD_EXT", test2_U)
             self._write_field("PWM_CHOP", 7)
             dwell(0.2)
-            c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
-            logging.info("TMC 4671 '%s' alignment I %s", self.stepper_name, str(self.current_helper.get_current()))
+            c, MAX_I, iux, iv, iwy = II = self.current_helper.get_current()
+            logging.info("TMC 4671 '%s' alignment I %s", self.stepper_name, str(II))
             test2_U/(self.vm_range/self.voltage_scale)
             R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
             logging.info("TMC 4671 '%s' est. motor R=%g", self.stepper_name, R)
@@ -2092,7 +2092,6 @@ class TMC4671:
             self._write_field("PID_TORQUE_TARGET", 0)
             self._write_field("PID_VELOCITY_TARGET", 0)
             self._write_field("PID_POSITION_TARGET", 0)
-            self._write_field("PWM_CHOP", 7)
             # Send registers, 6100 first if configured then 4671
             if self.fields6100 is not None:
                 for reg_name in list(self.fields6100.registers.keys()):
@@ -2105,6 +2104,7 @@ class TMC4671:
                 self.mcu_tmc.set_register(reg_name, val, print_time)
             self._calibrate_adc(print_time)
             self._setup_filters()
+            self._write_field("PWM_CHOP", 7)
 
     def _setup_filter(self, register: str, biquad_filter: BiquadFilter) -> None:
         enabled = int(biquad_filter.freq > 0)
