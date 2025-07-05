@@ -805,14 +805,14 @@ FieldFormatters = {
     "ABN_DECODER_PHI_E": format_phi,
     "ABN_DECODER_PHI_E_OFFSET": format_phi,
     "ABN_DECODER_PHI_M_OFFSET": format_phi,
-    "PID_FLUX_P": format_q4_12,
-    "PID_FLUX_I": format_q4_12,
-    "PID_TORQUE_P": format_q4_12,
-    "PID_TORQUE_I": format_q4_12,
-    "PID_VELOCITY_P": format_q8_8,
-    "PID_VELOCITY_I": format_q4_12,
-    "PID_POSITION_P": format_q8_8,
-    "PID_POSITION_I": format_q4_12,
+    # "PID_FLUX_P": format_q4_12,
+    # "PID_FLUX_I": format_q4_12,
+    # "PID_TORQUE_P": format_q4_12,
+    # "PID_TORQUE_I": format_q4_12,
+    # "PID_VELOCITY_P": format_q8_8,
+    # "PID_VELOCITY_I": format_q4_12,
+    # "PID_POSITION_P": format_q8_8,
+    # "PID_POSITION_I": format_q4_12,
 }
 
 DumpGroups = {
@@ -1633,12 +1633,12 @@ class TMC4671:
         set_config_field(config, "PHI_E_SELECTION", 3)
         # 0: phi_e, 3: ABN_e 5: Hall_e 9: ABN_m 12: Hall_m
         set_config_field(config, "POSITION_SELECTION", 9)
-        set_config_field(config, "VELOCITY_SELECTION", 3)
+        set_config_field(config, "VELOCITY_SELECTION", 9)
         #set_config_field(config, "VELOCITY_METER_SELECTION", 0) # Default velocity meter
         set_config_field(config, "VELOCITY_METER_SELECTION", 1) # PWM frequency velocity meter
         set_config_field(config, "MODE_PID_SMPL", 0) # Advanced PID samples position at fPWM
         set_config_field(config, "MODE_PID_TYPE", 1) # Advanced PID mode
-        set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 31500) # Voltage limit, 32768 = Vm
+        set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 32500) # Voltage limit, 32768 = Vm
         # TODO: get this from the size of the printer
         set_config_field(config, "PID_POSITION_LIMIT_LOW", -0x10000000)
         set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x10000000)
@@ -1978,10 +1978,18 @@ class TMC4671:
         self._write_field("PID_VELOCITY_TARGET", 0)
         self._write_field("PID_POSITION_TARGET", 0)
         self._write_field("PID_POSITION_ACTUAL", 0)
+        # While we are still in torque mode, measure torque to position gain
+        self._write_field("PID_TORQUE_TARGET", test_cur)
+        dwell(0.1)
+        self._write_field("PID_TORQUE_TARGET", 0)
+        dwell(0.1)
+        pos = self._read_field("PID_POSITION_ACTUAL")
+        self._write_field("PID_POSITION_TARGET", pos)
         self._write_field("MODE_MOTION", old_mode)
         self._write_field("PID_FLUX_OFFSET", old_flux_offset)
         self._write_field("PHI_E_SELECTION", old_phi_e_selection)
         # Analysis and logging
+        logging.info("pos = %g"%(pos,))
         #for r in c:
         #    logging.info("%g,%s"%(float(r[0]-c[0][0])/1e9,','.join(map(str, r[1:]))))
         # At this point we can determine system model
