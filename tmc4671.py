@@ -1562,6 +1562,9 @@ class TMC4671:
         gcode.register_mux_command("TMC_DEBUG_MOVE", "STEPPER", self.name,
                                    self.cmd_TMC_DEBUG_MOVE,
                                    desc=self.cmd_TMC_DEBUG_MOVE_help)
+        gcode.register_mux_command("TMC_TUNE_MOTION_PID", "STEPPER", self.name,
+                                   self.cmd_TMC_TUNE_MOTION_PID,
+                                   desc=self.cmd_TMC_TUNE_MOTION_PID_help)
         gcode.register_mux_command("TMC_TUNE_PID", "STEPPER", self.name,
                                    self.cmd_TMC_TUNE_PID,
                                    desc=self.cmd_TMC_TUNE_PID_help)
@@ -2125,6 +2128,47 @@ class TMC4671:
         logging.info("INIT_TMC %s", self.name)
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         self._init_registers(print_time)
+
+    cmd_TMC_TUNE_MOTION_PID_help = "Tune the current and torque PID coefficients"
+    def cmd_TMC_TUNE_MOTION_PID(self, gcmd):
+        l_v = gcmd.get_float('LAMBDA_V', 100)
+        l_p = gcmd.get_float('LAMBDA_P', 400)
+        I_h = gcmd.get_float('HOLDING_CURRENT', None)
+        T_h = gcmd.get_float('HOLDING_TORQUE', None)
+        Kt = gcmd.get_float('KT', None)
+        if Kt is None:
+            if (I_h is None or T_h is None):
+                gcmd.respond_info("Must supply KT or both HOLDING_TORQUE and HOLDING_CURRENT.")
+                return
+            Kt = T_h / I_h
+        Kadc = self.current_helper.current_scale * 1e-3
+        NPP = self._read_field("N_POLE_PAIRS")
+        rotation_distance, _ = self.stepper.get_rotation_distance()
+        t_d = 1.
+
+        k_v = Kadc / (Kt * math.pi)
+        t_iv = 2.*l_v + t_d
+        p_v = t_iv / (k_v * (l_v + t_d) ** 2)
+        i_v = 1. / t_iv
+
+        k_p = NPP / (256. * 50.)
+        t_ip = 2.*l_p + t_d
+        p_p = t_ip / (k_p * (l_p + t_d) ** 2)
+        i_p = 1. / t_ip
+
+        self._write_field("PID_VELOCITY_P", self.pid_helpers["VELOCITY_P"].to_f(p_v))
+        self._write_field("PID_VELOCITY_I", self.pid_helpers["VELOCITY_I"].to_f(i_v))
+        self._write_field("PID_POSITION_P", self.pid_helpers["POSITION_P"].to_f(p_p))
+        self._write_field("PID_POSITION_I", self.pid_helpers["POSITION_I"].to_f(i_p))
+
+        gcmd.respond_info(
+            "PID %s parameters calculated.\n"
+            "k_v=%.5f k_p=%.5f\n KT=%.5f\n"
+            "p_v=%.5f i_v=%.5f p_p=%.5f i_p=%.5f\n"
+            "The SAVE_CONFIG command will update the printer config file\n"
+            "with these parameters and restart the printer.\n"
+            "Suggested torque and velocity filter frequency: %d\n"
+            % (self.name, k_v, k_p, Kt, p_v, i_v, p_p, i_p, 3.0*self.pwmfreq / l_v))
 
     cmd_TMC_TUNE_PID_help = "Tune the current and torque PID coefficients"
     def cmd_TMC_TUNE_PID(self, gcmd):
