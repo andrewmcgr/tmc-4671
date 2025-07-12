@@ -64,8 +64,8 @@ Wiring:
 * Connect the encoder you are using. Note that digital Hall sensors, while they sort of work, will not give good results with Klipper.
 * Configure the driver's variables appropriately. This will basically require reading the datasheet for the 4671 and the schematic for your driver board very carefully. The work to make this more user-friendly has not yet been done.
 * `current_scale_ma_lsb` is 1.155 for the OpenFFBoard with ACS724T-30AB current sensors, and 1.272 for the EVAL-BOB
-* `run_current` should be total peak current, which means 2.8 times the rated current for a stepper motor, maximum. For BLDC, calculate this from the peak power dissipation, if no rated current is given, then multiply by 3.4. Yes, this gives some very large-seeming current values, but the 4671 will not use them except very briefly.
-* Configure the matching stepper section with appropriate full_steps_per_rotation and microsteps. Both must be powers of two, and their product must be less than 65536. 256 steps and 8 microsteps works well in most cases.
+* `run_current` should be total peak current, which means 1.4 times the rated current for a stepper motor, maximum. For BLDC, calculate this from the peak power dissipation, if no rated current is given, then multiply by 2.8. Yes, this gives some very large-seeming current values, but the 4671 will not use them except very briefly.
+* Configure the matching stepper section with appropriate full_steps_per_rotation and microsteps. Both must be powers of two, and their product must be less than 65536. 4096 steps and 2 microsteps works well in most cases.
 
 The following is a working example for driving an LDO 2504-E1000 stepper with OpenFFBoard drivers and the OpenFFBoard MCU. Other stepper motors with 1000 line optical encoders will be similar. LDO use a 6-wire encoder, the signals being A+, A-, B+, B-, 5V and common. A-, B- and common must be wired to the driver board's encoder port GND A+ to A, B+ to B, 5V to 5V, and the board's Z left unconnected. Other encoders may have no signal minus pins. Z can safely be connected, and will be used by the driver.
 ```ini
@@ -92,9 +92,8 @@ spi_bus: spi1
 spi_speed: 2000000
 diag_pin: tmcx:PE8
 current_scale_ma_lsb: 1.155
-adc_temp_reg: AGPI_B
-run_current: 7.0
-flux_current: 1.6
+run_current: 3.5
+flux_current: 0.02
 foc_motor_type: 2
 foc_n_pole_pairs: 50
 foc_pwm_sv: 0
@@ -105,15 +104,17 @@ foc_abn_decoder_ppr: 4000
 foc_abn_direction: 0
 foc_phi_e_selection: 3
 foc_position_selection: 9
-foc_velocity_selection: 3
+foc_velocity_selection: 9
 foc_pid_flux_i: 0.485
 foc_pid_flux_p: 9.66
 foc_pid_torque_i: 0.485
 foc_pid_torque_p: 9.66
-foc_pid_velocity_p: 3.2
-foc_pid_position_p: 3.0
-biquad_flux_frequency: 5000
-biquad_torque_frequency: 5000
+foc_pid_velocity_i: 0.00826
+foc_pid_velocity_p: 1.408
+foc_pid_position_i: 0.00277
+foc_pid_position_p: 2.82
+biquad_flux_frequency: 0
+biquad_torque_frequency: 0
 biquad_velocity_frequency: 0
 biquad_position_frequency: 0
 ```
@@ -139,4 +140,16 @@ It is a good idea to copy the output values to both flux and torque, and use the
 
 `biquad_torque_frequency` and `biquad_flux_frequency` adjust the digital filters for current measurement. Reasonable values range from about 40 Hz to about 5000 Hz, with most NEMA 17 motors liking values near 1600 Hz for torque and 800 Hz for flux. If the frequency is too high, the motor will make hissing noises while moving, if the frequency is too low it will tend to make noise while stationary, and to round off corners when printing fast. Flux frequencies can be a lot lower than torque frequencies, as the flux current does not need to change as dynamically. Filters for measured velocity and measured position are also available, but I have found no use for those in a 3D printer.
 
-Velocity and position can not be autotuned. Start with `velocity_p` and `position_p` set to 1.0, which should enable the motor to move. Increase velocity coefficient by steps of about 50% until the motor starts making noise at rest, at which point back off until it is quiet, then do the same for position. Again, the coefficients for a CoreXY printer should be equal on both motors.
+Velocity and position may be manually tuned. Start with `velocity_p` and `position_p` set to 1.0, which should enable the motor to move. Increase velocity coefficient by steps of about 50% until the motor starts making noise at rest, at which point back off until it is quiet, then do the same for position. Again, the coefficients for a CoreXY printer should be equal on both motors.
+
+Velocity and position may also be autotuned, by reference to parameters from the motor datasheet.
+```
+TMC_TUNE_MOTION_PID LAMBDA_V=80 LAMBDA_P=180 HOLDING_CURRENT=2.5 HOLDING_TORQUE=0.055 STEPPER=stepper_y
+```
+or
+```
+TMC_TUNE_MOTION_PID LAMBDA_V=80 LAMBDA_P=180 KT=0.022 STEPPER=stepper_y
+```
+depending on whether you know a KT value (in nM/A) or holding specifications. Lambda_v and Lambda_p are measures of how aggressive the tuning will be. Lambda_v can go from approximately 45 up, and Lambda_p should be at least twice Lambda_v; the default values are Lambda_v=100 and Lambda_p=400. `SAVE_CONFIG` will save the tuning values. The command will also suggest filter frequencies, but will not apply them.
+
+If the motors make noise at rest after autotuning, increase the Lambda values. If not, consider decreasing them; the minimum value that remains quiet at rest is likely also the optimal value.
