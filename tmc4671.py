@@ -1123,7 +1123,7 @@ class CurrentHelper:
         self.homing_current = config.getfloat('homing_current', above=0.,
                                               maxval=MAX_CURRENT,
                                               default=self.run_current)
-        self.flux_current = config.getfloat('flux_current', above=0.,
+        self.flux_current = config.getfloat('flux_current',
                                               maxval=MAX_CURRENT,
                                               default=0.)
         self.current_scale = config.getfloat('current_scale_ma_lsb', 1.272,
