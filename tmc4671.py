@@ -1217,8 +1217,9 @@ class TMCErrorCheck:
         #self.status_warn_mask = 0xffffffff
         self.status_error_mask = self._make_mask([#"PWM_MIN",
                                                   #"PWM_MAX",
-                                                  "ADC_I_CLIPPED",
-                                                  "AENC_CLIPPED"])
+                                                  #"AENC_CLIPPED",
+                                                  "ADC_I_CLIPPED"
+                                                  ])
         self.last_status = 0
         self.monitor_data = {n: None
                              for reg_name in DumpGroups["monitor"]
