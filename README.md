@@ -15,6 +15,8 @@ Supported hardware:
     * This board can drive all kinds of motors, including steppers.
     * 20 A 60 V limits
     * On-board thermistor for output MOSFET temnperature monitoring
+  * Ouroboros by Isik's Tech
+    * This board can drive *two* of all kinds of motors, including steppers.
 * Encoders
   * ABZ and AB encoders, voltages as supported by the driver board (most common types work)
     * 6-wire AB encoders with differential outputs work if wired correctly to the driver board. Integrated encoders in LDO motors are of this type, and are tested.
@@ -32,7 +34,7 @@ Klipper driver features:
 * Encoder autoinitialisation for relative encoders, or absolute encoders not indexed to the electrical phase of the motor
 * Sensorless homing (not currently working) by setting a low homing current and detecting failure to track the commanded position within the driver
 * On-driver limit switch pin support
-* Optional TMC6100 output driver initialisation support (requred for the eval board, not used for OpenFFBoard)
+* Optional TMC6100 output driver initialisation support (requred for the eval board, not used for OpenFFBoard or Ouroboros)
 * Virtual steps-per-revolution and microsteps. Klipper treats the TMC 4671 as if it were a conventional stepper driver, all servo activity takes place in hardware. Thus the steps and microsteps in the configuration have no particular relation to the motor, and instead are translated to position angle targets within the TMC 4671.
 
 ## Klipper Installation
@@ -63,7 +65,7 @@ Wiring:
 * Brake resistors are required. Mount them somewhere they can get hot without melting things (brake resistor temperatures around 95C are normal, though usually they'll be much cooler).
 * Connect the encoder you are using. Note that digital Hall sensors, while they sort of work, will not give good results with Klipper.
 * Configure the driver's variables appropriately. This will basically require reading the datasheet for the 4671 and the schematic for your driver board very carefully. The work to make this more user-friendly has not yet been done.
-* `current_scale_ma_lsb` is 1.155 for the OpenFFBoard with ACS724T-30AB current sensors, and 1.272 for the EVAL-BOB
+* `current_scale_ma_lsb` is 1.155 for the OpenFFBoard with ACS724T-30AB current sensors, and 1.272 for both the EVAL-BOB and Ouroboros
 * `run_current` should be total peak current, which means 1.4 times the rated current for a stepper motor, maximum. For BLDC, calculate this from the peak power dissipation, if no rated current is given, then multiply by 2.8. Yes, this gives some very large-seeming current values, but the 4671 will not use them except very briefly.
 * Configure the matching stepper section with appropriate full_steps_per_rotation and microsteps. Both must be powers of two, and their product must be less than 65536. 4096 steps and 2 microsteps works well in most cases.
 
