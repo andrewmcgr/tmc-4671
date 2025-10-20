@@ -2161,6 +2161,13 @@ class TMC4671:
         self._write_field("PID_VELOCITY_I", self.pid_helpers["VELOCITY_I"].to_f(i_v))
         self._write_field("PID_POSITION_P", self.pid_helpers["POSITION_P"].to_f(p_p))
         self._write_field("PID_POSITION_I", self.pid_helpers["POSITION_I"].to_f(i_p))
+        # Store results for SAVE_CONFIG
+        cfgname = "tmc4671 %s" % (self.name,)
+        configfile = self.printer.lookup_object('configfile')
+        configfile.set(cfgname, 'foc_PID_VELOCITY_P', "%.3f" % (p_v,))
+        configfile.set(cfgname, 'foc_PID_VELOCITY_I', "%.3f" % (i_v,))
+        configfile.set(cfgname, 'foc_PID_POSITION_P', "%.3f" % (p_p,))
+        configfile.set(cfgname, 'foc_PID_POSITION_I', "%.3f" % (i_p,))
 
         gcmd.respond_info(
             "PID %s parameters calculated.\n"
