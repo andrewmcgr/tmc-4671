@@ -1772,12 +1772,12 @@ class TMC4671:
             logging.info("TMC %s failed to init: %s", self.name, str(e))
         enable_line.register_state_callback(self._handle_stepper_enable)
 
-    #def _handle_ready(self):
-    #    # klippy:ready handlers are limited in what they may do. Communicating with a MCU
-    #    # will pause the reactor and is thus forbidden. That code has to run outside of the event handler.
-    #    self.printer.reactor.register_callback(self._handle_ready_deferred)
+    def _handle_ready(self):
+        # klippy:ready handlers are limited in what they may do. Communicating with a MCU
+        # will pause the reactor and is thus forbidden. That code has to run outside of the event handler.
+        self.printer.reactor.register_callback(self._handle_ready_deferred)
 
-    def _handle_ready(self, print_time=None):
+    def _handle_ready_deferred(self, print_time=None):
         with self.mutex:
             if print_time is None:
                 print_time = self.printer.lookup_object('toolhead').get_last_move_time()
