@@ -1775,7 +1775,7 @@ class TMC4671:
     def _handle_ready(self):
         # klippy:ready handlers are limited in what they may do. Communicating with a MCU
         # will pause the reactor and is thus forbidden. That code has to run outside of the event handler.
-        self.printer.reactor.register_callback(self._handle_ready_deferred)
+        self.printer.reactor.register_callback((lambda ev: self._handle_ready_deferred))
 
     def _handle_ready_deferred(self, print_time=None):
         with self.mutex:
