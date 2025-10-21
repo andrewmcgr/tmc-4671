@@ -1,0 +1,10 @@
+[project]
+name = "tmc4671"
+version = "0.1.0"
+description = "Kalico plugin for TMC-4671 drivers"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = []
+
+[project.entry-points."kalico.plugins"]
+tmc4671 = "tmc4671"
