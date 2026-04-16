@@ -38,6 +38,7 @@ Klipper driver features:
 * On-driver limit switch pin support
 * Optional TMC6100 output driver initialisation support (requred for the eval board, not used for OpenFFBoard or Ouroboros)
 * Virtual steps-per-revolution and microsteps. Klipper treats the TMC 4671 as if it were a conventional stepper driver, all servo activity takes place in hardware. Thus the steps and microsteps in the configuration have no particular relation to the motor, and instead are translated to position angle targets within the TMC 4671.
+* Phase current monitoring via ADC (current_ux, current_v, current_wy) — updated every 1 s in the periodic timer callback alongside STATUS_FLAGS, visible in Klipper's `get_status`
 
 ## Klipper Installation
 

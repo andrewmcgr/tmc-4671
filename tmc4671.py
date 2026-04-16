@@ -1201,12 +1201,13 @@ def StepHelper(config, mcu_tmc):
 
 
 class TMCErrorCheck:
-    def __init__(self, config, mcu_tmc):
+    def __init__(self, config, mcu_tmc, current_helper):
         self.printer = config.get_printer()
         name_parts = config.get_name().split()
         self.stepper_name = ' '.join(name_parts[1:])
         self.mcu_tmc = mcu_tmc
         self.fields = mcu_tmc.get_fields()
+        self.current_helper = current_helper
         self.check_timer = None
         self.status_warn_mask = self._make_mask(["PID_IQ_TARGET_LIMIT",
                                                  "PID_ID_TARGET_LIMIT",
@@ -1225,6 +1226,8 @@ class TMCErrorCheck:
                              for reg_name in DumpGroups["monitor"]
                              for n in self.fields.get_reg_fields(reg_name, 0)
                              }
+        self.monitor_data.update({'current_ux': 0., 'current_v': 0.,
+                                  'current_wy': 0.})
         # Setup for temperature query
         # Per the OpenFFBoard firmware source
         #[thermistor ffboard]
@@ -1257,11 +1260,6 @@ class TMCErrorCheck:
             fmt = self.fields.pretty_format("STATUS_FLAGS", status)
             raise self.printer.command_error("TMC 4671 '%s' reports error: %s"
                                              % (self.stepper_name, fmt))
-        #for reg_name in DumpGroups["monitor"]:
-        #    val = self.mcu_tmc.get_register(reg_name)
-        #    self.monitor_data.update(self.fields.get_reg_fields(reg_name, val))
-        #    logging.info("TMC 4671 '%s' %s: %s", self.stepper_name,
-        #                 reg_name, self.fields.pretty_format(reg_name, val))
     def _query_temperature(self):
         try:
             if self.adc_temp_reg is not None:
@@ -1275,7 +1273,13 @@ class TMCErrorCheck:
     def _do_periodic_check(self, eventtime):
         try:
             self._query_status()
-            # self._query_temperature()
+            ch = self.current_helper
+            self.monitor_data['current_ux'] = ch.convert_adc_current(
+                ch._read_field("ADC_IUX"))
+            self.monitor_data['current_v'] = ch.convert_adc_current(
+                ch._read_field("ADC_IV"))
+            self.monitor_data['current_wy'] = ch.convert_adc_current(
+                ch._read_field("ADC_IWY"))
         except self.printer.command_error as e:
             self.printer.invoke_shutdown(str(e))
             return self.printer.get_reactor().NEVER
@@ -1552,7 +1556,8 @@ class TMC4671:
         # Register commands
         self.step_helper = StepHelper(config, self.mcu_tmc)
         self.current_helper = CurrentHelper(config, self.mcu_tmc)
-        self.error_helper = TMCErrorCheck(config, self.mcu_tmc)
+        self.error_helper = TMCErrorCheck(config, self.mcu_tmc,
+                                          self.current_helper)
         TMCVirtualPinHelper(config, self.mcu_tmc, self.current_helper)
         gcode.register_mux_command("SET_TMC_FIELD", "STEPPER", self.name,
                                    self.cmd_SET_TMC_FIELD,
@@ -2035,9 +2040,11 @@ class TMC4671:
     def _dump_pid(self, n, X):
         f = "PID_%s_ACTUAL"%X
         c = [(0,0)]*(n)
+        dwell = self.printer.lookup_object('toolhead').dwell
         for i in range(n):
             cur = self._read_field(f)
             c[i]=(monotonic_ns(), cur,)
+            dwell(0.005)
         return c
 
     def _init_registers(self, print_time=None):
@@ -2111,15 +2118,9 @@ class TMC4671:
     def get_status(self, eventtime=None):
         if not self.init_done:
             return {}
-        current = self.current_helper.get_current()
-        res = {'run_current': current[0],
-               'current_ux': current[2],
-               'current_v': current[3],
-               'current_wy': current[4],
-               }
-        for reg_name in DumpGroups["monitor"]:
-            val = self.mcu_tmc.get_register(reg_name)
-            self.monitor_data.update(self.fields.get_reg_fields(reg_name, val))
+        # run_current is cached; phase currents come from error_helper's
+        # periodic timer callback (_query_status) which may safely do SPI reads
+        res = {'run_current': self.current_helper.run_current}
         res.update(self.monitor_data)
         res.update(self.error_helper.get_status(eventtime))
         return res
@@ -2404,12 +2405,15 @@ class TMC4671:
     cmd_SET_TMC_CURRENT_help = "Set the current of a TMC driver"
     def cmd_SET_TMC_CURRENT(self, gcmd):
         ch = self.current_helper
-        prev_cur, max_cur = ch.get_current()
+        # Use cached run_current to avoid live SPI reads (get_current() triggers
+        # spi_transfer which may fail in certain reactor contexts)
+        prev_cur = ch.run_current
+        max_cur = MAX_CURRENT
         run_current = gcmd.get_float('CURRENT', None, minval=0., maxval=max_cur)
         if run_current is not None:
             with self.mutex:
                 reg_val = ch.set_current(run_current)
-                prev_cur, max_cur = ch.get_current()
+                prev_cur = ch.run_current
                 print_time = self.printer.lookup_object('toolhead').get_last_move_time()
                 self.mcu_tmc.set_register("PID_TORQUE_FLUX_LIMITS", reg_val, print_time)
         gcmd.respond_info("Run Current: %0.2fA" % (prev_cur,))
