@@ -1647,7 +1647,8 @@ class TMC4671:
         set_config_field(config, "VELOCITY_METER_SELECTION", 1) # PWM frequency velocity meter
         set_config_field(config, "MODE_PID_SMPL", 0) # Advanced PID samples position at fPWM
         set_config_field(config, "MODE_PID_TYPE", 1) # Advanced PID mode
-        set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 31500) # Voltage limit, 32768 = Vm
+        # This also acts as anti-windup protection, and needs some headroom
+        set_config_field(config, "PIDOUT_UQ_UD_LIMITS", 29000) # Voltage limit, 32768 = Vm
         # TODO: get this from the size of the printer
         set_config_field(config, "PID_POSITION_LIMIT_LOW", -0x10000000)
         set_config_field(config, "PID_POSITION_LIMIT_HIGH", 0x10000000)
