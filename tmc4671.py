@@ -752,7 +752,11 @@ def to_q8_8(val):
     return round(val * 2**8) & 0xffff
 
 def format_q3_29(val):
-    return "%.9f" % (val * 2**-29)
+    return "%.9f" % (int.from_bytes(val.to_bytes(length=4,
+                                                 byteorder='big',
+                                                 signed=False),
+                                    byteorder='big',
+                                    signed=True) * 2**-29)
 
 def to_q2_30(val):
     return round(val * 2**30) & 0xffffffff
@@ -953,28 +957,25 @@ def biquad_Z_tmc(T, b0, b1, b2, a0, a1, a2):
     b0z = (b0*(T**2) - 2*b1*T + 4*b2) / den
     a2z = (T**2 + 2*a1*T + 4*a2) / den
     a1z = (2*(T**2) - 8*a2) / den
-    dcgain = 1.0
     e29 = 2**29
-    b0 = round(b0z/(a0*dcgain) * e29)
-    b1 = round(b1z/(a0*dcgain) * e29)
-    b2 = round(b2z/(a0*dcgain) * e29)
+    b0 = round(b0z/(a0) * e29)
+    b1 = round(b1z/(a0) * e29)
+    b2 = round(b2z/(a0) * e29)
     a1 = round(-a1z/a0 * e29)
     a2 = round(-a2z/a0 * e29)
     # return in the same order as the config registers
-    return a1, a2, b0, b1, b2
+    return a1, a2, 0, b0, b1, b2
 
 # Normalise a biquad filter, according to TMC
 def biquad_tmc(b0, b1, b2, a0, a1, a2):
-    dcgain = (b0 + b1 + b2) / (a0 + a1 + a2)
-    #dcgain = 1.0
     e29 = 2**29
-    b0 = round(b0/(a0*dcgain) * e29)
-    b1 = round(b1/(a0*dcgain) * e29)
-    b2 = round(b2/(a0*dcgain) * e29)
+    b0 = round(b0/(a0) * e29)
+    b1 = round(b1/(a0) * e29)
+    b2 = round(b2/(a0) * e29)
     a1 = round(-a1/a0 * e29)
     a2 = round(-a2/a0 * e29)
     # return in the same order as the config registers
-    return a1, a2, b0, b1, b2
+    return a1, a2, 0, b0, b1, b2
 
 # S-IMC PI controller design, "Improved Method"
 # See https://folk.ntnu.no/skoge/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf
@@ -1941,7 +1942,7 @@ class TMC4671:
         # Switch back on, and this time motor should self-align
         self._write_field("UD_EXT", test2_U)
         self._write_field("PWM_CHOP", 7)
-        dwell(0.1)
+        dwell(0.2)
         c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
         logging.info("TMC 4671 '%s' alignment I %s", self.stepper_name, str(self.current_helper.get_current()))
         test2_U/(self.vm_range/self.voltage_scale)
@@ -1951,7 +1952,7 @@ class TMC4671:
             dwell(0.2)
             self._write_field("PWM_CHOP", 0)
             # Give it some time to settle
-            dwell(0.1)
+            dwell(0.2)
             self._write_field("PWM_CHOP", 7)
         # Give it some time to settle
         dwell(0.2)
@@ -1963,11 +1964,11 @@ class TMC4671:
             self._write_field("ABN_DECODER_PHI_E_OFFSET", 0)
         self._write_field("MODE_MOTION", MotionMode.stopped_mode)
         # Give it some time to settle
-        dwell(0.1)
+        dwell(0.2)
         self._write_field("MODE_MOTION", MotionMode.torque_mode)
         test_cur = limit_cur #// 2
         old_cur = self._read_field("PID_%s_ACTUAL"%X)
-        dwell(0.1)
+        dwell(0.2)
         if not test_existing:
             Kc0 = Kc
             self._write_field("PID_%s_P"%X, self.pid_helpers["%s_P"%X].to_f(Kc0))
@@ -2086,6 +2087,10 @@ class TMC4671:
 
     def _setup_filter(self, register: str, biquad_filter: BiquadFilter) -> None:
         enabled = int(biquad_filter.freq > 0)
+        if not enabled:
+            self.disable_biquad(register)
+            return
+
         params = None
 
         logging.info(
@@ -2109,7 +2114,6 @@ class TMC4671:
         if enabled and params is not None:
             self.enable_biquad(register, *biquad_tmc(*params))
 
-        self._write_field(register, enabled)
 
     def _setup_filters(self) -> None:
         for target, biquad_filter in self.biquad_filters.items():
