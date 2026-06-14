@@ -2002,6 +2002,7 @@ class TMC4671:
         dwell(0.75)  # 750 ms mechanical settling delay
 
         # Step 2: High-Frequency AC Injection
+        self._write_field("OPENLOOP_ACCELERATION", 1000000)  # High acceleration for instant ramp
         self._write_field("OPENLOOP_VELOCITY_TARGET", 17179869)  # 1 kHz frequency target value
         dwell(0.2)  # 200 ms electrical settling delay
 
@@ -2016,6 +2017,7 @@ class TMC4671:
         self._write_field("UD_EXT", 0)
         self._write_field("UQ_EXT", 0)
         self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
+        self._write_field("OPENLOOP_ACCELERATION", 0)
 
         if I_D == 0:
             self.motor_l = 0.0
