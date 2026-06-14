@@ -2004,19 +2004,17 @@ class TMC4671:
         # Step 2: High-Frequency AC Injection
         # We inject a 4 kHz electrical frequency (above the 1.8 kHz current loop bandwidth)
         # to ensure the mechanical low-pass filter of the rotor is completely locked, quiet, and accurate.
-        # We calculate the mechanical speed in RPM (represented as s16.16 fixed point) based on actual pole pairs:
+        # The register expects the raw DDS accumulator step directly, where 17179869 is exactly 1000 Hz.
+        # So for 4000 Hz, the value is exactly 4 * 17179869 = 68719476.
         f_test = 4000.0
-        npp = max(self._read_field("N_POLE_PAIRS"), 1)
-        # Speed (RPM) = 60 * f_test / npp
-        # Register Value = Speed (RPM) * 65536
-        speed_rpm_s16_16 = int(round((60.0 * f_test / npp) * 65536.0))
+        dds_value = 68719476
 
         # We also reduce the applied voltage to ac_U = test2_U // 3 to significantly reduce torque
         # and prevent any mechanical rotor runaway or toolhead movement.
         ac_U = max(test2_U // 3, 1)
         self._write_field("UD_EXT", ac_U)
         self._write_field("OPENLOOP_ACCELERATION", 10000000)  # High acceleration for instant ramp to 4000 Hz
-        self._write_field("OPENLOOP_VELOCITY_TARGET", speed_rpm_s16_16)
+        self._write_field("OPENLOOP_VELOCITY_TARGET", dds_value)
         dwell(0.2)  # 200 ms electrical settling delay
 
         # Step 3: Read Demodulated DC Currents
