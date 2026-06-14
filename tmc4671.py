@@ -2042,7 +2042,8 @@ class TMC4671:
             self.motor_l = 0.0
         else:
             # Use absolute value to make it robust against phase direction/sign.
-            self.motor_l = abs((self.motor_r * I_Q) / (2.0 * math.pi * f_test * I_D))
+            # Compensate for electrical vs mechanical scaling by multiplying by NPP (pole pairs).
+            self.motor_l = abs((self.motor_r * I_Q) / (2.0 * math.pi * f_test * I_D)) * npp
 
         logging.info("TMC 4671 '%s' est. motor L=%g H (ID=%d, IQ=%d)",
                      self.stepper_name, self.motor_l, I_D, I_Q)
