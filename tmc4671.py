@@ -2000,6 +2000,8 @@ class TMC4671:
         # Experiment over, switch off
         self._write_field("PID_%s_TARGET"%X, 0)
         # Put motion config back how it was
+        self._write_field("UD_EXT", 0)
+        self._write_field("UQ_EXT", 0)
         self._write_field("PID_TORQUE_TARGET", 0)
         self._write_field("PID_VELOCITY_TARGET", 0)
         self._write_field("PID_POSITION_TARGET", 0)
@@ -2321,6 +2323,8 @@ class TMC4671:
             c = self._dump_motion(n)
             self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
             self._write_field("OPENLOOP_ACCELERATION", 0)
+            self._write_field("UD_EXT", 0)
+            self._write_field("UQ_EXT", 0)
             self.printer.lookup_object('toolhead').dwell(0.2)
             self._write_field("MODE_MOTION", MotionMode.stopped_mode)
             self._write_field("PHI_E_SELECTION", old_phi_e_sel)
