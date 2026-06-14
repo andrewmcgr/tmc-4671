@@ -1825,6 +1825,8 @@ class TMC4671:
                                               print_time)
             enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
             enable_line.motor_enable(print_time)
+            # Calibrate current ADC first before any motor activation
+            self._calibrate_adc(print_time)
             # Just test the PID, as it also sets up the encoder offsets
             P, I = self._tune_flux_pid(True, 1.0, print_time)
             self._write_field("ABN_DECODER_COUNT", 0)
@@ -1839,7 +1841,6 @@ class TMC4671:
             self._write_field("ABN_DECODER_COUNT", 0)
             self._write_field("PID_POSITION_TARGET", 0)
             self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-            self._calibrate_adc(print_time)
             self.init_done = True
 
     def _calibrate_adc(self, print_time):
