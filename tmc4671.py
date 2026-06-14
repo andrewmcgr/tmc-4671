@@ -1953,10 +1953,19 @@ class TMC4671:
         self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
         # Turn on the chopper and wait a bit to measure the resistance
         self._write_field("PWM_CHOP", 7)
-        dwell(0.1)
-        c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
+        dwell(0.3)
+        # Average current readings to filter noise and ripple
+        iux_samples = []
+        iwy_samples = []
+        for i in range(20):
+            c, MAX_I, tmp_iux, iv, tmp_iwy = self.current_helper.get_current()
+            iux_samples.append(tmp_iux)
+            iwy_samples.append(tmp_iwy)
+            dwell(0.005)
+        iux = sum(iux_samples) / 20.0
+        iwy = sum(iwy_samples) / 20.0
         self._write_field("PWM_CHOP", 0)
-        logging.info("TMC 4671 '%s' initial I %s", self.stepper_name, str(self.current_helper.get_current()))
+        logging.info("TMC 4671 '%s' initial averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux, iwy)
         if max(abs(iux), abs(iwy)) < 1e-6:
             # something is horribly wrong
              raise self.printer.command_error("TMC 4671 is seeing no motor current. Check wiring.")
@@ -1966,9 +1975,18 @@ class TMC4671:
         # Switch back on, and this time motor should self-align
         self._write_field("UD_EXT", test2_U)
         self._write_field("PWM_CHOP", 7)
-        dwell(0.2)
-        c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
-        logging.info("TMC 4671 '%s' alignment I %s", self.stepper_name, str(self.current_helper.get_current()))
+        dwell(0.5)
+        # Average current readings to filter mechanical ringing and noise
+        iux_samples = []
+        iwy_samples = []
+        for i in range(20):
+            c, MAX_I, tmp_iux, iv, tmp_iwy = self.current_helper.get_current()
+            iux_samples.append(tmp_iux)
+            iwy_samples.append(tmp_iwy)
+            dwell(0.005)
+        iux = sum(iux_samples) / 20.0
+        iwy = sum(iwy_samples) / 20.0
+        logging.info("TMC 4671 '%s' alignment averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux, iwy)
         test2_U/(self.vm_range/self.voltage_scale)
         R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
         self.motor_r = R
