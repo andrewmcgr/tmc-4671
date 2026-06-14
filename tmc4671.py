@@ -12,7 +12,7 @@ import math
 from time import monotonic_ns
 from enum import IntEnum
 from typing import NamedTuple
-from statistics import median_low, mean
+from statistics import median_low, mean, fmean
 from extras import bus, tmc, thermistor
 
 # The 4671 has a 25 MHz external clock
@@ -1817,6 +1817,7 @@ class TMC4671:
             self._write_field("ABN_DECODER_COUNT", 0)
             self._write_field("PID_POSITION_TARGET", 0)
             self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+            self._calibrate_adc(print_time)
             self.init_done = True
 
     def _calibrate_adc(self, print_time):
@@ -1883,7 +1884,7 @@ class TMC4671:
             i1.append(v["ADC_I1_RAW"])
             i0.append(v["ADC_I0_RAW"])
             self.printer.lookup_object('toolhead').dwell(0.0005)
-        return median_low(i0), median_low(i1)
+        return int(round(fmean(i0))), int(round(fmean(i1)))
 
     def _sample_vm(self):
         self.printer.lookup_object('toolhead').dwell(0.2)
