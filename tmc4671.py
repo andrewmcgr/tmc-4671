@@ -1536,8 +1536,9 @@ class TMC4671:
         self.vm_offset = 32768
         self.vm_range = round(32767/1.25)
         # Correct for the OpenFFBoard
-        self.voltage_scale = config.getfloat('voltage_scale_ratio', 43.64,
+        self.voltage_scale = config.getfloat('voltage_scale_ratio', 21.82,
                                        above=0.)
+        self.motor_r = 0.0
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
                                    TMC_FREQUENCY, pin_option="cs_pin")
         self.read_translate = None
@@ -1587,6 +1588,27 @@ class TMC4671:
             self.name,
             self.cmd_SET_TMC_BIQUAD_FILTER,
             desc=self.cmd_SET_TMC_BIQUAD_FILTER_help,
+        )
+        gcode.register_mux_command(
+            "TMC_DEBUG_VOLTAGE",
+            "STEPPER",
+            self.name,
+            self.cmd_TMC_DEBUG_VOLTAGE,
+            desc=self.cmd_TMC_DEBUG_VOLTAGE_help,
+        )
+        gcode.register_mux_command(
+            "TMC_DEBUG_CURRENT",
+            "STEPPER",
+            self.name,
+            self.cmd_TMC_DEBUG_CURRENT,
+            desc=self.cmd_TMC_DEBUG_CURRENT_help,
+        )
+        gcode.register_mux_command(
+            "TMC_DEBUG_MOTOR",
+            "STEPPER",
+            self.name,
+            self.cmd_TMC_DEBUG_MOTOR,
+            desc=self.cmd_TMC_DEBUG_MOTOR_help,
         )
         # Allow other registers to be set from the config
         set_config_field = self.fields.set_config_field
@@ -1803,6 +1825,8 @@ class TMC4671:
                                               print_time)
             enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
             enable_line.motor_enable(print_time)
+            # Calibrate current ADC first before any motor activation
+            self._calibrate_adc(print_time)
             # Just test the PID, as it also sets up the encoder offsets
             P, I = self._tune_flux_pid(True, 1.0, print_time)
             self._write_field("ABN_DECODER_COUNT", 0)
@@ -1817,7 +1841,6 @@ class TMC4671:
             self._write_field("ABN_DECODER_COUNT", 0)
             self._write_field("PID_POSITION_TARGET", 0)
             self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-            self._calibrate_adc(print_time)
             self.init_done = True
 
     def _calibrate_adc(self, print_time):
@@ -1930,10 +1953,19 @@ class TMC4671:
         self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
         # Turn on the chopper and wait a bit to measure the resistance
         self._write_field("PWM_CHOP", 7)
-        dwell(0.1)
-        c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
+        dwell(0.3)
+        # Average current readings to filter noise and ripple
+        iux_samples = []
+        iwy_samples = []
+        for i in range(20):
+            c, MAX_I, tmp_iux, iv, tmp_iwy = self.current_helper.get_current()
+            iux_samples.append(tmp_iux)
+            iwy_samples.append(tmp_iwy)
+            dwell(0.005)
+        iux = sum(iux_samples) / 20.0
+        iwy = sum(iwy_samples) / 20.0
         self._write_field("PWM_CHOP", 0)
-        logging.info("TMC 4671 '%s' initial I %s", self.stepper_name, str(self.current_helper.get_current()))
+        logging.info("TMC 4671 '%s' initial averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux, iwy)
         if max(abs(iux), abs(iwy)) < 1e-6:
             # something is horribly wrong
              raise self.printer.command_error("TMC 4671 is seeing no motor current. Check wiring.")
@@ -1943,11 +1975,21 @@ class TMC4671:
         # Switch back on, and this time motor should self-align
         self._write_field("UD_EXT", test2_U)
         self._write_field("PWM_CHOP", 7)
-        dwell(0.2)
-        c, MAX_I, iux, iv, iwy = self.current_helper.get_current()
-        logging.info("TMC 4671 '%s' alignment I %s", self.stepper_name, str(self.current_helper.get_current()))
+        dwell(0.5)
+        # Average current readings to filter mechanical ringing and noise
+        iux_samples = []
+        iwy_samples = []
+        for i in range(20):
+            c, MAX_I, tmp_iux, iv, tmp_iwy = self.current_helper.get_current()
+            iux_samples.append(tmp_iux)
+            iwy_samples.append(tmp_iwy)
+            dwell(0.005)
+        iux = sum(iux_samples) / 20.0
+        iwy = sum(iwy_samples) / 20.0
+        logging.info("TMC 4671 '%s' alignment averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux, iwy)
         test2_U/(self.vm_range/self.voltage_scale)
         R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
+        self.motor_r = R
         logging.info("TMC 4671 '%s' est. motor R=%g", self.stepper_name, R)
         for i in range(5):
             dwell(0.2)
@@ -1986,6 +2028,8 @@ class TMC4671:
         # Experiment over, switch off
         self._write_field("PID_%s_TARGET"%X, 0)
         # Put motion config back how it was
+        self._write_field("UD_EXT", 0)
+        self._write_field("UQ_EXT", 0)
         self._write_field("PID_TORQUE_TARGET", 0)
         self._write_field("PID_VELOCITY_TARGET", 0)
         self._write_field("PID_POSITION_TARGET", 0)
@@ -2307,6 +2351,8 @@ class TMC4671:
             c = self._dump_motion(n)
             self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
             self._write_field("OPENLOOP_ACCELERATION", 0)
+            self._write_field("UD_EXT", 0)
+            self._write_field("UQ_EXT", 0)
             self.printer.lookup_object('toolhead').dwell(0.2)
             self._write_field("MODE_MOTION", MotionMode.stopped_mode)
             self._write_field("PHI_E_SELECTION", old_phi_e_sel)
@@ -2460,6 +2506,114 @@ class TMC4671:
             f"Configured {biquad_target} biquad filter: filter={filter_type}, "
             f"freq={freq}, slope={slope}, enabled={enabled}"
         )
+
+    cmd_TMC_DEBUG_VOLTAGE_help = "Measure and report VM and FOC voltages (Ud, Uq)"
+    def cmd_TMC_DEBUG_VOLTAGE(self, gcmd):
+        vm = self._read_vm()
+        
+        # Read FOC voltages (target)
+        reg_val = self.mcu_tmc.get_register("INTERIM_FOC_UQ_UD")
+        ud_raw = reg_val & 0xFFFF
+        uq_raw = (reg_val >> 16) & 0xFFFF
+        ud = ud_raw if ud_raw < 32768 else ud_raw - 65536
+        uq = uq_raw if uq_raw < 32768 else uq_raw - 65536
+        
+        # Read FOC voltages (limited)
+        reg_lim_val = self.mcu_tmc.get_register("INTERIM_FOC_UQ_UD_LIMITED")
+        ud_lim_raw = reg_lim_val & 0xFFFF
+        uq_lim_raw = (reg_lim_val >> 16) & 0xFFFF
+        ud_lim = ud_lim_raw if ud_lim_raw < 32768 else ud_lim_raw - 65536
+        uq_lim = uq_lim_raw if uq_lim_raw < 32768 else uq_lim_raw - 65536
+
+        # Read external target voltages
+        reg_ext_val = self.mcu_tmc.get_register("UQ_UD_EXT")
+        ud_ext_raw = reg_ext_val & 0xFFFF
+        uq_ext_raw = (reg_ext_val >> 16) & 0xFFFF
+        ud_ext = ud_ext_raw if ud_ext_raw < 32768 else ud_ext_raw - 65536
+        uq_ext = uq_ext_raw if uq_ext_raw < 32768 else uq_ext_raw - 65536
+
+        # Convert to Volts
+        # 32768 in raw units corresponds to full VM supply voltage
+        vm_ref = max(vm, 0.001)  # Avoid division by zero
+        vd = (ud / 32768.0) * vm_ref
+        vq = (uq / 32768.0) * vm_ref
+        vd_lim = (ud_lim / 32768.0) * vm_ref
+        vq_lim = (uq_lim / 32768.0) * vm_ref
+        vd_ext = (ud_ext / 32768.0) * vm_ref
+        vq_ext = (uq_ext / 32768.0) * vm_ref
+
+        gcmd.respond_info(
+            f"TMC 4671 '{self.name}' Voltage Debug Report:\n"
+            f"  Supply Voltage (VM): {vm:.3f} V\n"
+            f"  FOC Target:          Ud={ud:6d} ({vd:.3f} V) | Uq={uq:6d} ({vq:.3f} V)\n"
+            f"  FOC Limited:         Ud={ud_lim:6d} ({vd_lim:.3f} V) | Uq={uq_lim:6d} ({vq_lim:.3f} V)\n"
+            f"  External Target:     Ud={ud_ext:6d} ({vd_ext:.3f} V) | Uq={uq_ext:6d} ({vq_ext:.3f} V)"
+        )
+
+    cmd_TMC_DEBUG_CURRENT_help = "Measure and report FOC and phase currents"
+    def cmd_TMC_DEBUG_CURRENT(self, gcmd):
+        ch = self.current_helper
+        
+        # Read configured limits and status
+        run_current = ch.run_current
+        homing_current = ch.homing_current
+        limit_raw = self._read_field("PID_TORQUE_FLUX_LIMITS")
+        limit_a = ch.convert_adc_current(limit_raw)
+        
+        # Read raw phase currents (ADC)
+        iux = ch.convert_adc_current(self._read_field("ADC_IUX"))
+        iv = ch.convert_adc_current(self._read_field("ADC_IV"))
+        iwy = ch.convert_adc_current(self._read_field("ADC_IWY"))
+        
+        # Read FOC Target Currents (d/q axis)
+        flux_target = ch.convert_adc_current(self._read_field("PID_FLUX_TARGET"))
+        torque_target = ch.convert_adc_current(self._read_field("PID_TORQUE_TARGET"))
+        
+        # Read FOC Actual Currents (d/q axis)
+        flux_actual = ch.convert_adc_current(self._read_field("PID_FLUX_ACTUAL"))
+        torque_actual = ch.convert_adc_current(self._read_field("PID_TORQUE_ACTUAL"))
+        
+        # Read FOC Interim Currents
+        reg_foc_val = self.mcu_tmc.get_register("INTERIM_FOC_IQ_ID")
+        id_raw = reg_foc_val & 0xFFFF
+        iq_raw = (reg_foc_val >> 16) & 0xFFFF
+        id_foc = id_raw if id_raw < 32768 else id_raw - 65536
+        iq_foc = iq_raw if iq_raw < 32768 else iq_raw - 65536
+        id_foc_a = ch.convert_adc_current(id_foc)
+        iq_foc_a = ch.convert_adc_current(iq_foc)
+
+        gcmd.respond_info(
+            f"TMC 4671 '{self.name}' Current Debug Report:\n"
+            f"  Run Current Limit:    {run_current:.3f} A\n"
+            f"  Homing Current Limit: {homing_current:.3f} A\n"
+            f"  Active Current Limit:  {limit_a:.3f} A (raw: {limit_raw:d})\n"
+            f"  Phase Currents:\n"
+            f"    I_ux (Phase U/X):   {iux: .3f} A\n"
+            f"    I_v  (Phase V):     {iv: .3f} A\n"
+            f"    I_wy (Phase W/Y):   {iwy: .3f} A\n"
+            f"  FOC Target Currents:\n"
+            f"    Id (Flux Target):   {flux_target: .3f} A\n"
+            f"    Iq (Torque Target): {torque_target: .3f} A\n"
+            f"  FOC Actual Currents:\n"
+            f"    Id (Flux Actual):   {flux_actual: .3f} A\n"
+            f"    Iq (Torque Actual): {torque_actual: .3f} A\n"
+            f"  FOC Interim (ID/IQ):\n"
+            f"    Id (Interim Flux):  {id_foc_a: .3f} A (raw: {id_foc:6d})\n"
+            f"    Iq (Interim Torque): {iq_foc_a: .3f} A (raw: {iq_foc:6d})"
+        )
+
+    cmd_TMC_DEBUG_MOTOR_help = "Report estimated motor resistance"
+    def cmd_TMC_DEBUG_MOTOR(self, gcmd):
+        if self.motor_r == 0.0:
+            gcmd.respond_info(
+                f"TMC 4671 '{self.name}' Motor Debug Report:\n"
+                f"  Estimated Resistance (motor_r): Not yet calibrated (run TMC_TUNE_PID first)"
+            )
+        else:
+            gcmd.respond_info(
+                f"TMC 4671 '{self.name}' Motor Debug Report:\n"
+                f"  Estimated Resistance (motor_r): {self.motor_r:.4f} Ohms"
+            )
 
 def load_config_prefix(config):
     return TMC4671(config)
