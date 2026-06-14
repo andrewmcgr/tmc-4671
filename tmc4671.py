@@ -2003,7 +2003,7 @@ class TMC4671:
 
         # Step 2: High-Frequency AC Injection
         self._write_field("OPENLOOP_ACCELERATION", 1000000)  # High acceleration for instant ramp
-        self._write_field("OPENLOOP_VELOCITY_TARGET", 17179869)  # 1 kHz frequency target value
+        self._write_field("OPENLOOP_VELOCITY_TARGET", 171798691)  # 1 kHz frequency target value (DDS clock is 250 kHz, so 1 kHz is 171798691)
         dwell(0.2)  # 200 ms electrical settling delay
 
         # Step 3: Read Demodulated DC Currents
