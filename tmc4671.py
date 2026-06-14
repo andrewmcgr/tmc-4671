@@ -2002,16 +2002,14 @@ class TMC4671:
         dwell(0.75)  # 750 ms mechanical settling delay
 
         # Step 2: High-Frequency AC Injection
-        # Desired AC frequency: 2 kHz to reduce noise and increase inductive reactance stimulation
-        f_test = 2000.0
-        npp = max(self._read_field("N_POLE_PAIRS"), 1)
-        # Convert electrical frequency to mechanical RPM in s16.16 format
-        # Speed (RPM) = 60 * f_test / npp
-        # Register Value = Speed (RPM) * 65536
-        speed_rpm_s16_16 = int(round((60.0 * f_test / npp) * 65536.0))
-
-        self._write_field("OPENLOOP_ACCELERATION", 10000000)  # High acceleration for instant ramp
-        self._write_field("OPENLOOP_VELOCITY_TARGET", speed_rpm_s16_16)
+        # We apply 1 kHz electrical frequency by writing 17179869 to the register.
+        # This is mathematically exact for 1000 Hz electrical frequency when DDS is clocked at 250 kHz (f_clk/100).
+        # We also reduce the applied voltage to ac_U = test2_U // 3 to significantly reduce torque
+        # and prevent any mechanical rotor runaway or toolhead movement.
+        ac_U = max(test2_U // 3, 1)
+        self._write_field("UD_EXT", ac_U)
+        self._write_field("OPENLOOP_ACCELERATION", 10000000)  # High acceleration for instant ramp to 1000 Hz
+        self._write_field("OPENLOOP_VELOCITY_TARGET", 17179869)  # 1 kHz frequency target value
         dwell(0.2)  # 200 ms electrical settling delay
 
         # Step 3: Read Demodulated DC Currents
@@ -2021,17 +2019,26 @@ class TMC4671:
         I_D = id_raw if id_raw < 32768 else id_raw - 65536
         I_Q = iq_raw if iq_raw < 32768 else iq_raw - 65536
 
-        # Step 4: Calculate Inductance and Cleanup
+        # Step 4: Calculate Inductance, Cleanup, and Re-alignment
         self._write_field("UD_EXT", 0)
         self._write_field("UQ_EXT", 0)
         self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
         self._write_field("OPENLOOP_ACCELERATION", 0)
 
+        # CRITICAL: Since the motor was spun electrically, we MUST re-align and magnetically
+        # lock the rotor back to the electrical zero position (PHI_E_EXT = 0) before continuing,
+        # otherwise the subsequent encoder calibration will be misaligned, causing a runaway ("yeeting the toolhead").
+        self._write_field("PHI_E_SELECTION", 1)  # External angle mode
+        self._write_field("PHI_E_EXT", 0)
+        self._write_field("UD_EXT", test2_U)
+        dwell(0.75)  # Let the rotor settle completely back to the aligned position
+
         if I_D == 0:
             self.motor_l = 0.0
         else:
-            # Use absolute value to make it robust against phase direction/sign
-            self.motor_l = abs((self.motor_r * I_Q) / (2.0 * math.pi * f_test * I_D))
+            # Use absolute value to make it robust against phase direction/sign.
+            # Since 17179869 corresponds to exactly 100 Hz electrical frequency, we divide by 100.0.
+            self.motor_l = abs((self.motor_r * I_Q) / (2.0 * math.pi * 100.0 * I_D))
 
         logging.info("TMC 4671 '%s' est. motor L=%g H (ID=%d, IQ=%d)",
                      self.stepper_name, self.motor_l, I_D, I_Q)
