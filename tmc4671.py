@@ -1588,6 +1588,13 @@ class TMC4671:
             self.cmd_SET_TMC_BIQUAD_FILTER,
             desc=self.cmd_SET_TMC_BIQUAD_FILTER_help,
         )
+        gcode.register_mux_command(
+            "TMC_DEBUG_VOLTAGE",
+            "STEPPER",
+            self.name,
+            self.cmd_TMC_DEBUG_VOLTAGE,
+            desc=self.cmd_TMC_DEBUG_VOLTAGE_help,
+        )
         # Allow other registers to be set from the config
         set_config_field = self.fields.set_config_field
         if self.fields6100 is not None:
@@ -2459,6 +2466,49 @@ class TMC4671:
         gcmd.respond_info(
             f"Configured {biquad_target} biquad filter: filter={filter_type}, "
             f"freq={freq}, slope={slope}, enabled={enabled}"
+        )
+
+    cmd_TMC_DEBUG_VOLTAGE_help = "Measure and report VM and FOC voltages (Ud, Uq)"
+    def cmd_TMC_DEBUG_VOLTAGE(self, gcmd):
+        vm = self._read_vm()
+        
+        # Read FOC voltages (target)
+        reg_val = self.mcu_tmc.get_register("INTERIM_FOC_UQ_UD")
+        ud_raw = reg_val & 0xFFFF
+        uq_raw = (reg_val >> 16) & 0xFFFF
+        ud = ud_raw if ud_raw < 32768 else ud_raw - 65536
+        uq = uq_raw if uq_raw < 32768 else uq_raw - 65536
+        
+        # Read FOC voltages (limited)
+        reg_lim_val = self.mcu_tmc.get_register("INTERIM_FOC_UQ_UD_LIMITED")
+        ud_lim_raw = reg_lim_val & 0xFFFF
+        uq_lim_raw = (reg_lim_val >> 16) & 0xFFFF
+        ud_lim = ud_lim_raw if ud_lim_raw < 32768 else ud_lim_raw - 65536
+        uq_lim = uq_lim_raw if uq_lim_raw < 32768 else uq_lim_raw - 65536
+
+        # Read external target voltages
+        reg_ext_val = self.mcu_tmc.get_register("UQ_UD_EXT")
+        ud_ext_raw = reg_ext_val & 0xFFFF
+        uq_ext_raw = (reg_ext_val >> 16) & 0xFFFF
+        ud_ext = ud_ext_raw if ud_ext_raw < 32768 else ud_ext_raw - 65536
+        uq_ext = uq_ext_raw if uq_ext_raw < 32768 else uq_ext_raw - 65536
+
+        # Convert to Volts
+        # 32768 in raw units corresponds to full VM supply voltage
+        vm_ref = max(vm, 0.001)  # Avoid division by zero
+        vd = (ud / 32768.0) * vm_ref
+        vq = (uq / 32768.0) * vm_ref
+        vd_lim = (ud_lim / 32768.0) * vm_ref
+        vq_lim = (uq_lim / 32768.0) * vm_ref
+        vd_ext = (ud_ext / 32768.0) * vm_ref
+        vq_ext = (uq_ext / 32768.0) * vm_ref
+
+        gcmd.respond_info(
+            f"TMC 4671 '{self.name}' Voltage Debug Report:\n"
+            f"  Supply Voltage (VM): {vm:.3f} V\n"
+            f"  FOC Target:          Ud={ud:6d} ({vd:.3f} V) | Uq={uq:6d} ({vq:.3f} V)\n"
+            f"  FOC Limited:         Ud={ud_lim:6d} ({vd_lim:.3f} V) | Uq={uq_lim:6d} ({vq_lim:.3f} V)\n"
+            f"  External Target:     Ud={ud_ext:6d} ({vd_ext:.3f} V) | Uq={uq_ext:6d} ({vq_ext:.3f} V)"
         )
 
 def load_config_prefix(config):
