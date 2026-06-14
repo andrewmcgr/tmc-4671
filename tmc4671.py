@@ -1538,6 +1538,7 @@ class TMC4671:
         # Correct for the OpenFFBoard
         self.voltage_scale = config.getfloat('voltage_scale_ratio', 21.82,
                                        above=0.)
+        self.motor_r = 0.0
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
                                    TMC_FREQUENCY, pin_option="cs_pin")
         self.read_translate = None
@@ -1601,6 +1602,13 @@ class TMC4671:
             self.name,
             self.cmd_TMC_DEBUG_CURRENT,
             desc=self.cmd_TMC_DEBUG_CURRENT_help,
+        )
+        gcode.register_mux_command(
+            "TMC_DEBUG_MOTOR",
+            "STEPPER",
+            self.name,
+            self.cmd_TMC_DEBUG_MOTOR,
+            desc=self.cmd_TMC_DEBUG_MOTOR_help,
         )
         # Allow other registers to be set from the config
         set_config_field = self.fields.set_config_field
@@ -1962,6 +1970,7 @@ class TMC4671:
         logging.info("TMC 4671 '%s' alignment I %s", self.stepper_name, str(self.current_helper.get_current()))
         test2_U/(self.vm_range/self.voltage_scale)
         R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
+        self.motor_r = R
         logging.info("TMC 4671 '%s' est. motor R=%g", self.stepper_name, R)
         for i in range(5):
             dwell(0.2)
@@ -2573,6 +2582,19 @@ class TMC4671:
             f"    Id (Interim Flux):  {id_foc_a: .3f} A (raw: {id_foc:6d})\n"
             f"    Iq (Interim Torque): {iq_foc_a: .3f} A (raw: {iq_foc:6d})"
         )
+
+    cmd_TMC_DEBUG_MOTOR_help = "Report estimated motor resistance"
+    def cmd_TMC_DEBUG_MOTOR(self, gcmd):
+        if self.motor_r == 0.0:
+            gcmd.respond_info(
+                f"TMC 4671 '{self.name}' Motor Debug Report:\n"
+                f"  Estimated Resistance (motor_r): Not yet calibrated (run TMC_TUNE_PID first)"
+            )
+        else:
+            gcmd.respond_info(
+                f"TMC 4671 '{self.name}' Motor Debug Report:\n"
+                f"  Estimated Resistance (motor_r): {self.motor_r:.4f} Ohms"
+            )
 
 def load_config_prefix(config):
     return TMC4671(config)
