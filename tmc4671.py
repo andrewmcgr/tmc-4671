@@ -2038,6 +2038,7 @@ class TMC4671:
         self._write_field("UD_EXT", test2_U)
         dwell(0.75)  # Let the rotor settle completely back to the aligned position
 
+        npp = max(self._read_field("N_POLE_PAIRS"), 1)
         if I_D == 0:
             self.motor_l = 0.0
         else:
