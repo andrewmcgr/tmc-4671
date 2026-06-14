@@ -1539,6 +1539,7 @@ class TMC4671:
         self.voltage_scale = config.getfloat('voltage_scale_ratio', 21.82,
                                        above=0.)
         self.motor_r = 0.0
+        self.motor_l = 0.0
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
                                    TMC_FREQUENCY, pin_option="cs_pin")
         self.read_translate = None
@@ -1991,6 +1992,63 @@ class TMC4671:
         R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
         self.motor_r = R
         logging.info("TMC 4671 '%s' est. motor R=%g", self.stepper_name, R)
+
+        # Inductance Measurement Procedure
+        # Step 1: Magnetic Alignment (DC)
+        self._write_field("PHI_E_SELECTION", 2)  # Open Loop
+        self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
+        self._write_field("UQ_EXT", 0)
+        self._write_field("UD_EXT", test2_U)
+        dwell(0.75)  # 750 ms mechanical settling delay
+
+        # Step 2: High-Frequency AC Injection
+        # We inject a 4 kHz electrical frequency (above the 1.8 kHz current loop bandwidth)
+        # to ensure the mechanical low-pass filter of the rotor is completely locked, quiet, and accurate.
+        # The register expects the raw DDS accumulator step directly, where 17179869 is exactly 1000 Hz.
+        # So for 4000 Hz, the value is exactly 4 * 17179869 = 68719476.
+        f_test = 4000.0
+        dds_value = 68719476
+
+        # We also reduce the applied voltage to ac_U = test2_U // 3 to significantly reduce torque
+        # and prevent any mechanical rotor runaway or toolhead movement.
+        ac_U = max(test2_U // 3, 1)
+        self._write_field("UD_EXT", ac_U)
+        self._write_field("OPENLOOP_ACCELERATION", 10000000)  # High acceleration for instant ramp to 4000 Hz
+        self._write_field("OPENLOOP_VELOCITY_TARGET", dds_value)
+        dwell(0.2)  # 200 ms electrical settling delay
+
+        # Step 3: Read Demodulated DC Currents
+        reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
+        id_raw = reg_val & 0xFFFF
+        iq_raw = (reg_val >> 16) & 0xFFFF
+        I_D = id_raw if id_raw < 32768 else id_raw - 65536
+        I_Q = iq_raw if iq_raw < 32768 else iq_raw - 65536
+
+        # Step 4: Calculate Inductance, Cleanup, and Re-alignment
+        self._write_field("UD_EXT", 0)
+        self._write_field("UQ_EXT", 0)
+        self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
+        self._write_field("OPENLOOP_ACCELERATION", 0)
+
+        # CRITICAL: Since the motor was spun electrically, we MUST re-align and magnetically
+        # lock the rotor back to the electrical zero position (PHI_E_EXT = 0) before continuing,
+        # otherwise the subsequent encoder calibration will be misaligned, causing a runaway ("yeeting the toolhead").
+        self._write_field("PHI_E_SELECTION", 1)  # External angle mode
+        self._write_field("PHI_E_EXT", 0)
+        self._write_field("UD_EXT", test2_U)
+        dwell(0.75)  # Let the rotor settle completely back to the aligned position
+
+        npp = max(self._read_field("N_POLE_PAIRS"), 1)
+        if I_D == 0:
+            self.motor_l = 0.0
+        else:
+            # Use absolute value to make it robust against phase direction/sign.
+            # Compensate for electrical vs mechanical scaling by multiplying by NPP (pole pairs).
+            self.motor_l = abs((self.motor_r * I_Q) / (2.0 * math.pi * f_test * I_D)) * npp
+
+        logging.info("TMC 4671 '%s' est. motor L=%g H (ID=%d, IQ=%d)",
+                     self.stepper_name, self.motor_l, I_D, I_Q)
+
         for i in range(5):
             dwell(0.2)
             self._write_field("PWM_CHOP", 0)
@@ -2602,18 +2660,16 @@ class TMC4671:
             f"    Iq (Interim Torque): {iq_foc_a: .3f} A (raw: {iq_foc:6d})"
         )
 
-    cmd_TMC_DEBUG_MOTOR_help = "Report estimated motor resistance"
+    cmd_TMC_DEBUG_MOTOR_help = "Report estimated motor parameters (resistance and inductance)"
     def cmd_TMC_DEBUG_MOTOR(self, gcmd):
-        if self.motor_r == 0.0:
-            gcmd.respond_info(
-                f"TMC 4671 '{self.name}' Motor Debug Report:\n"
-                f"  Estimated Resistance (motor_r): Not yet calibrated (run TMC_TUNE_PID first)"
-            )
-        else:
-            gcmd.respond_info(
-                f"TMC 4671 '{self.name}' Motor Debug Report:\n"
-                f"  Estimated Resistance (motor_r): {self.motor_r:.4f} Ohms"
-            )
+        res_str = f"{self.motor_r:.4f} Ohms" if self.motor_r != 0.0 else "Not yet calibrated (run TMC_TUNE_PID first)"
+        ind_str = f"{self.motor_l:.6f} H ({self.motor_l * 1000.0:.3f} mH)" if self.motor_l != 0.0 else "Not yet calibrated (run TMC_TUNE_PID first)"
+        
+        gcmd.respond_info(
+            f"TMC 4671 '{self.name}' Motor Debug Report:\n"
+            f"  Estimated Resistance (motor_r): {res_str}\n"
+            f"  Estimated Inductance (motor_l): {ind_str}"
+        )
 
 def load_config_prefix(config):
     return TMC4671(config)
