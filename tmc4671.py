@@ -1536,7 +1536,7 @@ class TMC4671:
         self.vm_offset = 32768
         self.vm_range = round(32767/1.25)
         # Correct for the OpenFFBoard
-        self.voltage_scale = config.getfloat('voltage_scale_ratio', 43.64,
+        self.voltage_scale = config.getfloat('voltage_scale_ratio', 21.82,
                                        above=0.)
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
                                    TMC_FREQUENCY, pin_option="cs_pin")
