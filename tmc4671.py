@@ -2002,8 +2002,16 @@ class TMC4671:
         dwell(0.75)  # 750 ms mechanical settling delay
 
         # Step 2: High-Frequency AC Injection
-        self._write_field("OPENLOOP_ACCELERATION", 1000000)  # High acceleration for instant ramp
-        self._write_field("OPENLOOP_VELOCITY_TARGET", 171798691)  # 1 kHz frequency target value (DDS clock is 250 kHz, so 1 kHz is 171798691)
+        # Desired AC frequency: 2 kHz to reduce noise and increase inductive reactance stimulation
+        f_test = 2000.0
+        npp = max(self._read_field("N_POLE_PAIRS"), 1)
+        # Convert electrical frequency to mechanical RPM in s16.16 format
+        # Speed (RPM) = 60 * f_test / npp
+        # Register Value = Speed (RPM) * 65536
+        speed_rpm_s16_16 = int(round((60.0 * f_test / npp) * 65536.0))
+
+        self._write_field("OPENLOOP_ACCELERATION", 10000000)  # High acceleration for instant ramp
+        self._write_field("OPENLOOP_VELOCITY_TARGET", speed_rpm_s16_16)
         dwell(0.2)  # 200 ms electrical settling delay
 
         # Step 3: Read Demodulated DC Currents
@@ -2022,7 +2030,8 @@ class TMC4671:
         if I_D == 0:
             self.motor_l = 0.0
         else:
-            self.motor_l = (self.motor_r * -I_Q) / (2.0 * math.pi * 1000.0 * I_D)
+            # Use absolute value to make it robust against phase direction/sign
+            self.motor_l = abs((self.motor_r * I_Q) / (2.0 * math.pi * f_test * I_D))
 
         logging.info("TMC 4671 '%s' est. motor L=%g H (ID=%d, IQ=%d)",
                      self.stepper_name, self.motor_l, I_D, I_Q)
