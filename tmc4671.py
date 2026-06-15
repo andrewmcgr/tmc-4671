@@ -1595,13 +1595,29 @@ class TMC4671:
                 self._write_field("PID_TORQUE_P", self.pid_helpers["TORQUE_P"].to_f(P))
                 self._write_field("PID_TORQUE_I", self.pid_helpers["TORQUE_I"].to_f(I))
             else:
-                P = 2.0 * math.pi * current_bandwidth * self.motor_l
-                I = 2.0 * math.pi * current_bandwidth * self.motor_r / self.pwmfreq
+                # 1. Calculate continuous physical gains
+                omega_bw = 2.0 * math.pi * current_bandwidth
+                Kp_physical = omega_bw * self.motor_l
+
+                # 2. Extract hardware loop scaling factors
+                # current_scale is in mA/LSB, convert to A/LSB
+                amps_per_adc_count = self.current_helper.current_scale * 1e-3
+                vm_voltage = self._read_vm()
+
+                hardware_loop_gain = (amps_per_adc_count * 32768.0) / max(vm_voltage, 0.001)
+
+                # 3. Apply loop gain to P
+                P = Kp_physical * hardware_loop_gain
+
+                # 4. Calculate I as an analytical plant ratio for Advanced Mode (Serial structure)
+                # I = R / (L * f_pwm)
+                I = self.motor_r / (self.motor_l * self.pwmfreq)
                 self._write_field("PID_FLUX_P", self.pid_helpers["FLUX_P"].to_f(P))
+
                 self._write_field("PID_FLUX_I", self.pid_helpers["FLUX_I"].to_f(I))
                 self._write_field("PID_TORQUE_P", self.pid_helpers["TORQUE_P"].to_f(P))
                 self._write_field("PID_TORQUE_I", self.pid_helpers["TORQUE_I"].to_f(I))
-                
+
                 # Store results for SAVE_CONFIG
                 cfgname = "tmc4671 %s" % (self.name,)
                 configfile = self.printer.lookup_object('configfile')
