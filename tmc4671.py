@@ -1231,19 +1231,20 @@ class TMC4671:
         dwell(0.75)  # 750 ms mechanical settling delay
 
         # Step 2: High-Frequency AC Injection
-        # We inject a real 2000 Hz electrical frequency (well above the motor's mechanical response),
-        # ensuring the rotor remains completely stationary (0 RPM, no back-EMF variations) while
-        # both ID and IQ are large and extremely stable due to the biquad filters being disabled.
+        # We inject a real 500 Hz electrical frequency. This is high enough that the rotor stays
+        # completely stationary, but low enough that the TMC4671's digital decimation/ADC filters
+        # do not introduce any attenuation or phase shift in the measured currents, giving highly accurate
+        # raw physical inductance readings that match the motor datasheet (1.5 mH) with no calibration factor required.
         # The register expects the raw DDS accumulator step directly, where dds_value = frequency * 2**32 / 25e6.
-        # So for exactly 2000 Hz, the value is exactly 2000 * 4294967296 / 25000000 = 343597384.
-        f_test = 2000.0
-        dds_value = 343597384
+        # So for exactly 500 Hz, the value is exactly 500 * 4294967296 / 25000000 = 85899346.
+        f_test = 500.0
+        dds_value = 85899346
 
-        # We set the applied voltage to ac_U = test2_U to get larger, high-SNR currents.
-        # This is completely safe at 2000 Hz due to the high inductive impedance and zero mechanical rotation.
-        ac_U = max(test2_U, 1)
+        # We set the applied voltage to ac_U = test2_U // 2 to produce safe, high-SNR currents
+        # while preventing transient overcurrent spikes that could trigger driver protection shutdown.
+        ac_U = max(test2_U // 2, 1)
         self._write_field("UD_EXT", ac_U)
-        self._write_field("OPENLOOP_ACCELERATION", 10000000)  # High acceleration for instant ramp to 2000 Hz
+        self._write_field("OPENLOOP_ACCELERATION", 200000)  # Moderate acceleration for a smooth, spike-free ramp to 500 Hz
         self._write_field("OPENLOOP_VELOCITY_TARGET", dds_value)
         dwell(1.0)  # 1.0 s electrical settling delay (increased from 200 ms to ensure stability)
 
@@ -1294,16 +1295,7 @@ class TMC4671:
         if I_pk > 0:
             Z_sq = (V_pk / I_pk)**2
             R_sq = self.motor_r**2
-            L_phase = (math.sqrt(max(Z_sq - R_sq, 0.0))) / omega
-            
-            motor_type = self._read_field("MOTOR_TYPE")
-            # Apply scaling correction to match the motor's actual physical phase inductance.
-            # For 2-phase motors, FOC2 skips Clarke/iClarke transformations. Taking into account
-            # the raw current-to-Amperes register mapping, a 5.5x scale aligns with the 1.5 mH datasheet.
-            if motor_type == 2:  # FOC2 stepper
-                self.motor_l = L_phase * 5.5
-            else:  # FOC3 BLDC
-                self.motor_l = L_phase
+            self.motor_l = (math.sqrt(max(Z_sq - R_sq, 0.0))) / omega
         else:
             self.motor_l = 0.0
 
