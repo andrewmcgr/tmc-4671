@@ -377,6 +377,10 @@ class CurrentHelper:
         iv = self.convert_adc_current(self._read_field("ADC_IV"))
         iwy = self.convert_adc_current(self._read_field("ADC_IWY"))
         return c, MAX_CURRENT, iux, iv, iwy
+    def get_qd_current(self):
+        iq = self.convert_adc_current(self._read_field("PID_FLUX_ACTUAL"))
+        id = self.convert_adc_current(self._read_field("PID_TORQUE_ACTUAL"))
+        return iq, id
     def set_current(self, run_current):
         self.run_current = run_current
         self.flux_limit = self._calc_flux_limit(self.run_current)
