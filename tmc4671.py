@@ -1235,14 +1235,11 @@ class TMC4671:
         dwell(0.75)  # 750 ms mechanical settling delay
 
         # Step 2: High-Frequency AC Injection
-        # We inject a real 500 Hz electrical frequency. This is high enough that the rotor stays
-        # completely stationary, but low enough that the TMC4671's digital decimation/ADC filters
-        # do not introduce any attenuation or phase shift in the measured currents, giving highly accurate
-        # raw physical inductance readings that match the motor datasheet (1.5 mH) with no calibration factor required.
-        # The register expects the raw DDS accumulator step directly, where dds_value = frequency * 2**32 / 25e6.
-        # So for exactly 500 Hz, the value is exactly 500 * 4294967296 / 25000000 = 85899346.
-        f_test = 500.0
-        dds_value = 85899346
+        # We inject a real 1000 Hz electrical frequency. This is high enough that the rotor stays
+        # completely stationary.
+        # THe register value is an angle added to phi_e every cycle.
+        f_test = 1000
+        dds_value = int(f_test * 2**16 / self.pwmfreq)
 
         # We set the applied voltage to ac_U = test2_U // 2 to produce safe, high-SNR currents
         # while preventing transient overcurrent spikes that could trigger driver protection shutdown.
@@ -1256,17 +1253,10 @@ class TMC4671:
         id_samples = []
         iq_samples = []
         for i in range(100):
-            reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
-            id_raw = reg_val & 0xFFFF
-            iq_raw = (reg_val >> 16) & 0xFFFF
-            val_id = id_raw if id_raw < 32768 else id_raw - 65536
-            val_iq = iq_raw if iq_raw < 32768 else iq_raw - 65536
-            id_samples.append(val_id)
-            iq_samples.append(val_iq)
+            iq, id = self.current_helper.get_qd_current()
+            id_samples.append(id)
+            iq_samples.append(iq)
             dwell(0.001)  # 1 ms sampling interval
-
-        I_D = sum(id_samples) / 100.0
-        I_Q = sum(iq_samples) / 100.0
 
         # Step 4: Calculate Inductance, Cleanup, and Re-alignment
         self._write_field("UD_EXT", 0)
@@ -1286,9 +1276,10 @@ class TMC4671:
         npp = max(self._read_field("N_POLE_PAIRS"), 1)
 
         # Convert raw ID and IQ to physical Amperes
-        id_amp = I_D * self.current_helper.current_scale * 1e-3
-        iq_amp = I_Q * self.current_helper.current_scale * 1e-3
-        I_pk = math.sqrt(id_amp**2 + iq_amp**2)
+        I_D = mean(id_samples)
+        I_Q = mean(iq_samples)
+
+        I_pk = math.sqrt(I_D**2 + I_Q**2)
 
         # Convert raw ac_U to physical peak Volts
         vm = self._read_vm()
