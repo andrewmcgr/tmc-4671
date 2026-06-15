@@ -1522,12 +1522,30 @@ class TMC4671:
     def cmd_TMC_TUNE_PID(self, gcmd):
         test_existing = gcmd.get_int('CHECK', 0)
         derate = gcmd.get_float('DERATE', 1.6)
-        logging.info("TMC_TUNE_PID %s", self.name)
+        simc_flag = gcmd.get_int('SIMC', 0)
+        current_bandwidth = gcmd.get_float('CURRENT_BANDWIDTH', 1800.0)
+        logging.info("TMC_TUNE_PID %s (SIMC=%d, BANDWIDTH=%.1f)", self.name, simc_flag, current_bandwidth)
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         with self.mutex:
-            P, I = self._tune_flux_pid(test_existing, derate, print_time)
-            self._write_field("PID_TORQUE_P", self.pid_helpers["TORQUE_P"].to_f(P))
-            self._write_field("PID_TORQUE_I", self.pid_helpers["TORQUE_I"].to_f(I))
+            if simc_flag:
+                P, I = self._tune_flux_pid(test_existing, derate, print_time)
+                self._write_field("PID_TORQUE_P", self.pid_helpers["TORQUE_P"].to_f(P))
+                self._write_field("PID_TORQUE_I", self.pid_helpers["TORQUE_I"].to_f(I))
+            else:
+                P = 2.0 * math.pi * current_bandwidth * self.motor_l
+                I = 2.0 * math.pi * current_bandwidth * self.motor_r / self.pwmfreq
+                self._write_field("PID_FLUX_P", self.pid_helpers["FLUX_P"].to_f(P))
+                self._write_field("PID_FLUX_I", self.pid_helpers["FLUX_I"].to_f(I))
+                self._write_field("PID_TORQUE_P", self.pid_helpers["TORQUE_P"].to_f(P))
+                self._write_field("PID_TORQUE_I", self.pid_helpers["TORQUE_I"].to_f(I))
+                
+                # Store results for SAVE_CONFIG
+                cfgname = "tmc4671 %s" % (self.name,)
+                configfile = self.printer.lookup_object('configfile')
+                configfile.set(cfgname, 'foc_PID_FLUX_P', "%.3f" % (P,))
+                configfile.set(cfgname, 'foc_PID_FLUX_I', "%.3f" % (I,))
+                configfile.set(cfgname, 'foc_PID_TORQUE_P', "%.3f" % (P,))
+                configfile.set(cfgname, 'foc_PID_TORQUE_I', "%.3f" % (I,))
         gcmd.respond_info(
             "PID %s parameters: Kc=%.2f Ki=%.3f\n"
             "The SAVE_CONFIG command will update the printer config file\n"
