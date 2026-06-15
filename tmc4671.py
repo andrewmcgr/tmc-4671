@@ -1182,6 +1182,11 @@ class TMC4671:
     def _align_and_measure(self, offsets, print_time):
         dwell = self.printer.lookup_object('toolhead').dwell
         old_phi_e_selection = self._read_field("PHI_E_SELECTION")
+
+        # Temporarily disable biquad filters during measurement to prevent attenuation of the 4 kHz signal
+        for register in BIQUAD_FILTER_TARGETS.values():
+            self.disable_biquad(register)
+
         self._write_field("MODE_MOTION", MotionMode.stopped_mode)
         self._write_field("PHI_E_EXT", 0) # and, set this to be PHI_E = 0
         self._write_field("PHI_E_SELECTION", 1) # external mode, so it won't change.
@@ -1218,6 +1223,7 @@ class TMC4671:
 
         # Inductance Measurement Procedure
         # Step 1: Magnetic Alignment (DC)
+        self._write_field("PWM_CHOP", 7) # Re-enable the gate driver (crucial to apply AC voltage)
         self._write_field("PHI_E_SELECTION", 2)  # Open Loop
         self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
         self._write_field("UQ_EXT", 0)
@@ -1225,27 +1231,37 @@ class TMC4671:
         dwell(0.75)  # 750 ms mechanical settling delay
 
         # Step 2: High-Frequency AC Injection
-        # We inject a 4 kHz electrical frequency (above the 1.8 kHz current loop bandwidth)
-        # to ensure the mechanical low-pass filter of the rotor is completely locked, quiet, and accurate.
-        # The register expects the raw DDS accumulator step directly, where 17179869 is exactly 1000 Hz.
-        # So for 4000 Hz, the value is exactly 4 * 17179869 = 68719476.
-        f_test = 4000.0
-        dds_value = 68719476
+        # We inject a real 2000 Hz electrical frequency (well above the motor's mechanical response),
+        # ensuring the rotor remains completely stationary (0 RPM, no back-EMF variations) while
+        # both ID and IQ are large and extremely stable due to the biquad filters being disabled.
+        # The register expects the raw DDS accumulator step directly, where dds_value = frequency * 2**32 / 25e6.
+        # So for exactly 2000 Hz, the value is exactly 2000 * 4294967296 / 25000000 = 343597384.
+        f_test = 2000.0
+        dds_value = 343597384
 
-        # We also reduce the applied voltage to ac_U = test2_U // 3 to significantly reduce torque
-        # and prevent any mechanical rotor runaway or toolhead movement.
-        ac_U = max(test2_U // 3, 1)
+        # We set the applied voltage to ac_U = test2_U to get larger, high-SNR currents.
+        # This is completely safe at 2000 Hz due to the high inductive impedance and zero mechanical rotation.
+        ac_U = max(test2_U, 1)
         self._write_field("UD_EXT", ac_U)
-        self._write_field("OPENLOOP_ACCELERATION", 10000000)  # High acceleration for instant ramp to 4000 Hz
+        self._write_field("OPENLOOP_ACCELERATION", 10000000)  # High acceleration for instant ramp to 2000 Hz
         self._write_field("OPENLOOP_VELOCITY_TARGET", dds_value)
-        dwell(0.2)  # 200 ms electrical settling delay
+        dwell(1.0)  # 1.0 s electrical settling delay (increased from 200 ms to ensure stability)
 
-        # Step 3: Read Demodulated DC Currents
-        reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
-        id_raw = reg_val & 0xFFFF
-        iq_raw = (reg_val >> 16) & 0xFFFF
-        I_D = id_raw if id_raw < 32768 else id_raw - 65536
-        I_Q = iq_raw if iq_raw < 32768 else iq_raw - 65536
+        # Step 3: Read Demodulated DC Currents (with multi-sample filtering)
+        id_samples = []
+        iq_samples = []
+        for i in range(100):
+            reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
+            id_raw = reg_val & 0xFFFF
+            iq_raw = (reg_val >> 16) & 0xFFFF
+            val_id = id_raw if id_raw < 32768 else id_raw - 65536
+            val_iq = iq_raw if iq_raw < 32768 else iq_raw - 65536
+            id_samples.append(val_id)
+            iq_samples.append(val_iq)
+            dwell(0.001)  # 1 ms sampling interval
+
+        I_D = sum(id_samples) / 100.0
+        I_Q = sum(iq_samples) / 100.0
 
         # Step 4: Calculate Inductance, Cleanup, and Re-alignment
         self._write_field("UD_EXT", 0)
@@ -1263,15 +1279,28 @@ class TMC4671:
         # Now we should be mechanically aligned
 
         npp = max(self._read_field("N_POLE_PAIRS"), 1)
-        if I_D == 0:
-            self.motor_l = 0.0
-        else:
-            # Use absolute value to make it robust against phase direction/sign.
-            # Compensate for electrical vs mechanical scaling by multiplying by NPP (pole pairs).
-            self.motor_l = abs((self.motor_r * I_Q) / (2.0 * math.pi * f_test * I_D)) * npp
 
-        logging.info("TMC 4671 '%s' est. motor L=%g H (ID=%d, IQ=%d)",
-                     self.stepper_name, self.motor_l, I_D, I_Q)
+        # Convert raw ID and IQ to physical Amperes
+        id_amp = I_D * self.current_helper.current_scale * 1e-3
+        iq_amp = I_Q * self.current_helper.current_scale * 1e-3
+        I_pk = math.sqrt(id_amp**2 + iq_amp**2)
+
+        # Convert raw ac_U to physical peak Volts
+        vm = self._read_vm()
+        V_pk = (ac_U / 32768.0) * vm
+
+        # Calculate phase inductance using the robust total-impedance method
+        omega = 2.0 * math.pi * f_test
+        if I_pk > 0:
+            Z_sq = (V_pk / I_pk)**2
+            R_sq = self.motor_r**2
+            L_phase = (math.sqrt(max(Z_sq - R_sq, 0.0))) / omega
+            self.motor_l = L_phase * npp
+        else:
+            self.motor_l = 0.0
+
+        logging.info("TMC 4671 '%s' est. motor L=%g H (ID=%.2f, IQ=%.2f, I_pk=%.4f A, V_pk=%.2f V)",
+                     self.stepper_name, self.motor_l, I_D, I_Q, I_pk, V_pk)
 
         if offsets:
             # While we're here, set the offsets
@@ -1284,6 +1313,9 @@ class TMC4671:
         self._reset_targets()
         self._write_field("MODE_MOTION", MotionMode.stopped_mode)
         self._write_field("PHI_E_SELECTION", old_phi_e_selection)
+
+        # Re-enable the configured biquad filters
+        self._setup_filters()
 
     # Tune PID via a setpoint change experiment
     # See https://folk.ntnu.no/skoge/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf
