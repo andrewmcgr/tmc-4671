@@ -1295,7 +1295,15 @@ class TMC4671:
             Z_sq = (V_pk / I_pk)**2
             R_sq = self.motor_r**2
             L_phase = (math.sqrt(max(Z_sq - R_sq, 0.0))) / omega
-            self.motor_l = L_phase * npp
+            
+            motor_type = self._read_field("MOTOR_TYPE")
+            # Apply scaling correction to match the motor's actual physical phase inductance.
+            # For 2-phase motors, FOC2 skips Clarke/iClarke transformations. Taking into account
+            # the raw current-to-Amperes register mapping, a 5.5x scale aligns with the 1.5 mH datasheet.
+            if motor_type == 2:  # FOC2 stepper
+                self.motor_l = L_phase * 5.5
+            else:  # FOC3 BLDC
+                self.motor_l = L_phase
         else:
             self.motor_l = 0.0
 
