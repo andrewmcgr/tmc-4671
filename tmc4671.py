@@ -1260,6 +1260,7 @@ class TMC4671:
         self._write_field("PHI_E_EXT", 0)
         self._write_field("UD_EXT", test2_U)
         dwell(0.75)  # Let the rotor settle completely back to the aligned position
+        # Now we should be mechanically aligned
 
         npp = max(self._read_field("N_POLE_PAIRS"), 1)
         if I_D == 0:
@@ -1272,15 +1273,6 @@ class TMC4671:
         logging.info("TMC 4671 '%s' est. motor L=%g H (ID=%d, IQ=%d)",
                      self.stepper_name, self.motor_l, I_D, I_Q)
 
-        for i in range(5):
-            dwell(0.2)
-            self._write_field("PWM_CHOP", 0)
-            # Give it some time to settle
-            dwell(0.2)
-            self._write_field("PWM_CHOP", 7)
-        # Give it some time to settle
-        dwell(0.2)
-        # Now we should be mechanically aligned
         if offsets:
             # While we're here, set the offsets
             self._write_field("HALL_PHI_E_OFFSET", -self._read_field("HALL_PHI_E") % 65536)
