@@ -378,8 +378,8 @@ class CurrentHelper:
         iwy = self.convert_adc_current(self._read_field("ADC_IWY"))
         return c, MAX_CURRENT, iux, iv, iwy
     def get_qd_current(self):
-        iq = self.convert_adc_current(self._read_field("PID_FLUX_ACTUAL"))
-        id = self.convert_adc_current(self._read_field("PID_TORQUE_ACTUAL"))
+        id = self.convert_adc_current(self._read_field("PID_FLUX_ACTUAL"))
+        iq = self.convert_adc_current(self._read_field("PID_TORQUE_ACTUAL"))
         return iq, id
     def set_current(self, run_current):
         self.run_current = run_current
@@ -1223,7 +1223,7 @@ class TMC4671:
         test2_U / (self.vm_range / self.voltage_scale)
         R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
         self.motor_r = R
-        logging.info("TMC 4671 '%s' est. motor R=%g", self.stepper_name, R)
+        logging.info("TMC 4671 '%s' est. motor R=%g Ω", self.stepper_name, R)
 
         # Inductance Measurement Procedure
         # Step 1: Magnetic Alignment (DC)
@@ -1231,34 +1231,70 @@ class TMC4671:
         self._write_field("PHI_E_SELECTION", 2)  # Open Loop
         self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
         self._write_field("UQ_EXT", 0)
-        self._write_field("UD_EXT", test2_U)
+
+        # Automated AC Voltage Calculation
+        I_target_A = 0.4
+        V_req = (I_target_A * self.motor_r * 2.0) + 1.2
+        vm = self._read_vm()
+        if self._read_field("MOTOR_TYPE") == 3:
+            V_max_phase = vm / math.sqrt(3.0)
+        else:
+            V_max_phase = vm
+
+        if V_req > V_max_phase:
+            ac_U = 32767
+        else:
+            ac_U = int(32767.0 * (V_req / V_max_phase))
+        ac_U = max(ac_U, 500)
+
+        # Apply the exact same voltage for both tests to calibrate out dead-time
+        self._write_field("UD_EXT", ac_U)
         dwell(0.75)  # 750 ms mechanical settling delay
 
-        # Step 2: High-Frequency AC Injection
-        # We inject a real 1000 Hz electrical frequency. This is high enough that the rotor stays
-        # completely stationary.
-        # THe register value is an angle added to phi_e every cycle.
-        f_test = 1000
-        dds_value = int(f_test * 2**16 / self.pwmfreq)
+        # --- Measure True DC Current Magnitude AND Raw Averages ---
+        dc_mag_samples = []
+        id_dc_raw_samples = []
+        iq_dc_raw_samples = []
+        for i in range(10):
+            iq, id = self.current_helper.get_qd_current()
+            dc_mag_samples.append(math.sqrt(id**2 + iq**2))
+            id_dc_raw_samples.append(id)
+            iq_dc_raw_samples.append(iq)
+            dwell(0.001)
 
-        # We set the applied voltage to ac_U = test2_U // 2 to produce safe, high-SNR currents
-        # while preventing transient overcurrent spikes that could trigger driver protection shutdown.
-        ac_U = max(test2_U // 2, 1)
-        self._write_field("UD_EXT", ac_U)
-        self._write_field("OPENLOOP_ACCELERATION", 200000)  # Moderate acceleration for a smooth, spike-free ramp to 500 Hz
+        I_DC_MAG = mean(dc_mag_samples)
+        I_DC_RAW_D = mean(id_dc_raw_samples)
+        I_DC_RAW_Q = mean(iq_dc_raw_samples)
+
+        # Step 2: High-Frequency AC Injection
+        # We inject a sine wave from the open-loop generator. This is high enough that the rotor stays
+        # completely stationary.
+        # The register value is an angle added to phi_e every cycle, angle units are 2^16 counts/revolution.
+        # However, it's also a Q16.16 fixed-point value, so use 2^32.
+        f_test = 1000
+        dds_value = int(f_test * (2**32) / self.pwmfreq)
+
+        self._write_field("OPENLOOP_ACCELERATION", dds_value)  # We want snap acceleration for this test
         self._write_field("OPENLOOP_VELOCITY_TARGET", dds_value)
         dwell(1.0)  # 1.0 s electrical settling delay (increased from 200 ms to ensure stability)
 
-        # Step 3: Read Demodulated DC Currents (with multi-sample filtering)
-        id_samples = []
-        iq_samples = []
+        # Step 3: Read Currents
+        # --- Measure True AC Current Magnitude AND Raw Averages ---
+        ac_mag_samples = []
+        id_ac_raw_samples = []
+        iq_ac_raw_samples = []
         for i in range(100):
             iq, id = self.current_helper.get_qd_current()
-            id_samples.append(id)
-            iq_samples.append(iq)
-            dwell(0.001)  # 1 ms sampling interval
+            ac_mag_samples.append(math.sqrt(id**2 + iq**2))
+            id_ac_raw_samples.append(id)
+            iq_ac_raw_samples.append(iq)
+            dwell(0.001)
 
-        # Step 4: Calculate Inductance, Cleanup, and Re-alignment
+        I_AC_MAG = mean(ac_mag_samples)
+        I_AC_RAW_D = mean(id_ac_raw_samples)
+        I_AC_RAW_Q = mean(iq_ac_raw_samples)
+
+        # Step 4: Cleanup and Re-alignment
         self._write_field("UD_EXT", 0)
         self._write_field("UQ_EXT", 0)
         self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
@@ -1273,29 +1309,37 @@ class TMC4671:
         dwell(0.75)  # Let the rotor settle completely back to the aligned position
         # Now we should be mechanically aligned
 
-        npp = max(self._read_field("N_POLE_PAIRS"), 1)
+        # =================================================================
+        # Step 4: Hardware-Agnostic Impedance Math
+        # =================================================================
 
-        # Convert raw ID and IQ to physical Amperes
-        I_D = mean(id_samples)
-        I_Q = mean(iq_samples)
+        # Calculate the true voltage passing through the MOSFETs using the DC pulse
+        # V_true = I * R
+        V_true = I_DC_MAG * self.motor_r
 
-        I_pk = math.sqrt(I_D**2 + I_Q**2)
-
-        # Convert raw ac_U to physical peak Volts
-        vm = self._read_vm()
-        V_pk = (ac_U / 32768.0) * vm
-
-        # Calculate phase inductance using the robust total-impedance method
         omega = 2.0 * math.pi * f_test
-        if I_pk > 0:
-            Z_sq = (V_pk / I_pk)**2
+
+        if I_AC_MAG > 0 and V_true > 0:
+            # Calculate total AC Impedance
+            Z = V_true / I_AC_MAG
+
+            # Isolate the Inductive Reactance (Z^2 = R^2 + X_L^2)
+            Z_sq = Z**2
             R_sq = self.motor_r**2
-            self.motor_l = (math.sqrt(max(Z_sq - R_sq, 0.0))) / omega
+
+            if Z_sq > R_sq:
+                self.motor_l = math.sqrt(Z_sq - R_sq) / omega
+            else:
+                self.motor_l = 0.0
         else:
             self.motor_l = 0.0
 
-        logging.info("TMC 4671 '%s' est. motor L=%g H (ID=%.2f, IQ=%.2f, I_pk=%.4f A, V_pk=%.2f V)",
-                     self.stepper_name, self.motor_l, I_D, I_Q, I_pk, V_pk)
+        logging.info("TMC 4671 '%s' L=%g H (ac_U=%d, Vm=%.1f)",
+                     self.stepper_name, self.motor_l, ac_U, vm)
+        logging.info("   -> DC: Mag=%.3f A (Raw ID=%.3f, IQ=%.3f)",
+                     I_DC_MAG, I_DC_RAW_D, I_DC_RAW_Q)
+        logging.info("   -> AC: Mag=%.3f A (Raw ID=%.3f, IQ=%.3f)",
+                     I_AC_MAG, I_AC_RAW_D, I_AC_RAW_Q)
 
         if offsets:
             # While we're here, set the offsets
