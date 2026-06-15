@@ -15,8 +15,9 @@ tmc-4671/
 ```
 
 ## WHERE TO LOOK
-- **Register Map & SPI Communication**: Located in [tmc4671.py](file:///home/amcgregor/tmc-4671/tmc4671.py). This file defines register addresses, sub-registers, and helper classes (e.g. `MotionMode`, `BiquadFilter`).
-- **Autotuning & Homing**: Also implemented in [tmc4671.py](file:///home/amcgregor/tmc-4671/tmc4671.py).
+- **Chip Datasheet**: [TMC 4671 LA Datasheet version 2.08](datasheet/TMC4671-LA_datasheet_rev2.08.noimages.md).
+- **Register Map & SPI Communication**: Located in [tmc4671_regs.py](tmc4671_regs.py). This file defines register addresses, sub-registers.
+- **Everything else**: Implemented in [tmc4671.py](tmc4671.py).
 
 ## CONVENTIONS & CRITICAL INSTRUCTIONS
 - **Datasheet Revision**: The correct version of the TMC 4671 datasheet to use is **version 2.08**. Do not use older or newer versions unless explicitly instructed, as register addresses or features can vary.

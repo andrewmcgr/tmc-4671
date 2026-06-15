@@ -49,6 +49,7 @@ function link_extension {
     echo "[INSTALL] Linking extension to Klipper..."
 
     ln -srfn "${TMC4671_PATH}/tmc4671.py" "${KLIPPER_PLUGINS_PATH}/tmc4671.py"
+    ln -srfn "${TMC4671_PATH}/tmc4671_regs.py" "${KLIPPER_PLUGINS_PATH}/tmc4671_regs.py"
 }
 
 function restart_klipper {
