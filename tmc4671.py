@@ -1828,8 +1828,8 @@ class TMC4671:
             enable_line.motor_enable(print_time)
             # Calibrate current ADC first before any motor activation
             self._calibrate_adc(print_time)
-            # Just test the PID, as it also sets up the encoder offsets
-            P, I = self._tune_flux_pid(True, 1.0, print_time)
+            # Just align and measure, which sets up the encoder offsets
+            self._align_and_measure(True, print_time)
             self._write_field("ABN_DECODER_COUNT", 0)
             self._write_field("PID_POSITION_TARGET", 0)
             print_time = self.printer.lookup_object('toolhead').get_last_move_time()
@@ -1925,46 +1925,48 @@ class TMC4671:
     def _read_vm(self):
         return self._convert_vm(self._read_field("ADC_VM_RAW"))
 
-    def _tune_flux_pid(self, test_existing, derate, print_time):
-        return self._tune_pid("FLUX", 2.5, derate, True, test_existing, print_time)
-
-    def _tune_torque_pid(self, test_existing, derate, print_time):
-        return self._tune_pid("TORQUE", 1.0, derate, True, test_existing, print_time)
-
-    # Align motors and tune PID via a setpoint change experiment
-    # See https://folk.ntnu.no/skoge/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf
-    def _tune_pid(self, X, Kc, derate, offsets, test_existing, print_time):
-        ch = self.current_helper
-        dwell = self.printer.lookup_object('toolhead').dwell
-        old_mode = self._read_field("MODE_MOTION")
-        old_phi_e_selection = self._read_field("PHI_E_SELECTION")
-        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-        limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
-        old_flux_offset = self._read_field("PID_FLUX_OFFSET")
-        self._write_field("PHI_E_EXT", 0) # and, set this to be PHI_E = 0
-        self._write_field("PHI_E_SELECTION", 1) # external mode, so it won't change.
-        # Start at some low voltage and see if we can read a current
-        test_U = round(self.vm_range/self.voltage_scale) # Should be about 1V
-        self._write_field("UQ_EXT", 0)
-        self._write_field("UD_EXT", test_U)
+    def _reset_targets(self):
         self._write_field("PID_TORQUE_TARGET", 0)
         self._write_field("PID_VELOCITY_TARGET", 0)
         self._write_field("PID_POSITION_TARGET", 0)
         self._write_field("PID_POSITION_ACTUAL", 0)
+
+    def _average_currents(self, samples=20, interval=0.005):
+        dwell = self.printer.lookup_object('toolhead').dwell
+        iux_samples = []
+        iwy_samples = []
+        c = 0
+        for i in range(samples):
+            c, MAX_I, tmp_iux, iv, tmp_iwy = self.current_helper.get_current()
+            iux_samples.append(tmp_iux)
+            iwy_samples.append(tmp_iwy)
+            dwell(interval)
+        return sum(iux_samples) / float(samples), sum(iwy_samples) / float(samples), c
+
+    def _tune_flux_pid(self, test_existing, derate, print_time):
+        return self._tune_pid("FLUX", 2.5, derate, test_existing, print_time)
+
+    def _tune_torque_pid(self, test_existing, derate, print_time):
+        return self._tune_pid("TORQUE", 1.0, derate, test_existing, print_time)
+
+    # Align motor and measure resistance and inductance on startup
+    def _align_and_measure(self, offsets, print_time):
+        dwell = self.printer.lookup_object('toolhead').dwell
+        old_phi_e_selection = self._read_field("PHI_E_SELECTION")
+        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+        self._write_field("PHI_E_EXT", 0) # and, set this to be PHI_E = 0
+        self._write_field("PHI_E_SELECTION", 1) # external mode, so it won't change.
+        # Start at some low voltage and see if we can read a current
+        test_U = round(self.vm_range / self.voltage_scale) # Should be about 1V
+        self._write_field("UQ_EXT", 0)
+        self._write_field("UD_EXT", test_U)
+        self._reset_targets()
         self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
         # Turn on the chopper and wait a bit to measure the resistance
         self._write_field("PWM_CHOP", 7)
         dwell(0.3)
         # Average current readings to filter noise and ripple
-        iux_samples = []
-        iwy_samples = []
-        for i in range(20):
-            c, MAX_I, tmp_iux, iv, tmp_iwy = self.current_helper.get_current()
-            iux_samples.append(tmp_iux)
-            iwy_samples.append(tmp_iwy)
-            dwell(0.005)
-        iux = sum(iux_samples) / 20.0
-        iwy = sum(iwy_samples) / 20.0
+        iux, iwy, c = self._average_currents(20, 0.005)
         self._write_field("PWM_CHOP", 0)
         logging.info("TMC 4671 '%s' initial averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux, iwy)
         if max(abs(iux), abs(iwy)) < 1e-6:
@@ -1978,17 +1980,9 @@ class TMC4671:
         self._write_field("PWM_CHOP", 7)
         dwell(0.5)
         # Average current readings to filter mechanical ringing and noise
-        iux_samples = []
-        iwy_samples = []
-        for i in range(20):
-            c, MAX_I, tmp_iux, iv, tmp_iwy = self.current_helper.get_current()
-            iux_samples.append(tmp_iux)
-            iwy_samples.append(tmp_iwy)
-            dwell(0.005)
-        iux = sum(iux_samples) / 20.0
-        iwy = sum(iwy_samples) / 20.0
+        iux, iwy, _ = self._average_currents(20, 0.005)
         logging.info("TMC 4671 '%s' alignment averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux, iwy)
-        test2_U/(self.vm_range/self.voltage_scale)
+        test2_U / (self.vm_range / self.voltage_scale)
         R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
         self.motor_r = R
         logging.info("TMC 4671 '%s' est. motor R=%g", self.stepper_name, R)
@@ -2060,15 +2054,30 @@ class TMC4671:
         # Now we should be mechanically aligned
         if offsets:
             # While we're here, set the offsets
-            self._write_field("HALL_PHI_E_OFFSET", -self._read_field("HALL_PHI_E")%65536),
+            self._write_field("HALL_PHI_E_OFFSET", -self._read_field("HALL_PHI_E") % 65536)
             self._write_field("ABN_DECODER_COUNT", 0)
             self._write_field("ABN_DECODER_PHI_E_OFFSET", 0)
+        # Put motion config back how it was / safe stopped state
+        self._write_field("UD_EXT", 0)
+        self._write_field("UQ_EXT", 0)
+        self._reset_targets()
         self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-        # Give it some time to settle
-        dwell(0.2)
+        self._write_field("PHI_E_SELECTION", old_phi_e_selection)
+
+    # Tune PID via a setpoint change experiment
+    # See https://folk.ntnu.no/skoge/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf
+    def _tune_pid(self, X, Kc, derate, test_existing, print_time):
+        ch = self.current_helper
+        dwell = self.printer.lookup_object('toolhead').dwell
+        old_mode = self._read_field("MODE_MOTION")
+        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+        limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
+        old_flux_offset = self._read_field("PID_FLUX_OFFSET")
+        self._reset_targets()
+
+        # Switch to torque mode for the setpoint change experiment
         self._write_field("MODE_MOTION", MotionMode.torque_mode)
-        test_cur = limit_cur #// 2
-        old_cur = self._read_field("PID_%s_ACTUAL"%X)
+        test_cur = limit_cur
         dwell(0.2)
         if not test_existing:
             Kc0 = Kc
@@ -2076,6 +2085,7 @@ class TMC4671:
             self._write_field("PID_%s_I"%X, self.pid_helpers["%s_I"%X].to_f(0.0))
         else:
             Kc0 = from_q4_12(self._read_field("PID_%s_P"%X))
+
         # Do a setpoint change experiment
         self._write_field("PID_%s_TARGET"%X, 0)
         logging.info("test_cur = %d"%test_cur)
@@ -2083,21 +2093,14 @@ class TMC4671:
         c = self._dump_pid(n, X)
         self._write_field("PID_%s_TARGET"%X, test_cur)
         c += self._dump_pid(n, X)
-        # Experiment over, switch off
+
+        # Experiment over, switch off target and restore motion settings
         self._write_field("PID_%s_TARGET"%X, 0)
-        # Put motion config back how it was
-        self._write_field("UD_EXT", 0)
-        self._write_field("UQ_EXT", 0)
-        self._write_field("PID_TORQUE_TARGET", 0)
-        self._write_field("PID_VELOCITY_TARGET", 0)
-        self._write_field("PID_POSITION_TARGET", 0)
-        self._write_field("PID_POSITION_ACTUAL", 0)
+        self._reset_targets()
         self._write_field("MODE_MOTION", old_mode)
         self._write_field("PID_FLUX_OFFSET", old_flux_offset)
-        self._write_field("PHI_E_SELECTION", old_phi_e_selection)
-        # Analysis and logging
-        #for r in c:
-        #    logging.info("%g,%s"%(float(r[0]-c[0][0])/1e9,','.join(map(str, r[1:]))))
+
+        # Analysis and logging of setpoint change experiment results
         # At this point we can determine system model
         y0 = sum(float(a[1]) for a in c[0:n])/float(n)
         yinf = sum(float(a[1]) for a in c[3*n//2:2*n])/float(2*n - 3*n//2) - y0
@@ -2113,7 +2116,6 @@ class TMC4671:
             yp, tp = ypt, tpt
         yp -= y0
         # It is better to overestimate tp than under.
-        #tp -= float(c[n][0] + c[n+1][0])/2.0
         tp -= c[n][0]
         tp *= 1e-9 # it was in nanoseconds, we want seconds
         D = (yp - yinf) / yinf
