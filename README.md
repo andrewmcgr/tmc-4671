@@ -224,7 +224,7 @@ The command also suggests biquad filter frequencies but does not apply them.
 Report what the PID tuning helpers would compute given the current motor parameters, without writing anything to the controller. Compares computed values against the currently active register values.
 
 ```
-TMC_DEBUG_TUNING STEPPER=stepper_x [CURRENT_BANDWIDTH=<hz>] [LAMBDA_V=<val>] [LAMBDA_P=<val>] [KT=<nm/a>]
+TMC_DEBUG_TUNING STEPPER=stepper_x [CURRENT_BANDWIDTH=<hz>] [LAMBDA_V=<val>] [LAMBDA_P=<val>] [KT=<nm/a>] [R=<ohm>] [L=<henry>]
 TMC_DEBUG_TUNING STEPPER=stepper_x HOLDING_CURRENT=<a> HOLDING_TORQUE=<nm> [...]
 ```
 
@@ -235,8 +235,10 @@ TMC_DEBUG_TUNING STEPPER=stepper_x HOLDING_CURRENT=<a> HOLDING_TORQUE=<nm> [...]
 | `LAMBDA_P` | 400.0 | Position loop time constant for the motion PID calculation. |
 | `KT` | — | Motor torque constant in Nm/A (required for motion PID section). |
 | `HOLDING_CURRENT` + `HOLDING_TORQUE` | — | Alternative way to supply Kt. |
+| `R` | — | Override motor winding resistance in Ω. Defaults to the measured value. |
+| `L` | — | Override motor winding inductance in H. Defaults to the measured value. |
 
-If motor R and L have not yet been measured (startup alignment pending), the current PID section reports that instead of computing. The motion PID section is skipped if no torque constant is provided.
+If motor R and L have not yet been measured (startup alignment pending), the current PID section reports that instead of computing. Providing `R` or `L` overrides the measured value for the computation without changing what is stored; the output labels overridden values accordingly. The motion PID section is skipped if no torque constant is provided.
 
 ### SET_TMC_BIQUAD_FILTER
 
