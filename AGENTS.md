@@ -26,4 +26,5 @@ tmc-4671/
 - **Datasheet Revision**: The correct version of the TMC 4671 datasheet to use is **version 2.08**. Do not use older or newer versions unless explicitly instructed, as register addresses or features can vary.
 - **Firmware Context**: This repository is a plugin for the **Kalico** 3d printer firmware (and is structured to integrate with Kalico/Klipper).
 - **Refactoring**: When extracting code into new files, ensure this file is updated.
+- **Installer**: `install.sh` symlinks each Python module file into Klipper's `extras/` directory. When adding a new module file, add a corresponding `ln -srfn` line to `link_extension` in `install.sh` and run the script (or create the symlink manually) on the target machine, otherwise Klipper will fail to import the module.
 - **Commit style**: Plain English, no conventional-commit prefixes (e.g. "Add motor inductance measurement", not "feat: add motor inductance measurement").
