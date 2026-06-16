@@ -1092,6 +1092,26 @@ class TMC4671:
     def _tune_torque_pid(self, test_existing, derate, print_time):
         return self._tune_pid("TORQUE", 1.0, derate, test_existing, print_time)
 
+    def _tune_current_pid(self, current_bandwidth):
+        # 1. Calculate continuous physical gains
+        omega_bw = 2.0 * math.pi * current_bandwidth
+        Kp_physical = omega_bw * self.motor_l
+
+        # 2. Extract hardware loop scaling factors
+        # current_scale is in mA/LSB, convert to A/LSB
+        amps_per_adc_count = self.current_helper.current_scale * 1e-3
+        vm_voltage = self._read_vm()
+
+        hardware_loop_gain = (amps_per_adc_count * 32768.0) / max(vm_voltage, 0.001)
+
+        # 3. Apply loop gain to P
+        P = Kp_physical * hardware_loop_gain
+
+        # 4. Calculate I as an analytical plant ratio for Advanced Mode (Serial structure)
+        # I = R / (L * f_pwm)
+        I = self.motor_r / (self.motor_l * self.pwmfreq)
+        return P, I
+
     # Align motor and measure resistance and inductance on startup
     def _align_and_measure(self, offsets, print_time):
         dwell = self.printer.lookup_object('toolhead').dwell
@@ -1502,39 +1522,21 @@ class TMC4671:
         with self.mutex:
             if simc_flag:
                 P, I = self._tune_flux_pid(test_existing, derate, print_time)
-                self._write_field("PID_TORQUE_P", self.pid_helpers["TORQUE_P"].to_f(P))
-                self._write_field("PID_TORQUE_I", self.pid_helpers["TORQUE_I"].to_f(I))
             else:
-                # 1. Calculate continuous physical gains
-                omega_bw = 2.0 * math.pi * current_bandwidth
-                Kp_physical = omega_bw * self.motor_l
+                P, I = self._tune_current_pid(current_bandwidth)
+            self._write_field("PID_FLUX_P", self.pid_helpers["FLUX_P"].to_f(P))
 
-                # 2. Extract hardware loop scaling factors
-                # current_scale is in mA/LSB, convert to A/LSB
-                amps_per_adc_count = self.current_helper.current_scale * 1e-3
-                vm_voltage = self._read_vm()
+            self._write_field("PID_FLUX_I", self.pid_helpers["FLUX_I"].to_f(I))
+            self._write_field("PID_TORQUE_P", self.pid_helpers["TORQUE_P"].to_f(P))
+            self._write_field("PID_TORQUE_I", self.pid_helpers["TORQUE_I"].to_f(I))
 
-                hardware_loop_gain = (amps_per_adc_count * 32768.0) / max(vm_voltage, 0.001)
-
-                # 3. Apply loop gain to P
-                P = Kp_physical * hardware_loop_gain
-
-                # 4. Calculate I as an analytical plant ratio for Advanced Mode (Serial structure)
-                # I = R / (L * f_pwm)
-                I = self.motor_r / (self.motor_l * self.pwmfreq)
-                self._write_field("PID_FLUX_P", self.pid_helpers["FLUX_P"].to_f(P))
-
-                self._write_field("PID_FLUX_I", self.pid_helpers["FLUX_I"].to_f(I))
-                self._write_field("PID_TORQUE_P", self.pid_helpers["TORQUE_P"].to_f(P))
-                self._write_field("PID_TORQUE_I", self.pid_helpers["TORQUE_I"].to_f(I))
-
-                # Store results for SAVE_CONFIG
-                cfgname = "tmc4671 %s" % (self.name,)
-                configfile = self.printer.lookup_object('configfile')
-                configfile.set(cfgname, 'foc_PID_FLUX_P', "%.3f" % (P,))
-                configfile.set(cfgname, 'foc_PID_FLUX_I', "%.3f" % (I,))
-                configfile.set(cfgname, 'foc_PID_TORQUE_P', "%.3f" % (P,))
-                configfile.set(cfgname, 'foc_PID_TORQUE_I', "%.3f" % (I,))
+            # Store results for SAVE_CONFIG
+            cfgname = "tmc4671 %s" % (self.name,)
+            configfile = self.printer.lookup_object('configfile')
+            configfile.set(cfgname, 'foc_PID_FLUX_P', "%.3f" % (P,))
+            configfile.set(cfgname, 'foc_PID_FLUX_I', "%.3f" % (I,))
+            configfile.set(cfgname, 'foc_PID_TORQUE_P', "%.3f" % (P,))
+            configfile.set(cfgname, 'foc_PID_TORQUE_I', "%.3f" % (I,))
         gcmd.respond_info(
             "PID %s parameters: Kc=%.2f Ki=%.3f\n"
             "The SAVE_CONFIG command will update the printer config file\n"
