@@ -1099,10 +1099,14 @@ class TMC4671:
     def _tune_torque_pid(self, test_existing, derate, print_time):
         return self._tune_pid("TORQUE", 1.0, derate, test_existing, print_time)
 
-    def _tune_current_pid(self, current_bandwidth):
+    def _tune_current_pid(self, current_bandwidth, motor_r=None, motor_l=None):
+        if motor_r is None:
+            motor_r = self.motor_r
+        if motor_l is None:
+            motor_l = self.motor_l
         # 1. Calculate continuous physical gains
         omega_bw = 2.0 * math.pi * current_bandwidth
-        Kp_physical = omega_bw * self.motor_l
+        Kp_physical = omega_bw * motor_l
 
         # 2. Extract hardware loop scaling factors
         # current_scale is in mA/LSB, convert to A/LSB
@@ -1116,7 +1120,7 @@ class TMC4671:
 
         # 4. Calculate I as an analytical plant ratio for Advanced Mode (Serial structure)
         # I = R / (L * f_pwm)
-        I = self.motor_r / (self.motor_l * self.pwmfreq)
+        I = motor_r / (motor_l * self.pwmfreq)
         return P, I
 
     def _tune_motion_pid(self, Kt, l_v, l_p):
@@ -1934,20 +1938,27 @@ class TMC4671:
         I_h = gcmd.get_float('HOLDING_CURRENT', None)
         T_h = gcmd.get_float('HOLDING_TORQUE', None)
         Kt = gcmd.get_float('KT', None)
+        r_override = gcmd.get_float('R', None, minval=0.0)
+        l_override = gcmd.get_float('L', None, minval=0.0)
         if Kt is None and I_h is not None and T_h is not None:
             Kt = T_h / I_h
+
+        eff_r = r_override if r_override is not None else self.motor_r
+        eff_l = l_override if l_override is not None else self.motor_l
 
         lines = ["TMC 4671 '%s' Tuning Debug Report" % self.name]
 
         # Motor parameters
-        if self.motor_r == 0.0 or self.motor_l == 0.0:
+        if eff_r == 0.0 or eff_l == 0.0:
             lines.append(
                 "Motor parameters: not yet calibrated (startup alignment pending)"
             )
         else:
+            r_src = " (override)" if r_override is not None else ""
+            l_src = " (override)" if l_override is not None else ""
             lines.append(
-                "Motor parameters: R=%.4f Ω  L=%.6f H (%.3f mH)"
-                % (self.motor_r, self.motor_l, self.motor_l * 1000.0)
+                "Motor parameters: R=%.4f Ω%s  L=%.6f H (%.3f mH)%s"
+                % (eff_r, r_src, eff_l, eff_l * 1000.0, l_src)
             )
 
         # --- Current PID ---
@@ -1956,10 +1967,12 @@ class TMC4671:
             "--- Current PID (bandwidth method, CURRENT_BANDWIDTH=%.1f Hz) ---"
             % current_bandwidth
         )
-        if self.motor_r == 0.0 or self.motor_l == 0.0:
+        if eff_r == 0.0 or eff_l == 0.0:
             lines.append("  Cannot compute: motor parameters not yet calibrated")
         else:
-            P_new, I_new = self._tune_current_pid(current_bandwidth)
+            P_new, I_new = self._tune_current_pid(
+                current_bandwidth, motor_r=eff_r, motor_l=eff_l
+            )
             P_flux_cur = self.pid_helpers["FLUX_P"].from_f(
                 self._read_field("PID_FLUX_P")
             )
