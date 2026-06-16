@@ -158,3 +158,166 @@ TMC_TUNE_MOTION_PID LAMBDA_V=80 LAMBDA_P=180 KT=0.022 STEPPER=stepper_y
 depending on whether you know a KT value (in nM/A) or holding specifications. Lambda_v and Lambda_p are measures of how aggressive the tuning will be. Lambda_v can go from approximately 45 up, and Lambda_p should be at least twice Lambda_v; the default values are Lambda_v=100 and Lambda_p=400. `SAVE_CONFIG` will save the tuning values. The command will also suggest filter frequencies, but will not apply them.
 
 If the motors make noise at rest after autotuning, increase the Lambda values. If not, consider decreasing them; the minimum value that remains quiet at rest is likely also the optimal value.
+
+## G-code command reference
+
+All commands take `STEPPER=<name>` to select the driver, e.g. `STEPPER=stepper_x`.
+
+### INIT_TMC
+
+Re-initialises all TMC 4671 registers from the config and runs ADC offset calibration. Useful after a power glitch without a full Klipper restart.
+
+```
+INIT_TMC STEPPER=stepper_x
+```
+
+### SET_TMC_CURRENT
+
+Get or set the run current limit.
+
+```
+SET_TMC_CURRENT STEPPER=stepper_x [CURRENT=<amps>]
+```
+
+Without `CURRENT`, reports the currently active limit. With `CURRENT`, updates the `PID_TORQUE_FLUX_LIMITS` register immediately.
+
+### TMC_TUNE_PID
+
+Autotune flux and torque PID coefficients and queue the results for `SAVE_CONFIG`.
+
+```
+TMC_TUNE_PID STEPPER=stepper_x [CURRENT_BANDWIDTH=<hz>] [SIMC=<0|1>] [CHECK=<0|1>] [DERATE=<factor>]
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `CURRENT_BANDWIDTH` | 1800.0 | Target closed-loop current bandwidth in Hz. Higher values are faster but noisier. |
+| `SIMC` | 0 | Use S-IMC setpoint-change experiment instead of the bandwidth method. |
+| `CHECK` | 0 | With `SIMC=1`: test the *existing* gains instead of starting from scratch. |
+| `DERATE` | 1.6 | With `SIMC=1`: initial gain derate factor. |
+
+The default (bandwidth) method derives P and I analytically from the measured motor R and L. The `SIMC` method runs a live setpoint-change experiment and fits a first-order-plus-dead-time model — more accurate but takes longer and requires the motor to be active.
+
+Output example: `PID stepper_x parameters: Kc=9.66 Ki=0.485`
+
+### TMC_TUNE_MOTION_PID
+
+Autotune velocity and position PID coefficients using S-IMC and queue the results for `SAVE_CONFIG`.
+
+```
+TMC_TUNE_MOTION_PID STEPPER=stepper_x KT=<nm/a> [LAMBDA_V=<val>] [LAMBDA_P=<val>]
+TMC_TUNE_MOTION_PID STEPPER=stepper_x HOLDING_CURRENT=<a> HOLDING_TORQUE=<nm> [LAMBDA_V=<val>] [LAMBDA_P=<val>]
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `KT` | — | Motor torque constant in Nm/A. |
+| `HOLDING_CURRENT` | — | Rated holding current in A (alternative to `KT`). |
+| `HOLDING_TORQUE` | — | Rated holding torque in Nm (alternative to `KT`). |
+| `LAMBDA_V` | 100.0 | Velocity loop closed-loop time constant (smaller = faster/noisier). |
+| `LAMBDA_P` | 400.0 | Position loop closed-loop time constant. Should be at least 2× `LAMBDA_V`. |
+
+The command also suggests biquad filter frequencies but does not apply them.
+
+### TMC_DEBUG_TUNING
+
+Report what the PID tuning helpers would compute given the current motor parameters, without writing anything to the controller. Compares computed values against the currently active register values.
+
+```
+TMC_DEBUG_TUNING STEPPER=stepper_x [CURRENT_BANDWIDTH=<hz>] [LAMBDA_V=<val>] [LAMBDA_P=<val>] [KT=<nm/a>]
+TMC_DEBUG_TUNING STEPPER=stepper_x HOLDING_CURRENT=<a> HOLDING_TORQUE=<nm> [...]
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `CURRENT_BANDWIDTH` | 1800.0 | Bandwidth in Hz for the current PID calculation. |
+| `LAMBDA_V` | 100.0 | Velocity loop time constant for the motion PID calculation. |
+| `LAMBDA_P` | 400.0 | Position loop time constant for the motion PID calculation. |
+| `KT` | — | Motor torque constant in Nm/A (required for motion PID section). |
+| `HOLDING_CURRENT` + `HOLDING_TORQUE` | — | Alternative way to supply Kt. |
+
+If motor R and L have not yet been measured (startup alignment pending), the current PID section reports that instead of computing. The motion PID section is skipped if no torque constant is provided.
+
+### SET_TMC_BIQUAD_FILTER
+
+Configure a biquad filter on the fly.
+
+```
+SET_TMC_BIQUAD_FILTER STEPPER=stepper_x FILTER=<target> [FREQUENCY=<hz>] [TYPE=<type>] [SLOPE=<q>]
+```
+
+| Parameter | Values | Description |
+|---|---|---|
+| `FILTER` | `flux`, `torque`, `velocity`, `position` | Which signal path to filter. |
+| `FREQUENCY` | 0 – 100000000 | Cutoff frequency in Hz. 0 disables the filter. |
+| `TYPE` | `lpf`, `notch`, `apf` | Filter topology. Default: `lpf`. |
+| `SLOPE` | any positive float | Q factor / slope. Default: 0.707 (Butterworth). |
+
+### SET_TMC_FIELD
+
+Read or write any TMC 4671 register field by name.
+
+```
+SET_TMC_FIELD STEPPER=stepper_x FIELD=<name> [VALUE=<int>|FVAL=<float>]
+```
+
+Without `VALUE` or `FVAL`, reads and prints the current value of the field. `FVAL` uses the field's configured floating-point converter (e.g. for PID coefficients).
+
+### DUMP_TMC
+
+Read and display TMC 4671 registers.
+
+```
+DUMP_TMC STEPPER=stepper_x [GROUP=<name>|REGISTER=<name>|FIELD=<name>]
+```
+
+Available groups: `default`, `hall`, `abn`, `adc`, `aenc`, `pwm`, `pidconf`, `pid`, `step`, `filters`. Without arguments, dumps the `default` group.
+
+### DUMP_TMC6100
+
+Read and display TMC6100 gate driver registers. Only available when `drv_cs_pin` is configured.
+
+```
+DUMP_TMC6100 STEPPER=stepper_x [GROUP=<name>|REGISTER=<name>|FIELD=<name>]
+```
+
+### TMC_DEBUG_VOLTAGE
+
+Report the motor supply voltage (VM) and the FOC d/q axis voltages in both raw counts and volts.
+
+```
+TMC_DEBUG_VOLTAGE STEPPER=stepper_x
+```
+
+### TMC_DEBUG_CURRENT
+
+Report phase currents, FOC target and actual d/q axis currents, and the active current limit.
+
+```
+TMC_DEBUG_CURRENT STEPPER=stepper_x
+```
+
+### TMC_DEBUG_MOTOR
+
+Report the motor resistance and inductance measured during the last startup alignment.
+
+```
+TMC_DEBUG_MOTOR STEPPER=stepper_x
+```
+
+Values are populated after the first successful `klippy:ready` alignment sequence. If the driver has not yet aligned, the command says so.
+
+### TMC_DEBUG_MOVE
+
+Run a raw motion test in a chosen mode. The motor must be free to move. Results are logged to the Klipper log.
+
+```
+TMC_DEBUG_MOVE STEPPER=stepper_x <VELOCITY=<int>|TORQUE=<int>|POSITION=<int>|OPENVEL=<int>>
+```
+
+| Parameter | Description |
+|---|---|
+| `VELOCITY` | Target in velocity-mode raw units. |
+| `TORQUE` | Target in torque-mode raw units. |
+| `POSITION` | Target in position-mode raw units. |
+| `OPENVEL` | Open-loop velocity in raw units (no position feedback). |

@@ -11,7 +11,6 @@ import logging, collections
 import math
 from time import monotonic_ns
 from enum import IntEnum
-from typing import NamedTuple
 from statistics import median_low, mean, fmean
 from extras import bus, tmc, thermistor
 from .tmc4671_regs import (
@@ -19,6 +18,11 @@ from .tmc4671_regs import (
     ADC_GPIO_FIELDS, Fields, FloatFields, SignedFields,
     FieldFormatters, to_q4_12, from_q4_12, to_q8_8, from_q8_8,
     to_q2_30, from_q2_30
+)
+from .tmc4671_biquad import (
+    BiquadFilter, BIQUAD_FILTER_TYPES, BIQUAD_FILTER_TARGETS,
+    biquad_lpf_tmc, biquad_lpf, biquad_notch, biquad_apf,
+    biquad_Z_tmc, biquad_tmc
 )
 
 # The 4671 has a 25 MHz external clock
@@ -33,11 +37,6 @@ class MotionMode(IntEnum):
     velocity_mode = 2
     position_mode = 3
     uq_ud_ext_mode = 8
-
-class BiquadFilter(NamedTuple):
-    type: str
-    freq: int
-    slope: float
 
 # Tuple is the address followed by a value to put in the next higher address
 # to select that sub-register, or none to just go straight there.
@@ -113,98 +112,9 @@ DumpGroups = {
                 "CONFIG_BIQUAD_F_B_2", "CONFIG_BIQUAD_F_ENABLE",],
 }
 
-
 ######################################################################
-# Biquad filter utilities
+# PI controller utilities
 ######################################################################
-
-BIQUAD_FILTER_TYPES = ['lpf', 'notch', 'apf']
-BIQUAD_FILTER_TARGETS = {
-        'flux': 'CONFIG_BIQUAD_F_ENABLE',
-        'torque': 'CONFIG_BIQUAD_T_ENABLE',
-        'velocity': 'CONFIG_BIQUAD_V_ENABLE',
-        'position': 'CONFIG_BIQUAD_X_ENABLE',
-}
-
-# Filter design formula from 4671 datasheet
-def biquad_lpf_tmc(fs, f, D):
-    w0 = 2.0 * math.pi * f / fs
-    b2 = b1 = 0.0
-    b0 = 1.0
-    a2 = 1.0 / (w0**2)
-    a1 = 2.0 * D / w0
-    a0 = 1.0
-    return b0, b1, b2, a0, a1, a2
-
-# Filter design formulae from https://www.w3.org/TR/audio-eq-cookbook/
-
-# Design a biquad low pass filter in canonical form
-def biquad_lpf(fs, f, Q):
-    w0 = 2.0 * math.pi * f / fs
-    cw0 = math.cos(w0)
-    sw0 = math.sin(w0)
-    alpha = 0.5 * sw0 / Q
-    b1 = 1.0 - cw0
-    b0 = b2 = b1 / 2.0
-    a0 = 1 + alpha
-    a1 = - 2.0 * cw0
-    a2 = 1 - alpha
-    return b0, b1, b2, a0, a1, a2
-
-# Design a biquad notch filter in canonical form
-def biquad_notch(fs, f, Q):
-    w0 = 2.0 * math.pi * f / fs
-    cw0 = math.cos(w0)
-    sw0 = math.sin(w0)
-    alpha = 0.5 * sw0 / Q
-    b1 = - 2.0 * cw0
-    b0 = b2 = 1.0
-    a0 = 1 + alpha
-    a1 = - 2.0 * cw0
-    a2 = 1 - alpha
-    return b0, b1, b2, a0, a1, a2
-
-# Design a biquad allpass filter in canonical form
-def biquad_apf(fs, f, Q):
-    w0 = 2.0 * math.pi * f / fs
-    cw0 = math.cos(w0)
-    sw0 = math.sin(w0)
-    alpha = 0.5 * sw0 / Q
-    b2 = 1 + alpha
-    b1 = - 2.0 * cw0
-    b0 = 1 - alpha
-    a0 = 1 + alpha
-    a1 = - 2.0 * cw0
-    a2 = 1 - alpha
-    return b0, b1, b2, a0, a1, a2
-
-# Z-transform and normalise a biquad filter, according to TMC
-def biquad_Z_tmc(T, b0, b1, b2, a0, a1, a2):
-    den = (T**2 - 2*a1 + 4*a2)
-    b2z = (b0*(T**2) + 2*b1*T + 4*b2) / den
-    b1z = (2*b0*(T**2) - 8*b2) / den
-    b0z = (b0*(T**2) - 2*b1*T + 4*b2) / den
-    a2z = (T**2 + 2*a1*T + 4*a2) / den
-    a1z = (2*(T**2) - 8*a2) / den
-    e29 = 2**29
-    b0 = round(b0z/(a0) * e29)
-    b1 = round(b1z/(a0) * e29)
-    b2 = round(b2z/(a0) * e29)
-    a1 = round(-a1z/a0 * e29)
-    a2 = round(-a2z/a0 * e29)
-    # return in the same order as the config registers
-    return a1, a2, 0, b0, b1, b2
-
-# Normalise a biquad filter, according to TMC
-def biquad_tmc(b0, b1, b2, a0, a1, a2):
-    e29 = 2**29
-    b0 = round(b0/(a0) * e29)
-    b1 = round(b1/(a0) * e29)
-    b2 = round(b2/(a0) * e29)
-    a1 = round(-a1/a0 * e29)
-    a2 = round(-a2/a0 * e29)
-    # return in the same order as the config registers
-    return a1, a2, 0, b0, b1, b2
 
 # S-IMC PI controller design, "Improved Method"
 # See https://folk.ntnu.no/skoge/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf
@@ -844,6 +754,13 @@ class TMC4671:
             self.cmd_TMC_DEBUG_MOTOR,
             desc=self.cmd_TMC_DEBUG_MOTOR_help,
         )
+        gcode.register_mux_command(
+            "TMC_DEBUG_TUNING",
+            "STEPPER",
+            self.name,
+            self.cmd_TMC_DEBUG_TUNING,
+            desc=self.cmd_TMC_DEBUG_TUNING_help,
+        )
         # Allow other registers to be set from the config
         set_config_field = self.fields.set_config_field
         if self.fields6100 is not None:
@@ -1181,6 +1098,43 @@ class TMC4671:
 
     def _tune_torque_pid(self, test_existing, derate, print_time):
         return self._tune_pid("TORQUE", 1.0, derate, test_existing, print_time)
+
+    def _tune_current_pid(self, current_bandwidth):
+        # 1. Calculate continuous physical gains
+        omega_bw = 2.0 * math.pi * current_bandwidth
+        Kp_physical = omega_bw * self.motor_l
+
+        # 2. Extract hardware loop scaling factors
+        # current_scale is in mA/LSB, convert to A/LSB
+        amps_per_adc_count = self.current_helper.current_scale * 1e-3
+        vm_voltage = self._read_vm()
+
+        hardware_loop_gain = (amps_per_adc_count * 32768.0) / max(vm_voltage, 0.001)
+
+        # 3. Apply loop gain to P
+        P = Kp_physical * hardware_loop_gain
+
+        # 4. Calculate I as an analytical plant ratio for Advanced Mode (Serial structure)
+        # I = R / (L * f_pwm)
+        I = self.motor_r / (self.motor_l * self.pwmfreq)
+        return P, I
+
+    def _tune_motion_pid(self, Kt, l_v, l_p):
+        Kadc = self.current_helper.current_scale * 1e-3
+        NPP = self._read_field("N_POLE_PAIRS")
+        t_d = 1.
+
+        k_v = Kadc / (Kt * math.pi)
+        t_iv = 2.*l_v + t_d
+        p_v = t_iv / (k_v * (l_v + t_d) ** 2)
+        i_v = 1. / t_iv
+
+        k_p = NPP / (256. * 50.)
+        t_ip = 2.*l_p + t_d
+        p_p = t_ip / (k_p * (l_p + t_d) ** 2)
+        i_p = 1. / t_ip
+
+        return p_v, i_v, p_p, i_p, k_v, k_p
 
     # Align motor and measure resistance and inductance on startup
     def _align_and_measure(self, offsets, print_time):
@@ -1545,20 +1499,9 @@ class TMC4671:
                 gcmd.respond_info("Must supply KT or both HOLDING_TORQUE and HOLDING_CURRENT.")
                 return
             Kt = T_h / I_h
-        Kadc = self.current_helper.current_scale * 1e-3
-        NPP = self._read_field("N_POLE_PAIRS")
         rotation_distance, _ = self.stepper.get_rotation_distance()
-        t_d = 1.
 
-        k_v = Kadc / (Kt * math.pi)
-        t_iv = 2.*l_v + t_d
-        p_v = t_iv / (k_v * (l_v + t_d) ** 2)
-        i_v = 1. / t_iv
-
-        k_p = NPP / (256. * 50.)
-        t_ip = 2.*l_p + t_d
-        p_p = t_ip / (k_p * (l_p + t_d) ** 2)
-        i_p = 1. / t_ip
+        p_v, i_v, p_p, i_p, k_v, k_p = self._tune_motion_pid(Kt, l_v, l_p)
 
         self._write_field("PID_VELOCITY_P", self.pid_helpers["VELOCITY_P"].to_f(p_v))
         self._write_field("PID_VELOCITY_I", self.pid_helpers["VELOCITY_I"].to_f(i_v))
@@ -1592,39 +1535,21 @@ class TMC4671:
         with self.mutex:
             if simc_flag:
                 P, I = self._tune_flux_pid(test_existing, derate, print_time)
-                self._write_field("PID_TORQUE_P", self.pid_helpers["TORQUE_P"].to_f(P))
-                self._write_field("PID_TORQUE_I", self.pid_helpers["TORQUE_I"].to_f(I))
             else:
-                # 1. Calculate continuous physical gains
-                omega_bw = 2.0 * math.pi * current_bandwidth
-                Kp_physical = omega_bw * self.motor_l
+                P, I = self._tune_current_pid(current_bandwidth)
+            self._write_field("PID_FLUX_P", self.pid_helpers["FLUX_P"].to_f(P))
 
-                # 2. Extract hardware loop scaling factors
-                # current_scale is in mA/LSB, convert to A/LSB
-                amps_per_adc_count = self.current_helper.current_scale * 1e-3
-                vm_voltage = self._read_vm()
+            self._write_field("PID_FLUX_I", self.pid_helpers["FLUX_I"].to_f(I))
+            self._write_field("PID_TORQUE_P", self.pid_helpers["TORQUE_P"].to_f(P))
+            self._write_field("PID_TORQUE_I", self.pid_helpers["TORQUE_I"].to_f(I))
 
-                hardware_loop_gain = (amps_per_adc_count * 32768.0) / max(vm_voltage, 0.001)
-
-                # 3. Apply loop gain to P
-                P = Kp_physical * hardware_loop_gain
-
-                # 4. Calculate I as an analytical plant ratio for Advanced Mode (Serial structure)
-                # I = R / (L * f_pwm)
-                I = self.motor_r / (self.motor_l * self.pwmfreq)
-                self._write_field("PID_FLUX_P", self.pid_helpers["FLUX_P"].to_f(P))
-
-                self._write_field("PID_FLUX_I", self.pid_helpers["FLUX_I"].to_f(I))
-                self._write_field("PID_TORQUE_P", self.pid_helpers["TORQUE_P"].to_f(P))
-                self._write_field("PID_TORQUE_I", self.pid_helpers["TORQUE_I"].to_f(I))
-
-                # Store results for SAVE_CONFIG
-                cfgname = "tmc4671 %s" % (self.name,)
-                configfile = self.printer.lookup_object('configfile')
-                configfile.set(cfgname, 'foc_PID_FLUX_P', "%.3f" % (P,))
-                configfile.set(cfgname, 'foc_PID_FLUX_I', "%.3f" % (I,))
-                configfile.set(cfgname, 'foc_PID_TORQUE_P', "%.3f" % (P,))
-                configfile.set(cfgname, 'foc_PID_TORQUE_I', "%.3f" % (I,))
+            # Store results for SAVE_CONFIG
+            cfgname = "tmc4671 %s" % (self.name,)
+            configfile = self.printer.lookup_object('configfile')
+            configfile.set(cfgname, 'foc_PID_FLUX_P', "%.3f" % (P,))
+            configfile.set(cfgname, 'foc_PID_FLUX_I', "%.3f" % (I,))
+            configfile.set(cfgname, 'foc_PID_TORQUE_P', "%.3f" % (P,))
+            configfile.set(cfgname, 'foc_PID_TORQUE_I', "%.3f" % (I,))
         gcmd.respond_info(
             "PID %s parameters: Kc=%.2f Ki=%.3f\n"
             "The SAVE_CONFIG command will update the printer config file\n"
@@ -1998,6 +1923,107 @@ class TMC4671:
             f"  Estimated Resistance (motor_r): {res_str}\n"
             f"  Estimated Inductance (motor_l): {ind_str}"
         )
+
+    cmd_TMC_DEBUG_TUNING_help = (
+        "Report what PID tuning helpers would compute without applying changes"
+    )
+    def cmd_TMC_DEBUG_TUNING(self, gcmd):
+        current_bandwidth = gcmd.get_float('CURRENT_BANDWIDTH', 1800.0)
+        l_v = gcmd.get_float('LAMBDA_V', 100.0)
+        l_p = gcmd.get_float('LAMBDA_P', 400.0)
+        I_h = gcmd.get_float('HOLDING_CURRENT', None)
+        T_h = gcmd.get_float('HOLDING_TORQUE', None)
+        Kt = gcmd.get_float('KT', None)
+        if Kt is None and I_h is not None and T_h is not None:
+            Kt = T_h / I_h
+
+        lines = ["TMC 4671 '%s' Tuning Debug Report" % self.name]
+
+        # Motor parameters
+        if self.motor_r == 0.0 or self.motor_l == 0.0:
+            lines.append(
+                "Motor parameters: not yet calibrated (startup alignment pending)"
+            )
+        else:
+            lines.append(
+                "Motor parameters: R=%.4f Ω  L=%.6f H (%.3f mH)"
+                % (self.motor_r, self.motor_l, self.motor_l * 1000.0)
+            )
+
+        # --- Current PID ---
+        lines.append("")
+        lines.append(
+            "--- Current PID (bandwidth method, CURRENT_BANDWIDTH=%.1f Hz) ---"
+            % current_bandwidth
+        )
+        if self.motor_r == 0.0 or self.motor_l == 0.0:
+            lines.append("  Cannot compute: motor parameters not yet calibrated")
+        else:
+            P_new, I_new = self._tune_current_pid(current_bandwidth)
+            P_flux_cur = self.pid_helpers["FLUX_P"].from_f(
+                self._read_field("PID_FLUX_P")
+            )
+            I_flux_cur = self.pid_helpers["FLUX_I"].from_f(
+                self._read_field("PID_FLUX_I")
+            )
+            P_torq_cur = self.pid_helpers["TORQUE_P"].from_f(
+                self._read_field("PID_TORQUE_P")
+            )
+            I_torq_cur = self.pid_helpers["TORQUE_I"].from_f(
+                self._read_field("PID_TORQUE_I")
+            )
+            lines.append("  Computed:  P=%.4f  I=%.4f" % (P_new, I_new))
+            lines.append(
+                "  Active:    Flux   P=%.4f  I=%.4f" % (P_flux_cur, I_flux_cur)
+            )
+            lines.append(
+                "             Torque P=%.4f  I=%.4f" % (P_torq_cur, I_torq_cur)
+            )
+
+        # --- Motion PID ---
+        lines.append("")
+        lines.append(
+            "--- Motion PID (LAMBDA_V=%.1f  LAMBDA_P=%.1f) ---" % (l_v, l_p)
+        )
+        if Kt is None:
+            lines.append(
+                "  Supply KT or both HOLDING_CURRENT and HOLDING_TORQUE to compute"
+            )
+        else:
+            lines.append("  KT=%.5f Nm/A" % Kt)
+            p_v_new, i_v_new, p_p_new, i_p_new, k_v, k_p = self._tune_motion_pid(
+                Kt, l_v, l_p
+            )
+            p_v_cur = self.pid_helpers["VELOCITY_P"].from_f(
+                self._read_field("PID_VELOCITY_P")
+            )
+            i_v_cur = self.pid_helpers["VELOCITY_I"].from_f(
+                self._read_field("PID_VELOCITY_I")
+            )
+            p_p_cur = self.pid_helpers["POSITION_P"].from_f(
+                self._read_field("PID_POSITION_P")
+            )
+            i_p_cur = self.pid_helpers["POSITION_I"].from_f(
+                self._read_field("PID_POSITION_I")
+            )
+            lines.append(
+                "  Computed:  Velocity P=%.5f  I=%.5f" % (p_v_new, i_v_new)
+            )
+            lines.append(
+                "             Position  P=%.5f  I=%.5f" % (p_p_new, i_p_new)
+            )
+            lines.append(
+                "  Active:    Velocity P=%.5f  I=%.5f" % (p_v_cur, i_v_cur)
+            )
+            lines.append(
+                "             Position  P=%.5f  I=%.5f" % (p_p_cur, i_p_cur)
+            )
+            lines.append(
+                "  Suggested filter frequency: %d Hz"
+                % round(3.0 * self.pwmfreq / l_v)
+            )
+
+        gcmd.respond_info("\n".join(lines))
 
 def load_config_prefix(config):
     return TMC4671(config)

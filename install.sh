@@ -50,6 +50,7 @@ function link_extension {
 
     ln -srfn "${TMC4671_PATH}/tmc4671.py" "${KLIPPER_PLUGINS_PATH}/tmc4671.py"
     ln -srfn "${TMC4671_PATH}/tmc4671_regs.py" "${KLIPPER_PLUGINS_PATH}/tmc4671_regs.py"
+    ln -srfn "${TMC4671_PATH}/tmc4671_biquad.py" "${KLIPPER_PLUGINS_PATH}/tmc4671_biquad.py"
 }
 
 function restart_klipper {
