@@ -1184,6 +1184,7 @@ class TMC4671:
         self._write_field("PWM_CHOP", 7) # Re-enable the gate driver (crucial to apply AC voltage)
         self._write_field("PHI_E_SELECTION", 2)  # Open Loop
         self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
+        self._write_field("OPENLOOP_VELOCITY_ACTUAL", 0)  # Reset residual velocity from prior run
         self._write_field("UQ_EXT", 0)
 
         # Automated AC Voltage Calculation
