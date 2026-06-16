@@ -11,7 +11,6 @@ import logging, collections
 import math
 from time import monotonic_ns
 from enum import IntEnum
-from typing import NamedTuple
 from statistics import median_low, mean, fmean
 from extras import bus, tmc, thermistor
 from .tmc4671_regs import (
@@ -19,6 +18,11 @@ from .tmc4671_regs import (
     ADC_GPIO_FIELDS, Fields, FloatFields, SignedFields,
     FieldFormatters, to_q4_12, from_q4_12, to_q8_8, from_q8_8,
     to_q2_30, from_q2_30
+)
+from .tmc4671_biquad import (
+    BiquadFilter, BIQUAD_FILTER_TYPES, BIQUAD_FILTER_TARGETS,
+    biquad_lpf_tmc, biquad_lpf, biquad_notch, biquad_apf,
+    biquad_Z_tmc, biquad_tmc
 )
 
 # The 4671 has a 25 MHz external clock
@@ -33,11 +37,6 @@ class MotionMode(IntEnum):
     velocity_mode = 2
     position_mode = 3
     uq_ud_ext_mode = 8
-
-class BiquadFilter(NamedTuple):
-    type: str
-    freq: int
-    slope: float
 
 # Tuple is the address followed by a value to put in the next higher address
 # to select that sub-register, or none to just go straight there.
@@ -113,98 +112,9 @@ DumpGroups = {
                 "CONFIG_BIQUAD_F_B_2", "CONFIG_BIQUAD_F_ENABLE",],
 }
 
-
 ######################################################################
-# Biquad filter utilities
+# PI controller utilities
 ######################################################################
-
-BIQUAD_FILTER_TYPES = ['lpf', 'notch', 'apf']
-BIQUAD_FILTER_TARGETS = {
-        'flux': 'CONFIG_BIQUAD_F_ENABLE',
-        'torque': 'CONFIG_BIQUAD_T_ENABLE',
-        'velocity': 'CONFIG_BIQUAD_V_ENABLE',
-        'position': 'CONFIG_BIQUAD_X_ENABLE',
-}
-
-# Filter design formula from 4671 datasheet
-def biquad_lpf_tmc(fs, f, D):
-    w0 = 2.0 * math.pi * f / fs
-    b2 = b1 = 0.0
-    b0 = 1.0
-    a2 = 1.0 / (w0**2)
-    a1 = 2.0 * D / w0
-    a0 = 1.0
-    return b0, b1, b2, a0, a1, a2
-
-# Filter design formulae from https://www.w3.org/TR/audio-eq-cookbook/
-
-# Design a biquad low pass filter in canonical form
-def biquad_lpf(fs, f, Q):
-    w0 = 2.0 * math.pi * f / fs
-    cw0 = math.cos(w0)
-    sw0 = math.sin(w0)
-    alpha = 0.5 * sw0 / Q
-    b1 = 1.0 - cw0
-    b0 = b2 = b1 / 2.0
-    a0 = 1 + alpha
-    a1 = - 2.0 * cw0
-    a2 = 1 - alpha
-    return b0, b1, b2, a0, a1, a2
-
-# Design a biquad notch filter in canonical form
-def biquad_notch(fs, f, Q):
-    w0 = 2.0 * math.pi * f / fs
-    cw0 = math.cos(w0)
-    sw0 = math.sin(w0)
-    alpha = 0.5 * sw0 / Q
-    b1 = - 2.0 * cw0
-    b0 = b2 = 1.0
-    a0 = 1 + alpha
-    a1 = - 2.0 * cw0
-    a2 = 1 - alpha
-    return b0, b1, b2, a0, a1, a2
-
-# Design a biquad allpass filter in canonical form
-def biquad_apf(fs, f, Q):
-    w0 = 2.0 * math.pi * f / fs
-    cw0 = math.cos(w0)
-    sw0 = math.sin(w0)
-    alpha = 0.5 * sw0 / Q
-    b2 = 1 + alpha
-    b1 = - 2.0 * cw0
-    b0 = 1 - alpha
-    a0 = 1 + alpha
-    a1 = - 2.0 * cw0
-    a2 = 1 - alpha
-    return b0, b1, b2, a0, a1, a2
-
-# Z-transform and normalise a biquad filter, according to TMC
-def biquad_Z_tmc(T, b0, b1, b2, a0, a1, a2):
-    den = (T**2 - 2*a1 + 4*a2)
-    b2z = (b0*(T**2) + 2*b1*T + 4*b2) / den
-    b1z = (2*b0*(T**2) - 8*b2) / den
-    b0z = (b0*(T**2) - 2*b1*T + 4*b2) / den
-    a2z = (T**2 + 2*a1*T + 4*a2) / den
-    a1z = (2*(T**2) - 8*a2) / den
-    e29 = 2**29
-    b0 = round(b0z/(a0) * e29)
-    b1 = round(b1z/(a0) * e29)
-    b2 = round(b2z/(a0) * e29)
-    a1 = round(-a1z/a0 * e29)
-    a2 = round(-a2z/a0 * e29)
-    # return in the same order as the config registers
-    return a1, a2, 0, b0, b1, b2
-
-# Normalise a biquad filter, according to TMC
-def biquad_tmc(b0, b1, b2, a0, a1, a2):
-    e29 = 2**29
-    b0 = round(b0/(a0) * e29)
-    b1 = round(b1/(a0) * e29)
-    b2 = round(b2/(a0) * e29)
-    a1 = round(-a1/a0 * e29)
-    a2 = round(-a2/a0 * e29)
-    # return in the same order as the config registers
-    return a1, a2, 0, b0, b1, b2
 
 # S-IMC PI controller design, "Improved Method"
 # See https://folk.ntnu.no/skoge/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf
