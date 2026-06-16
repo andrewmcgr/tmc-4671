@@ -1112,6 +1112,23 @@ class TMC4671:
         I = self.motor_r / (self.motor_l * self.pwmfreq)
         return P, I
 
+    def _tune_motion_pid(self, Kt, l_v, l_p):
+        Kadc = self.current_helper.current_scale * 1e-3
+        NPP = self._read_field("N_POLE_PAIRS")
+        t_d = 1.
+
+        k_v = Kadc / (Kt * math.pi)
+        t_iv = 2.*l_v + t_d
+        p_v = t_iv / (k_v * (l_v + t_d) ** 2)
+        i_v = 1. / t_iv
+
+        k_p = NPP / (256. * 50.)
+        t_ip = 2.*l_p + t_d
+        p_p = t_ip / (k_p * (l_p + t_d) ** 2)
+        i_p = 1. / t_ip
+
+        return p_v, i_v, p_p, i_p, k_v, k_p
+
     # Align motor and measure resistance and inductance on startup
     def _align_and_measure(self, offsets, print_time):
         dwell = self.printer.lookup_object('toolhead').dwell
@@ -1475,20 +1492,9 @@ class TMC4671:
                 gcmd.respond_info("Must supply KT or both HOLDING_TORQUE and HOLDING_CURRENT.")
                 return
             Kt = T_h / I_h
-        Kadc = self.current_helper.current_scale * 1e-3
-        NPP = self._read_field("N_POLE_PAIRS")
         rotation_distance, _ = self.stepper.get_rotation_distance()
-        t_d = 1.
 
-        k_v = Kadc / (Kt * math.pi)
-        t_iv = 2.*l_v + t_d
-        p_v = t_iv / (k_v * (l_v + t_d) ** 2)
-        i_v = 1. / t_iv
-
-        k_p = NPP / (256. * 50.)
-        t_ip = 2.*l_p + t_d
-        p_p = t_ip / (k_p * (l_p + t_d) ** 2)
-        i_p = 1. / t_ip
+        p_v, i_v, p_p, i_p, k_v, k_p = self._tune_motion_pid(Kt, l_v, l_p)
 
         self._write_field("PID_VELOCITY_P", self.pid_helpers["VELOCITY_P"].to_f(p_v))
         self._write_field("PID_VELOCITY_I", self.pid_helpers["VELOCITY_I"].to_f(i_v))
