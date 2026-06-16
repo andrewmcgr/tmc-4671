@@ -26,3 +26,4 @@ tmc-4671/
 - **Datasheet Revision**: The correct version of the TMC 4671 datasheet to use is **version 2.08**. Do not use older or newer versions unless explicitly instructed, as register addresses or features can vary.
 - **Firmware Context**: This repository is a plugin for the **Kalico** 3d printer firmware (and is structured to integrate with Kalico/Klipper).
 - **Refactoring**: When extracting code into new files, ensure this file is updated.
+- **Commit style**: Plain English, no conventional-commit prefixes (e.g. "Add motor inductance measurement", not "feat: add motor inductance measurement").
