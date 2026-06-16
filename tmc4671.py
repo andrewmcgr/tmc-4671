@@ -754,6 +754,13 @@ class TMC4671:
             self.cmd_TMC_DEBUG_MOTOR,
             desc=self.cmd_TMC_DEBUG_MOTOR_help,
         )
+        gcode.register_mux_command(
+            "TMC_DEBUG_TUNING",
+            "STEPPER",
+            self.name,
+            self.cmd_TMC_DEBUG_TUNING,
+            desc=self.cmd_TMC_DEBUG_TUNING_help,
+        )
         # Allow other registers to be set from the config
         set_config_field = self.fields.set_config_field
         if self.fields6100 is not None:
@@ -1916,6 +1923,107 @@ class TMC4671:
             f"  Estimated Resistance (motor_r): {res_str}\n"
             f"  Estimated Inductance (motor_l): {ind_str}"
         )
+
+    cmd_TMC_DEBUG_TUNING_help = (
+        "Report what PID tuning helpers would compute without applying changes"
+    )
+    def cmd_TMC_DEBUG_TUNING(self, gcmd):
+        current_bandwidth = gcmd.get_float('CURRENT_BANDWIDTH', 1800.0)
+        l_v = gcmd.get_float('LAMBDA_V', 100.0)
+        l_p = gcmd.get_float('LAMBDA_P', 400.0)
+        I_h = gcmd.get_float('HOLDING_CURRENT', None)
+        T_h = gcmd.get_float('HOLDING_TORQUE', None)
+        Kt = gcmd.get_float('KT', None)
+        if Kt is None and I_h is not None and T_h is not None:
+            Kt = T_h / I_h
+
+        lines = ["TMC 4671 '%s' Tuning Debug Report" % self.name]
+
+        # Motor parameters
+        if self.motor_r == 0.0 or self.motor_l == 0.0:
+            lines.append(
+                "Motor parameters: not yet calibrated (startup alignment pending)"
+            )
+        else:
+            lines.append(
+                "Motor parameters: R=%.4f Ω  L=%.6f H (%.3f mH)"
+                % (self.motor_r, self.motor_l, self.motor_l * 1000.0)
+            )
+
+        # --- Current PID ---
+        lines.append("")
+        lines.append(
+            "--- Current PID (bandwidth method, CURRENT_BANDWIDTH=%.1f Hz) ---"
+            % current_bandwidth
+        )
+        if self.motor_r == 0.0 or self.motor_l == 0.0:
+            lines.append("  Cannot compute: motor parameters not yet calibrated")
+        else:
+            P_new, I_new = self._tune_current_pid(current_bandwidth)
+            P_flux_cur = self.pid_helpers["FLUX_P"].from_f(
+                self._read_field("PID_FLUX_P")
+            )
+            I_flux_cur = self.pid_helpers["FLUX_I"].from_f(
+                self._read_field("PID_FLUX_I")
+            )
+            P_torq_cur = self.pid_helpers["TORQUE_P"].from_f(
+                self._read_field("PID_TORQUE_P")
+            )
+            I_torq_cur = self.pid_helpers["TORQUE_I"].from_f(
+                self._read_field("PID_TORQUE_I")
+            )
+            lines.append("  Computed:  P=%.4f  I=%.4f" % (P_new, I_new))
+            lines.append(
+                "  Active:    Flux   P=%.4f  I=%.4f" % (P_flux_cur, I_flux_cur)
+            )
+            lines.append(
+                "             Torque P=%.4f  I=%.4f" % (P_torq_cur, I_torq_cur)
+            )
+
+        # --- Motion PID ---
+        lines.append("")
+        lines.append(
+            "--- Motion PID (LAMBDA_V=%.1f  LAMBDA_P=%.1f) ---" % (l_v, l_p)
+        )
+        if Kt is None:
+            lines.append(
+                "  Supply KT or both HOLDING_CURRENT and HOLDING_TORQUE to compute"
+            )
+        else:
+            lines.append("  KT=%.5f Nm/A" % Kt)
+            p_v_new, i_v_new, p_p_new, i_p_new, k_v, k_p = self._tune_motion_pid(
+                Kt, l_v, l_p
+            )
+            p_v_cur = self.pid_helpers["VELOCITY_P"].from_f(
+                self._read_field("PID_VELOCITY_P")
+            )
+            i_v_cur = self.pid_helpers["VELOCITY_I"].from_f(
+                self._read_field("PID_VELOCITY_I")
+            )
+            p_p_cur = self.pid_helpers["POSITION_P"].from_f(
+                self._read_field("PID_POSITION_P")
+            )
+            i_p_cur = self.pid_helpers["POSITION_I"].from_f(
+                self._read_field("PID_POSITION_I")
+            )
+            lines.append(
+                "  Computed:  Velocity P=%.5f  I=%.5f" % (p_v_new, i_v_new)
+            )
+            lines.append(
+                "             Position  P=%.5f  I=%.5f" % (p_p_new, i_p_new)
+            )
+            lines.append(
+                "  Active:    Velocity P=%.5f  I=%.5f" % (p_v_cur, i_v_cur)
+            )
+            lines.append(
+                "             Position  P=%.5f  I=%.5f" % (p_p_cur, i_p_cur)
+            )
+            lines.append(
+                "  Suggested filter frequency: %d Hz"
+                % round(3.0 * self.pwmfreq / l_v)
+            )
+
+        gcmd.respond_info("\n".join(lines))
 
 def load_config_prefix(config):
     return TMC4671(config)
