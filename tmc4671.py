@@ -1141,7 +1141,7 @@ class TMC4671:
         dwell = self.printer.lookup_object('toolhead').dwell
         old_phi_e_selection = self._read_field("PHI_E_SELECTION")
 
-        # Temporarily disable biquad filters during measurement to prevent attenuation of the 4 kHz signal
+        # Temporarily disable biquad filters during measurement to prevent attenuation of the 1 kHz signal
         for register in BIQUAD_FILTER_TARGETS.values():
             self.disable_biquad(register)
 
@@ -1174,7 +1174,6 @@ class TMC4671:
         # Average current readings to filter mechanical ringing and noise
         iux, iwy, _ = self._average_currents(20, 0.005)
         logging.info("TMC 4671 '%s' alignment averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux, iwy)
-        test2_U / (self.vm_range / self.voltage_scale)
         R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
         self.motor_r = R
         logging.info("TMC 4671 '%s' est. motor R=%g Ω", self.stepper_name, R)
