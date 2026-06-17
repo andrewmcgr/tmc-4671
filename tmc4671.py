@@ -2067,7 +2067,7 @@ class TMC4671:
         try:
             # 3. Calculate safe AC Voltage Amplitude (V_ac)
             # Target about 25% of run_current to prevent heating/vibration
-            I_target_A = self.run_current * 0.25
+            I_target_A = self.current_helper.run_current * 0.25
             V_req = (I_target_A * self.motor_r * 2.0) + 1.2
             vm = self._read_vm()
             if self._read_field("MOTOR_TYPE") == 3:
@@ -2103,7 +2103,7 @@ class TMC4671:
             sum_id = 0.0
             sum_iq = 0.0
             for _ in range(n_samples):
-                iq, id = self.get_qd_current()
+                iq, id = self.current_helper.get_qd_current()
                 sum_id += id
                 sum_iq += iq
                 dwell(0.001)  # Natural USB + OS scheduling jitter provides stochastic sampling
