@@ -299,6 +299,21 @@ Report phase currents, FOC target and actual d/q axis currents, and the active c
 TMC_DEBUG_CURRENT STEPPER=stepper_x
 ```
 
+### TMC_MEASURE_IMPEDANCE
+
+Perform a high-frequency AC injection test with stochastic demodulation to measure the distinct d-axis and q-axis inductances (Ld, Lq) and the motor's saliency ratio. 
+
+```
+TMC_MEASURE_IMPEDANCE STEPPER=stepper_x [F_INJECT=<hz>] [N_SAMPLES=<int>]
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `F_INJECT` | 2317.0 | Non-integer high-frequency injection frequency in Hz. |
+| `N_SAMPLES` | 500 | Number of stochastic samples to gather. |
+
+The command applies a rotating AC voltage vector on top of the measured motor winding resistance (using the motor resistance measured during startup alignment) and accumulates raw d/q current readings stochastically to extract distinct admittances, converting them to Ld and Lq inductances. Requires prior startup alignment.
+
 ### TMC_DEBUG_MOTOR
 
 Report the motor resistance and inductance measured during the last startup alignment.

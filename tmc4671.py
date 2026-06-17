@@ -622,9 +622,16 @@ class MCU_TMC_SPI:
                 else:
                     raise self.printer.command_error(
                         "Unable to write tmc spi '%s' address register %s (last read %x)" % (self.name, reg_name, v))
+            
+            # Certain registers contain highly dynamic fields (e.g., OPENLOOP_PHI in 0x23, or
+            # OPENLOOP_VELOCITY_ACTUAL in 0x22) that are constantly updated by the internal DDS
+            # and change on every PWM clock cycle. Bypassing verification for these is mandatory
+            # to prevent spurious write-verification failures during startup/operation.
+            bypass_verify = reg_name in ["OPENLOOP_VELOCITY_ACTUAL", "OPENLOOP_PHI"]
+            
             for retry in range(5):
                 v = self.tmc_spi.reg_write(reg, val, print_time)
-                if v == val:
+                if bypass_verify or v == val:
                     return
         raise self.printer.command_error(
             "Unable to write tmc spi '%s' address register %s (last read %x)" % (self.name, reg_name, v))
@@ -683,6 +690,7 @@ class TMC4671:
                                        above=0.)
         self.motor_r = 0.0
         self.motor_l = 0.0
+        self.dead_time_v = 0.0
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
                                    TMC_FREQUENCY, pin_option="cs_pin")
         self.read_translate = None
@@ -760,6 +768,13 @@ class TMC4671:
             self.name,
             self.cmd_TMC_DEBUG_TUNING,
             desc=self.cmd_TMC_DEBUG_TUNING_help,
+        )
+        gcode.register_mux_command(
+            "TMC_MEASURE_IMPEDANCE",
+            "STEPPER",
+            self.name,
+            self.cmd_TMC_MEASURE_IMPEDANCE,
+            desc=self.cmd_TMC_MEASURE_IMPEDANCE_help,
         )
         # Allow other registers to be set from the config
         set_config_field = self.fields.set_config_field
@@ -1162,23 +1177,43 @@ class TMC4671:
         self._write_field("PWM_CHOP", 7)
         dwell(0.3)
         # Average current readings to filter noise and ripple
-        iux, iwy, c = self._average_currents(20, 0.005)
+        iux_first, iwy_first, c = self._average_currents(20, 0.005)
         self._write_field("PWM_CHOP", 0)
-        logging.info("TMC 4671 '%s' initial averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux, iwy)
-        if max(abs(iux), abs(iwy)) < 1e-6:
+        logging.info("TMC 4671 '%s' initial averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux_first, iwy_first)
+        I1 = max(abs(iux_first), abs(iwy_first))
+        if I1 < 1e-6:
             # something is horribly wrong
              raise self.printer.command_error("TMC 4671 is seeing no motor current. Check wiring.")
         # Ok, calculate a voltage that will give us about a third of the configured current limit
-        test2_U = round((c / 2.0) * test_U / max(abs(iux), abs(iwy)))
+        test2_U = round((c / 2.0) * test_U / I1)
         logging.info("TMC 4671 '%s' test U %g %g", self.stepper_name, test_U, test2_U)
         # Switch back on, and this time motor should self-align
         self._write_field("UD_EXT", test2_U)
         self._write_field("PWM_CHOP", 7)
         dwell(0.5)
         # Average current readings to filter mechanical ringing and noise
-        iux, iwy, _ = self._average_currents(20, 0.005)
-        logging.info("TMC 4671 '%s' alignment averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux, iwy)
-        R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
+        iux_second, iwy_second, _ = self._average_currents(20, 0.005)
+        logging.info("TMC 4671 '%s' alignment averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux_second, iwy_second)
+        I2 = max(abs(iux_second), abs(iwy_second))
+
+        # Two-point differential measurement to exclude inverter dead-time
+        V1 = test_U * self.voltage_scale / self.vm_range
+        V2 = test2_U * self.voltage_scale / self.vm_range
+
+        delta_V = V2 - V1
+        delta_I = I2 - I1
+
+        if delta_I > 0.01:
+            R = delta_V / delta_I
+            self.dead_time_v = max(0.0, V2 - I2 * R)
+            logging.info("TMC 4671 '%s' differential calculation: R=%g Ω, V_dead=%g V",
+                         self.stepper_name, R, self.dead_time_v)
+        else:
+            R = V2 / I2
+            self.dead_time_v = 0.0
+            logging.warning("TMC 4671 '%s' differential current delta too small (%g A). "
+                            "Falling back to single-point R=%g Ω.",
+                            self.stepper_name, delta_I, R)
         self.motor_r = R
         logging.info("TMC 4671 '%s' est. motor R=%g Ω", self.stepper_name, R)
 
@@ -2037,6 +2072,222 @@ class TMC4671:
             )
 
         gcmd.respond_info("\n".join(lines))
+
+    cmd_TMC_MEASURE_IMPEDANCE_help = (
+        "Measure motor d/q axis inductances (Ld, Lq) and saliency ratio"
+    )
+    def cmd_TMC_MEASURE_IMPEDANCE(self, gcmd):
+        import time
+        f_inject = gcmd.get_float('F_INJECT', 2317.0, minval=1.0)
+        n_samples = gcmd.get_int('N_SAMPLES', 500, minval=10)
+        
+        # 1. Verification and Setup
+        if self.motor_r is None or self.motor_r < 1e-3:
+            raise gcmd.error("Motor resistance R not measured. Please run alignment/startup calibration first.")
+        if self.motor_l is None or self.motor_l < 1e-6:
+            raise gcmd.error("Motor average inductance Lnot measured. Please run alignment/startup calibration first.")
+            
+        toolhead = self.printer.lookup_object('toolhead')
+        enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
+        
+        # Helper function for variance
+        def calculate_variance(data):
+            if len(data) < 2:
+                return 0.0
+            mu = sum(data) / len(data)
+            return sum((x - mu) ** 2 for x in data) / (len(data) - 1)
+            
+        with self.mutex:
+            print_time = toolhead.get_last_move_time()
+            dwell = toolhead.dwell
+            old_phi_e_selection = self._read_field("PHI_E_SELECTION")
+            old_mode_motion = self._read_field("MODE_MOTION")
+            
+            # Enable motor hardware & gate driver (vital to allow current flow)
+            if self.fields6100 is not None:
+                self.mcu_tmc6100.set_register("GCONF",
+                                              self.fields6100.set_field("disable", 0),
+                                              print_time)
+            enable_line.motor_enable(print_time)
+            
+            # 2. Disable biquads to prevent attenuation
+            for register in BIQUAD_FILTER_TARGETS.values():
+                self.disable_biquad(register)
+                
+            try:
+                # 3. Calculate safe AC Voltage Amplitude (V_ac)
+                # Target about 25% of run_current to prevent heating/vibration
+                I_target_A = self.current_helper.run_current * 0.25
+                V_req = (I_target_A * self.motor_r * 2.0) + 1.2
+                vm = self._read_vm()
+                if self._read_field("MOTOR_TYPE") == 3:
+                    v_max_phase = vm / math.sqrt(3.0)
+                else:
+                    v_max_phase = vm
+                
+                if V_req > v_max_phase:
+                    ac_U = 32767
+                else:
+                    ac_U = int(32767.0 * (V_req / v_max_phase))
+                ac_U = max(ac_U, 500)
+                v_applied = ac_U * v_max_phase / 32767.0
+                # Compensate for measured inverter dead-time voltage drop
+                v_ac = max(0.01, v_applied - self.dead_time_v)
+                
+                # 4. Configure TMC4671 for DC Static Bias (Rotor Alignment & Noise Calibration)
+                self._write_field("PWM_CHOP", 7)
+                self._write_field("PHI_E_SELECTION", 2)  # Open Loop Mode
+                self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
+                self._write_field("UQ_EXT", 0)
+                self._write_field("OPENLOOP_ACCELERATION", 0)
+                self._write_field("UD_EXT", ac_U)
+                self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
+                
+                # Allow mechanical/electrical settling for DC alignment
+                dwell(0.5)
+                
+                # Sample the baseline DC/Noise currents to measure background variance (switching, ADC noise, EMI)
+                dc_mags = []
+                convert_adc = self.current_helper.convert_adc_current
+                for _ in range(100):
+                    reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
+                    flux_raw = reg_val & 0xffff
+                    if flux_raw >= 32768:
+                        flux_raw -= 65536
+                    torque_raw = (reg_val >> 16) & 0xffff
+                    if torque_raw >= 32768:
+                        torque_raw -= 65536
+                    
+                    id = convert_adc(flux_raw)
+                    iq = convert_adc(torque_raw)
+                    dc_mags.append(math.sqrt(id**2 + iq**2))
+                    dwell(0.001)
+                    
+                I_dc_avg = sum(dc_mags) / len(dc_mags)
+                var_noise = calculate_variance(dc_mags)
+                
+                # 5. Configure and Start High-Frequency AC Injection
+                dds_value = int(f_inject * (2**32) / self.pwmfreq)
+                self._write_field("OPENLOOP_ACCELERATION", dds_value)
+                self._write_field("OPENLOOP_VELOCITY_TARGET", dds_value)
+                
+                # Allow electrical settling for the rotating field
+                dwell(0.5)
+                
+                # 6. Stochastic AC/Saliency Polling Loop with precise timestamping
+                ac_samples = []
+                t_start = time.time()
+                for _ in range(n_samples):
+                    t0 = time.time()
+                    reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
+                    t1 = time.time()
+                    
+                    flux_raw = reg_val & 0xffff
+                    if flux_raw >= 32768:
+                        flux_raw -= 65536
+                    torque_raw = (reg_val >> 16) & 0xffff
+                    if torque_raw >= 32768:
+                        torque_raw -= 65536
+                    
+                    id = convert_adc(flux_raw)
+                    iq = convert_adc(torque_raw)
+                    
+                    mag = math.sqrt(id**2 + iq**2)
+                    t_mid = (t0 + t1) / 2.0 - t_start
+                    ac_samples.append((mag, t_mid))
+                    dwell(0.001)  # Jitter allows equivalent time sampling
+                    
+                # 7. Disable injection immediately
+                self._write_field("UD_EXT", 0)
+                self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+                
+                # =================================================================
+                # 8. DSP & Extraction Algorithms
+                # =================================================================
+                ac_mags = [mag for mag, _ in ac_samples]
+                I_avg = sum(ac_mags) / len(ac_mags)
+                
+                # --- Method A: Noise-Calibrated Standard Deviation Method ---
+                var_total = calculate_variance(ac_mags)
+                var_ripple = max(0.0, var_total - var_noise)
+                I_ripple_stdev = math.sqrt(2.0 * var_ripple)
+                
+                I_max_stdev = I_avg + I_ripple_stdev
+                I_min_stdev = max(1e-6, I_avg - I_ripple_stdev)
+                
+                # --- Method B: Least-Squares Sine Fit (Targeted Lomb-Scargle) ---
+                omega_ripple = 4.0 * math.pi * f_inject
+                y_vals = [mag - I_avg for mag in ac_mags]
+                
+                S_cc = sum(math.cos(omega_ripple * t)**2 for _, t in ac_samples)
+                S_ss = sum(math.sin(omega_ripple * t)**2 for _, t in ac_samples)
+                S_cs = sum(math.cos(omega_ripple * t) * math.sin(omega_ripple * t) for _, t in ac_samples)
+                S_yc = sum(y * math.cos(omega_ripple * t) for y, (_, t) in zip(y_vals, ac_samples))
+                S_ys = sum(y * math.sin(omega_ripple * t) for y, (_, t) in zip(y_vals, ac_samples))
+                
+                det = S_cc * S_ss - S_cs**2
+                if det > 1e-12:
+                    A_fit = (S_yc * S_ss - S_ys * S_cs) / det
+                    B_fit = (S_ys * S_cc - S_yc * S_cs) / det
+                else:
+                    A_fit, B_fit = 0.0, 0.0
+                I_ripple_fit = math.sqrt(A_fit**2 + B_fit**2)
+                
+                I_max_fit = I_avg + I_ripple_fit
+                I_min_fit = max(1e-6, I_avg - I_ripple_fit)
+                
+                # --- Inductance & Saliency Calculation ---
+                omega_inject = 2.0 * math.pi * f_inject
+                V_ac_eff = I_avg * math.sqrt(self.motor_r**2 + (omega_inject * self.motor_l)**2)
+                
+                # Method A Results
+                Ld_stdev = math.sqrt(max(0.0, (V_ac_eff / I_max_stdev)**2 - self.motor_r**2)) / omega_inject
+                Lq_stdev = math.sqrt(max(0.0, (V_ac_eff / I_min_stdev)**2 - self.motor_r**2)) / omega_inject
+                sal_stdev = Lq_stdev / Ld_stdev if Ld_stdev > 1e-9 else 1.0
+                
+                # Method B Results
+                Ld_fit = math.sqrt(max(0.0, (V_ac_eff / I_max_fit)**2 - self.motor_r**2)) / omega_inject
+                Lq_fit = math.sqrt(max(0.0, (V_ac_eff / I_min_fit)**2 - self.motor_r**2)) / omega_inject
+                sal_fit = Lq_fit / Ld_fit if Ld_fit > 1e-9 else 1.0
+                
+                # Report Results
+                lines = [
+                    f"TMC4671 '{self.name}' Robust Saliency Measurement Results:",
+                    f"  R (measured): {self.motor_r:.4f} Ohm",
+                    f"  L_avg (baseline): {self.motor_l * 1000.0:.3f} mH",
+                    f"  V_ac (nominal applied): {v_ac:.4f} V (ac_U={ac_U}, V_applied={v_applied:.4f}V, V_dead={self.dead_time_v:.4f}V)",
+                    f"  V_ac_effective (calibrated): {V_ac_eff:.4f} V",
+                    f"  DC Bias Current: {I_dc_avg:.4f} A",
+                    f"  DC Background Noise (stdev): {math.sqrt(var_noise):.4f} A",
+                    f"  AC Average Current: {I_avg:.4f} A",
+                    "",
+                    "  [Method A] Noise-Calibrated Standard Deviation:",
+                    f"    I_ripple: {I_ripple_stdev * 1000.0:.2f} mA",
+                    f"    Extracted Ld: {Ld_stdev * 1000.0:.3f} mH",
+                    f"    Extracted Lq: {Lq_stdev * 1000.0:.3f} mH",
+                    f"    Saliency Ratio (Lq/Ld): {sal_stdev:.3f}",
+                    "",
+                    "  [Method B] Least-Squares Sine Fit (Targeted Lomb-Scargle) (Recommended):",
+                    f"    I_ripple: {I_ripple_fit * 1000.0:.2f} mA",
+                    f"    Extracted Ld: {Ld_fit * 1000.0:.3f} mH",
+                    f"    Extracted Lq: {Lq_fit * 1000.0:.3f} mH",
+                    f"    Saliency Ratio (Lq/Ld): {sal_fit:.3f}"
+                ]
+                gcmd.respond_info("\n".join(lines))
+                
+            finally:
+                # 9. Restore initial state
+                self._write_field("UD_EXT", 0)
+                self._write_field("UQ_EXT", 0)
+                self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
+                self._write_field("OPENLOOP_ACCELERATION", 0)
+                self._write_field("MODE_MOTION", old_mode_motion)
+                self._write_field("PHI_E_SELECTION", old_phi_e_selection)
+                self._setup_filters()
+                
+                # Disable motor hardware & gate driver to return to safe idle state
+                print_time = toolhead.get_last_move_time()
+                enable_line.motor_disable(print_time)
 
 def load_config_prefix(config):
     return TMC4671(config)
