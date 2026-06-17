@@ -977,41 +977,47 @@ class TMC4671:
         self.printer.reactor.register_callback((lambda ev: self._handle_ready_deferred(print_time)))
 
     def _handle_ready_deferred(self, print_time=None):
-        with self.mutex:
-            if print_time is None:
+        try:
+            with self.mutex:
+                if print_time is None:
+                    print_time = self.printer.lookup_object('toolhead').get_last_move_time()
+                self._init_registers(print_time)
+                # Set these before setting enable to avoid yeeting the toolhead
+                self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+                self._write_field("STATUS_MASK", 0)
+                self._write_field("PID_FLUX_TARGET", 0)
+                self._write_field("PID_TORQUE_TARGET", 0)
+                self._write_field("PID_VELOCITY_TARGET", 0)
+                self._write_field("ABN_DECODER_COUNT", 0)
+                self._write_field("PID_POSITION_TARGET", 0)
+                # Now enable 6100
+                if self.fields6100 is not None:
+                    self.mcu_tmc6100.set_register("GCONF",
+                                                  self.fields6100.set_field("disable", 0),
+                                                  print_time)
+                enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
+                enable_line.motor_enable(print_time)
+                # Calibrate current ADC first before any motor activation
+                self._calibrate_adc(print_time)
+                # Just align and measure, which sets up the encoder offsets
+                self._align_and_measure(True, print_time)
+                self._write_field("ABN_DECODER_COUNT", 0)
+                self._write_field("PID_POSITION_TARGET", 0)
                 print_time = self.printer.lookup_object('toolhead').get_last_move_time()
-            # Set these before setting enable to avoid yeeting the toolhead
-            self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-            self._write_field("STATUS_MASK", 0)
-            self._write_field("PID_FLUX_TARGET", 0)
-            self._write_field("PID_TORQUE_TARGET", 0)
-            self._write_field("PID_VELOCITY_TARGET", 0)
-            self._write_field("ABN_DECODER_COUNT", 0)
-            self._write_field("PID_POSITION_TARGET", 0)
-            # Now enable 6100
-            if self.fields6100 is not None:
-                self.mcu_tmc6100.set_register("GCONF",
-                                              self.fields6100.set_field("disable", 0),
-                                              print_time)
-            enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
-            enable_line.motor_enable(print_time)
-            # Calibrate current ADC first before any motor activation
-            self._calibrate_adc(print_time)
-            # Just align and measure, which sets up the encoder offsets
-            self._align_and_measure(True, print_time)
-            self._write_field("ABN_DECODER_COUNT", 0)
-            self._write_field("PID_POSITION_TARGET", 0)
-            print_time = self.printer.lookup_object('toolhead').get_last_move_time()
-            enable_line.motor_disable(print_time)
-            self.alignment_done = True
-            self._write_field("STATUS_MASK", 0)
-            self._write_field("PID_FLUX_TARGET", 0)
-            self._write_field("PID_TORQUE_TARGET", 0)
-            self._write_field("PID_VELOCITY_TARGET", 0)
-            self._write_field("ABN_DECODER_COUNT", 0)
-            self._write_field("PID_POSITION_TARGET", 0)
-            self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-            self.init_done = True
+                enable_line.motor_disable(print_time)
+                self.alignment_done = True
+                self._write_field("STATUS_MASK", 0)
+                self._write_field("PID_FLUX_TARGET", 0)
+                self._write_field("PID_TORQUE_TARGET", 0)
+                self._write_field("PID_VELOCITY_TARGET", 0)
+                self._write_field("ABN_DECODER_COUNT", 0)
+                self._write_field("PID_POSITION_TARGET", 0)
+                self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+                self.init_done = True
+        except Exception as e:
+            logging.exception("TMC 4671 '%s' failed ready_deferred initialization", self.name)
+            self.printer.invoke_shutdown("TMC 4671 '%s' failed ready_deferred initialization: %s"
+                                         % (self.name, str(e)))
 
     def _calibrate_adc(self, print_time):
         self._write_field("PWM_CHOP", 0)
