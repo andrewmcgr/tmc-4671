@@ -2085,159 +2085,161 @@ class TMC4671:
             raise gcmd.error("Motor resistance R not measured. Please run alignment/startup calibration first.")
             
         toolhead = self.printer.lookup_object('toolhead')
-        print_time = toolhead.get_last_move_time()
-        dwell = toolhead.dwell
-        old_phi_e_selection = self._read_field("PHI_E_SELECTION")
-        old_mode_motion = self._read_field("MODE_MOTION")
-        
-        # Enable motor hardware & gate driver (vital to allow current flow)
         enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
-        if self.fields6100 is not None:
-            self.mcu_tmc6100.set_register("GCONF",
-                                          self.fields6100.set_field("disable", 0),
-                                          print_time)
-        enable_line.motor_enable(print_time)
         
-        # 2. Disable biquads to prevent attenuation
-        for register in BIQUAD_FILTER_TARGETS.values():
-            self.disable_biquad(register)
+        with self.mutex:
+            print_time = toolhead.get_last_move_time()
+            dwell = toolhead.dwell
+            old_phi_e_selection = self._read_field("PHI_E_SELECTION")
+            old_mode_motion = self._read_field("MODE_MOTION")
             
-        try:
-            # 3. Calculate safe AC Voltage Amplitude (V_ac)
-            # Target about 25% of run_current to prevent heating/vibration
-            I_target_A = self.current_helper.run_current * 0.25
-            V_req = (I_target_A * self.motor_r * 2.0) + 1.2
-            vm = self._read_vm()
-            if self._read_field("MOTOR_TYPE") == 3:
-                v_max_phase = vm / math.sqrt(3.0)
-            else:
-                v_max_phase = vm
+            # Enable motor hardware & gate driver (vital to allow current flow)
+            if self.fields6100 is not None:
+                self.mcu_tmc6100.set_register("GCONF",
+                                              self.fields6100.set_field("disable", 0),
+                                              print_time)
+            enable_line.motor_enable(print_time)
             
-            if V_req > v_max_phase:
-                ac_U = 32767
-            else:
-                ac_U = int(32767.0 * (V_req / v_max_phase))
-            ac_U = max(ac_U, 500)
-            v_applied = ac_U * v_max_phase / 32767.0
-            # Compensate for measured inverter dead-time voltage drop
-            v_ac = max(0.01, v_applied - self.dead_time_v)
-            
-            # 4. Configure TMC4671 for Open-loop Injection
-            self._write_field("PWM_CHOP", 7)
-            self._write_field("PHI_E_SELECTION", 2)  # Open Loop Mode
-            self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
-            self._write_field("UQ_EXT", 0)
-            
-            # Convert f_inject to DDS format (angle step per cycle)
-            dds_value = int(f_inject * (2**32) / self.pwmfreq)
-            self._write_field("OPENLOOP_ACCELERATION", dds_value)
-            self._write_field("OPENLOOP_VELOCITY_TARGET", dds_value)
-            self._write_field("UD_EXT", ac_U)
-            self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
-            
-            # Allow mechanical/electrical settling
-            dwell(0.5)
-            
-            # 5. Stochastic Polling Loop
-            sum_id = 0.0
-            sum_iq = 0.0
-            convert_adc = self.current_helper.convert_adc_current
-            for _ in range(n_samples):
-                reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
-                flux_raw = reg_val & 0xffff
-                if flux_raw >= 32768:
-                    flux_raw -= 65536
-                torque_raw = (reg_val >> 16) & 0xffff
-                if torque_raw >= 32768:
-                    torque_raw -= 65536
+            # 2. Disable biquads to prevent attenuation
+            for register in BIQUAD_FILTER_TARGETS.values():
+                self.disable_biquad(register)
                 
-                id = convert_adc(flux_raw)
-                iq = convert_adc(torque_raw)
-                sum_id += id
-                sum_iq += iq
-                dwell(0.001)  # Natural USB + OS scheduling jitter provides stochastic sampling
+            try:
+                # 3. Calculate safe AC Voltage Amplitude (V_ac)
+                # Target about 25% of run_current to prevent heating/vibration
+                I_target_A = self.current_helper.run_current * 0.25
+                V_req = (I_target_A * self.motor_r * 2.0) + 1.2
+                vm = self._read_vm()
+                if self._read_field("MOTOR_TYPE") == 3:
+                    v_max_phase = vm / math.sqrt(3.0)
+                else:
+                    v_max_phase = vm
                 
-            # 6. Disable injection immediately
-            self._write_field("UD_EXT", 0)
-            self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-            
-            # 7. Admittance & Inductance Calculations
-            Id_amps = sum_id / n_samples
-            Iq_amps = sum_iq / n_samples
-            
-            G = Id_amps / v_ac
-            B = -abs(Iq_amps / v_ac)  # Inductive susceptance must be negative
-            
-            R_ohms = self.motor_r
-            Cx = 1.0 / (2.0 * R_ohms)
-            r = 1.0 / (2.0 * R_ohms)
-            
-            dx = G - Cx
-            dy = B
-            d = math.sqrt(dx**2 + dy**2)
-            
-            # Geometric Admittance Extraction Safeguard: Radial projection clamping
-            if d > r:
-                logging.warning("TMC4671 '%s' measured admittance point (G=%.6f, B=%.6f) lies outside "
-                                "the nominal DC resistance circle (center=%.6f, radius=%.6f, distance=%.6f). "
-                                "Applying defensive radial projection clamping.",
-                                self.name, G, B, Cx, r, d)
-                # Project (G, B) radially onto 99.5% of the boundary to preserve numerical sanity
-                scale = 0.995 * r / d
-                G = Cx + dx * scale
-                B = dy * scale
-                # Re-calculate dx, dy, and d with the projected values
+                if V_req > v_max_phase:
+                    ac_U = 32767
+                else:
+                    ac_U = int(32767.0 * (V_req / v_max_phase))
+                ac_U = max(ac_U, 500)
+                v_applied = ac_U * v_max_phase / 32767.0
+                # Compensate for measured inverter dead-time voltage drop
+                v_ac = max(0.01, v_applied - self.dead_time_v)
+                
+                # 4. Configure TMC4671 for Open-loop Injection
+                self._write_field("PWM_CHOP", 7)
+                self._write_field("PHI_E_SELECTION", 2)  # Open Loop Mode
+                self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
+                self._write_field("UQ_EXT", 0)
+                
+                # Convert f_inject to DDS format (angle step per cycle)
+                dds_value = int(f_inject * (2**32) / self.pwmfreq)
+                self._write_field("OPENLOOP_ACCELERATION", dds_value)
+                self._write_field("OPENLOOP_VELOCITY_TARGET", dds_value)
+                self._write_field("UD_EXT", ac_U)
+                self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
+                
+                # Allow mechanical/electrical settling
+                dwell(0.5)
+                
+                # 5. Stochastic Polling Loop
+                sum_id = 0.0
+                sum_iq = 0.0
+                convert_adc = self.current_helper.convert_adc_current
+                for _ in range(n_samples):
+                    reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
+                    flux_raw = reg_val & 0xffff
+                    if flux_raw >= 32768:
+                        flux_raw -= 65536
+                    torque_raw = (reg_val >> 16) & 0xffff
+                    if torque_raw >= 32768:
+                        torque_raw -= 65536
+                    
+                    id = convert_adc(flux_raw)
+                    iq = convert_adc(torque_raw)
+                    sum_id += id
+                    sum_iq += iq
+                    dwell(0.001)  # Natural USB + OS scheduling jitter provides stochastic sampling
+                    
+                # 6. Disable injection immediately
+                self._write_field("UD_EXT", 0)
+                self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+                
+                # 7. Admittance & Inductance Calculations
+                Id_amps = sum_id / n_samples
+                Iq_amps = sum_iq / n_samples
+                
+                G = Id_amps / v_ac
+                B = -abs(Iq_amps / v_ac)  # Inductive susceptance must be negative
+                
+                R_ohms = self.motor_r
+                Cx = 1.0 / (2.0 * R_ohms)
+                r = 1.0 / (2.0 * R_ohms)
+                
                 dx = G - Cx
                 dy = B
                 d = math.sqrt(dx**2 + dy**2)
-            
-            h_squared = max(0.0, r**2 - d**2)
-            h = math.sqrt(h_squared)
-            
-            if d < 1e-6:
-                vx, vy = 0.0, -1.0
-            else:
-                vx = -dy / d
-                vy = dx / d
                 
-            # Locate distinct admittances on circle (guarantee B1, B2 <= -1e-6 to avoid capacitive artifacts)
-            G1 = G + (h * vx)
-            B1 = min(-1e-6, B + (h * vy))
-            G2 = G - (h * vx)
-            B2 = min(-1e-6, B - (h * vy))
-            
-            omega = 2.0 * math.pi * f_inject
-            L1 = -B1 / (omega * (G1**2 + B1**2))
-            L2 = -B2 / (omega * (G2**2 + B2**2))
-            
-            Lq = max(L1, L2)
-            Ld = min(L1, L2)
-            
-            # Report Results
-            gcmd.respond_info(
-                f"TMC4671 '{self.name}' Impedance Measurement Results:\n"
-                f"  R (measured): {R_ohms:.4f} Ohm\n"
-                f"  V_ac (applied): {v_ac:.4f} V (ac_U={ac_U}, V_applied={v_applied:.4f}V, V_dead={self.dead_time_v:.4f}V)\n"
-                f"  Averaged Currents: Id={Id_amps:.4f} A, Iq={Iq_amps:.4f} A\n"
-                f"  Admittance Midpoint: G={G:.6f} S, B={B:.6f} S\n"
-                f"  Extracted Ld: {Ld * 1000.0:.3f} mH\n"
-                f"  Extracted Lq: {Lq * 1000.0:.3f} mH\n"
-                f"  Saliency Ratio (Lq/Ld): {Lq/Ld:.3f}"
-            )
-            
-        finally:
-            # 8. Restore initial state
-            self._write_field("UD_EXT", 0)
-            self._write_field("UQ_EXT", 0)
-            self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
-            self._write_field("OPENLOOP_ACCELERATION", 0)
-            self._write_field("MODE_MOTION", old_mode_motion)
-            self._write_field("PHI_E_SELECTION", old_phi_e_selection)
-            self._setup_filters()
-            
-            # Disable motor hardware & gate driver to return to safe idle state
-            print_time = toolhead.get_last_move_time()
-            enable_line.motor_disable(print_time)
+                # Geometric Admittance Extraction Safeguard: Radial projection clamping
+                if d > r:
+                    logging.warning("TMC4671 '%s' measured admittance point (G=%.6f, B=%.6f) lies outside "
+                                    "the nominal DC resistance circle (center=%.6f, radius=%.6f, distance=%.6f). "
+                                    "Applying defensive radial projection clamping.",
+                                    self.name, G, B, Cx, r, d)
+                    # Project (G, B) radially onto 99.5% of the boundary to preserve numerical sanity
+                    scale = 0.995 * r / d
+                    G = Cx + dx * scale
+                    B = dy * scale
+                    # Re-calculate dx, dy, and d with the projected values
+                    dx = G - Cx
+                    dy = B
+                    d = math.sqrt(dx**2 + dy**2)
+                
+                h_squared = max(0.0, r**2 - d**2)
+                h = math.sqrt(h_squared)
+                
+                if d < 1e-6:
+                    vx, vy = 0.0, -1.0
+                else:
+                    vx = -dy / d
+                    vy = dx / d
+                    
+                # Locate distinct admittances on circle (guarantee B1, B2 <= -1e-6 to avoid capacitive artifacts)
+                G1 = G + (h * vx)
+                B1 = min(-1e-6, B + (h * vy))
+                G2 = G - (h * vx)
+                B2 = min(-1e-6, B - (h * vy))
+                
+                omega = 2.0 * math.pi * f_inject
+                L1 = -B1 / (omega * (G1**2 + B1**2))
+                L2 = -B2 / (omega * (G2**2 + B2**2))
+                
+                Lq = max(L1, L2)
+                Ld = min(L1, L2)
+                
+                # Report Results
+                gcmd.respond_info(
+                    f"TMC4671 '{self.name}' Impedance Measurement Results:\n"
+                    f"  R (measured): {R_ohms:.4f} Ohm\n"
+                    f"  V_ac (applied): {v_ac:.4f} V (ac_U={ac_U}, V_applied={v_applied:.4f}V, V_dead={self.dead_time_v:.4f}V)\n"
+                    f"  Averaged Currents: Id={Id_amps:.4f} A, Iq={Iq_amps:.4f} A\n"
+                    f"  Admittance Midpoint: G={G:.6f} S, B={B:.6f} S\n"
+                    f"  Extracted Ld: {Ld * 1000.0:.3f} mH\n"
+                    f"  Extracted Lq: {Lq * 1000.0:.3f} mH\n"
+                    f"  Saliency Ratio (Lq/Ld): {Lq/Ld:.3f}"
+                )
+                
+            finally:
+                # 8. Restore initial state
+                self._write_field("UD_EXT", 0)
+                self._write_field("UQ_EXT", 0)
+                self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
+                self._write_field("OPENLOOP_ACCELERATION", 0)
+                self._write_field("MODE_MOTION", old_mode_motion)
+                self._write_field("PHI_E_SELECTION", old_phi_e_selection)
+                self._setup_filters()
+                
+                # Disable motor hardware & gate driver to return to safe idle state
+                print_time = toolhead.get_last_move_time()
+                enable_line.motor_disable(print_time)
 
 def load_config_prefix(config):
     return TMC4671(config)
