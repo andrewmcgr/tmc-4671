@@ -691,6 +691,9 @@ class TMC4671:
                                        above=0.)
         self.motor_r = 0.0
         self.motor_l = 0.0
+        self.motor_ld = 0.0
+        self.motor_lq = 0.0
+        self.motor_saliency = 1.0
         self.dead_time_v = 0.0
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
                                    TMC_FREQUENCY, pin_option="cs_pin")
@@ -1278,17 +1281,26 @@ class TMC4671:
         # Step 3: Read Currents
         # --- Measure True AC Current Magnitude AND Raw Averages ---
         ac_raw_qd_pairs = []
+        t_start = time.time()
         for i in range(100):
-            ac_raw_qd_pairs.append(self.current_helper.get_qd_current())
+            t0 = time.time()
+            qd = self.current_helper.get_qd_current()
+            t1 = time.time()
+            ac_raw_qd_pairs.append((qd, t0, t1))
             dwell(0.001)
 
         ac_mag_samples = []
         id_ac_raw_samples = []
         iq_ac_raw_samples = []
-        for iq, id in ac_raw_qd_pairs:
-            ac_mag_samples.append(math.sqrt(id**2 + iq**2))
+        ac_samples_with_time = []
+        for qd, t0, t1 in ac_raw_qd_pairs:
+            iq, id = qd
+            mag = math.sqrt(id**2 + iq**2)
+            ac_mag_samples.append(mag)
             id_ac_raw_samples.append(id)
             iq_ac_raw_samples.append(iq)
+            t_mid = (t0 + t1) / 2.0 - t_start
+            ac_samples_with_time.append((mag, t_mid))
 
         I_AC_MAG = mean(ac_mag_samples)
         I_AC_RAW_D = mean(id_ac_raw_samples)
@@ -1334,8 +1346,22 @@ class TMC4671:
         else:
             self.motor_l = 0.0
 
+        if I_AC_MAG > 0 and V_true > 0 and self.motor_l > 0.0:
+            I_ripple_fit, Ld_fit, Lq_fit, sal_fit = self._calculate_impedance_method_b(
+                ac_samples_with_time, I_AC_MAG, f_test, V_true, omega, self.motor_r
+            )
+            self.motor_ld = Ld_fit
+            self.motor_lq = Lq_fit
+            self.motor_saliency = sal_fit
+        else:
+            self.motor_ld = 0.0
+            self.motor_lq = 0.0
+            self.motor_saliency = 1.0
+
         logging.info("TMC 4671 '%s' L=%g H (ac_U=%d, Vm=%.1f)",
                      self.stepper_name, self.motor_l, ac_U, vm)
+        logging.info("TMC 4671 '%s' Method B startup: Ld=%g H, Lq=%g H, saliency=%g",
+                     self.stepper_name, self.motor_ld, self.motor_lq, self.motor_saliency)
         logging.info("   -> DC: Mag=%.3f A (Raw ID=%.3f, IQ=%.3f)",
                      I_DC_MAG, I_DC_RAW_D, I_DC_RAW_Q)
         logging.info("   -> AC: Mag=%.3f A (Raw ID=%.3f, IQ=%.3f)",
@@ -1963,11 +1989,17 @@ class TMC4671:
     def cmd_TMC_DEBUG_MOTOR(self, gcmd):
         res_str = f"{self.motor_r:.4f} Ohms" if self.motor_r != 0.0 else "Not yet calibrated (run TMC_TUNE_PID first)"
         ind_str = f"{self.motor_l:.6f} H ({self.motor_l * 1000.0:.3f} mH)" if self.motor_l != 0.0 else "Not yet calibrated (run TMC_TUNE_PID first)"
+        ld_str = f"{self.motor_ld:.6f} H ({self.motor_ld * 1000.0:.3f} mH)" if self.motor_ld != 0.0 else "Not yet calibrated / measured"
+        lq_str = f"{self.motor_lq:.6f} H ({self.motor_lq * 1000.0:.3f} mH)" if self.motor_lq != 0.0 else "Not yet calibrated / measured"
+        sal_str = f"{self.motor_saliency:.4f}" if self.motor_saliency != 1.0 else "Not yet calibrated / measured"
         
         gcmd.respond_info(
             f"TMC 4671 '{self.name}' Motor Debug Report:\n"
             f"  Estimated Resistance (motor_r): {res_str}\n"
-            f"  Estimated Inductance (motor_l): {ind_str}"
+            f"  Estimated Inductance (motor_l): {ind_str}\n"
+            f"  Estimated Ld Inductance (motor_ld): {ld_str}\n"
+            f"  Estimated Lq Inductance (motor_lq): {lq_str}\n"
+            f"  Saliency Ratio (motor_saliency): {sal_str}"
         )
 
     cmd_TMC_DEBUG_TUNING_help = (
@@ -2294,6 +2326,9 @@ class TMC4671:
                 I_ripple_fit, Ld_fit, Lq_fit, sal_fit = self._calculate_impedance_method_b(
                     ac_samples, I_avg, f_inject, V_ac_eff, omega_inject, self.motor_r
                 )
+                self.motor_ld = Ld_fit
+                self.motor_lq = Lq_fit
+                self.motor_saliency = sal_fit
                 
                 # Report Results
                 lines = [

@@ -316,7 +316,7 @@ The command applies a rotating AC voltage vector on top of the measured motor wi
 
 ### TMC_DEBUG_MOTOR
 
-Report the motor resistance and inductance measured during the last startup alignment.
+Report the motor resistance, average inductance, estimated Ld inductance, estimated Lq inductance, and spatial saliency ratio measured during the last startup alignment (or manual `TMC_MEASURE_IMPEDANCE` run).
 
 ```
 TMC_DEBUG_MOTOR STEPPER=stepper_x
