@@ -685,9 +685,9 @@ class TMC4671:
             self.mcu_tmc6100 = None
         # These will be calibrated later, but this is roughly correct
         self.vm_offset = 32768
-        self.vm_range = round(32767/1.25)
+        self.vm_range = round(32767/2.5)
         # Correct for the OpenFFBoard
-        self.voltage_scale = config.getfloat('voltage_scale_ratio', 21.82,
+        self.voltage_scale = config.getfloat('voltage_scale_ratio', 40.875,
                                        above=0.)
         self.motor_r = 0.0
         self.motor_l = 0.0
@@ -709,8 +709,8 @@ class TMC4671:
         self.stepper_enable = self.printer.load_object(config, "stepper_enable")
         self.printer.register_event_handler("klippy:mcu_identify",
                                             self._handle_mcu_identify)
-        self.printer.register_event_handler("klippy:connect",
-                                            self._handle_connect)
+        self.printer.register_event_handler("klippy:disconnect",
+                                            self._handle_disconnect)
         # Register commands
         self.step_helper = StepHelper(config, self.mcu_tmc)
         self.current_helper = CurrentHelper(config, self.mcu_tmc)
@@ -971,6 +971,14 @@ class TMC4671:
             logging.info("TMC %s failed to init: %s", self.name, str(e))
         enable_line.register_state_callback(self._handle_stepper_enable)
 
+    def _handle_disconnect(self):
+        if self.fields6100 is not None:
+            try:
+                self.mcu_tmc6100.set_register(
+                    "GCONF", self.fields6100.set_field("disable", 1), None)
+            except Exception:
+                pass
+
     def _handle_ready(self, print_time=None):
         # klippy:ready handlers are limited in what they may do. Communicating with a MCU
         # will pause the reactor and is thus forbidden. That code has to run outside of the event handler.
@@ -986,7 +994,6 @@ class TMC4671:
             self._write_field("PID_FLUX_TARGET", 0)
             self._write_field("PID_TORQUE_TARGET", 0)
             self._write_field("PID_VELOCITY_TARGET", 0)
-            self._write_field("ABN_DECODER_COUNT", 0)
             self._write_field("PID_POSITION_TARGET", 0)
             # Now enable 6100
             if self.fields6100 is not None:
@@ -995,15 +1002,19 @@ class TMC4671:
                                               print_time)
             enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
             enable_line.motor_enable(print_time)
-            # Calibrate current ADC first before any motor activation
-            self._calibrate_adc(print_time)
-            # Just align and measure, which sets up the encoder offsets
-            self._align_and_measure(True, print_time)
-            self._write_field("ABN_DECODER_COUNT", 0)
-            self._write_field("PID_POSITION_TARGET", 0)
+            try:
+                # Calibrate current ADC first before any motor activation
+                self._calibrate_adc(print_time)
+                # Just align and measure, which sets up the encoder offsets
+                self._align_and_measure(True, print_time)
+                self._write_field("ABN_DECODER_COUNT", 0)
+                self._write_field("PID_POSITION_TARGET", 0)
+                self.alignment_done = True
+            except self.printer.command_error as e:
+                logging.error("TMC %s: startup calibration failed: %s",
+                              self.name, str(e))
             print_time = self.printer.lookup_object('toolhead').get_last_move_time()
             enable_line.motor_disable(print_time)
-            self.alignment_done = True
             self._write_field("STATUS_MASK", 0)
             self._write_field("PID_FLUX_TARGET", 0)
             self._write_field("PID_TORQUE_TARGET", 0)
@@ -1171,8 +1182,10 @@ class TMC4671:
         self._write_field("MODE_MOTION", MotionMode.stopped_mode)
         self._write_field("PHI_E_EXT", 0) # and, set this to be PHI_E = 0
         self._write_field("PHI_E_SELECTION", 1) # external mode, so it won't change.
-        # Start at some low voltage and see if we can read a current
-        test_U = round(self.vm_range / self.voltage_scale) # Should be about 1V
+        # Start at some low voltage and see if we can read a current.
+        # Read VM once; physical motor voltage = (UD_EXT / 32767) * vm.
+        vm = self._read_vm()
+        test_U = round(32767.0 / vm)
         self._write_field("UQ_EXT", 0)
         self._write_field("UD_EXT", test_U)
         self._reset_targets()
@@ -1201,8 +1214,8 @@ class TMC4671:
         I2 = max(abs(iux_second), abs(iwy_second))
 
         # Two-point differential measurement to exclude inverter dead-time
-        V1 = test_U * self.voltage_scale / self.vm_range
-        V2 = test2_U * self.voltage_scale / self.vm_range
+        V1 = (test_U  / 32767.0) * vm
+        V2 = (test2_U / 32767.0) * vm
 
         delta_V = V2 - V1
         delta_I = I2 - I1
