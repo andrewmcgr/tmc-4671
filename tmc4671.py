@@ -2084,9 +2084,19 @@ class TMC4671:
         if self.motor_r is None or self.motor_r < 1e-3:
             raise gcmd.error("Motor resistance R not measured. Please run alignment/startup calibration first.")
             
-        dwell = self.printer.lookup_object('toolhead').dwell
+        toolhead = self.printer.lookup_object('toolhead')
+        print_time = toolhead.get_last_move_time()
+        dwell = toolhead.dwell
         old_phi_e_selection = self._read_field("PHI_E_SELECTION")
         old_mode_motion = self._read_field("MODE_MOTION")
+        
+        # Enable motor hardware & gate driver (vital to allow current flow)
+        enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
+        if self.fields6100 is not None:
+            self.mcu_tmc6100.set_register("GCONF",
+                                          self.fields6100.set_field("disable", 0),
+                                          print_time)
+        enable_line.motor_enable(print_time)
         
         # 2. Disable biquads to prevent attenuation
         for register in BIQUAD_FILTER_TARGETS.values():
@@ -2224,6 +2234,10 @@ class TMC4671:
             self._write_field("MODE_MOTION", old_mode_motion)
             self._write_field("PHI_E_SELECTION", old_phi_e_selection)
             self._setup_filters()
+            
+            # Disable motor hardware & gate driver to return to safe idle state
+            print_time = toolhead.get_last_move_time()
+            enable_line.motor_disable(print_time)
 
 def load_config_prefix(config):
     return TMC4671(config)
