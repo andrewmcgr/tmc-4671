@@ -28,4 +28,5 @@ tmc-4671/
 - **Refactoring**: When extracting code into new files, ensure this file is updated.
 - **Installer**: `install.sh` symlinks each Python module file into Klipper's `extras/` directory. When adding a new module file, add a corresponding `ln -srfn` line to `link_extension` in `install.sh` and run the script (or create the symlink manually) on the target machine, otherwise Klipper will fail to import the module.
 - **Commit style**: Plain English, no conventional-commit prefixes (e.g. "Add motor inductance measurement", not "feat: add motor inductance measurement").
+- **Git and Branching**: NEVER commit or push directly to the `main` branch. All development and experiments MUST take place on dedicated, descriptive feature branches, with changes merged to `main` only via pull requests.
 - **G-code commands**: When adding or changing a G-code command, update the "G-code command reference" section at the end of `README.md` to reflect the new or changed command, its parameters, and their defaults.
