@@ -690,6 +690,7 @@ class TMC4671:
                                        above=0.)
         self.motor_r = 0.0
         self.motor_l = 0.0
+        self.dead_time_v = 0.0
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
                                    TMC_FREQUENCY, pin_option="cs_pin")
         self.read_translate = None
@@ -1176,23 +1177,43 @@ class TMC4671:
         self._write_field("PWM_CHOP", 7)
         dwell(0.3)
         # Average current readings to filter noise and ripple
-        iux, iwy, c = self._average_currents(20, 0.005)
+        iux_first, iwy_first, c = self._average_currents(20, 0.005)
         self._write_field("PWM_CHOP", 0)
-        logging.info("TMC 4671 '%s' initial averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux, iwy)
-        if max(abs(iux), abs(iwy)) < 1e-6:
+        logging.info("TMC 4671 '%s' initial averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux_first, iwy_first)
+        I1 = max(abs(iux_first), abs(iwy_first))
+        if I1 < 1e-6:
             # something is horribly wrong
              raise self.printer.command_error("TMC 4671 is seeing no motor current. Check wiring.")
         # Ok, calculate a voltage that will give us about a third of the configured current limit
-        test2_U = round((c / 2.0) * test_U / max(abs(iux), abs(iwy)))
+        test2_U = round((c / 2.0) * test_U / I1)
         logging.info("TMC 4671 '%s' test U %g %g", self.stepper_name, test_U, test2_U)
         # Switch back on, and this time motor should self-align
         self._write_field("UD_EXT", test2_U)
         self._write_field("PWM_CHOP", 7)
         dwell(0.5)
         # Average current readings to filter mechanical ringing and noise
-        iux, iwy, _ = self._average_currents(20, 0.005)
-        logging.info("TMC 4671 '%s' alignment averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux, iwy)
-        R = test2_U * self.voltage_scale / (self.vm_range * max(abs(iux), abs(iwy)))
+        iux_second, iwy_second, _ = self._average_currents(20, 0.005)
+        logging.info("TMC 4671 '%s' alignment averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux_second, iwy_second)
+        I2 = max(abs(iux_second), abs(iwy_second))
+
+        # Two-point differential measurement to exclude inverter dead-time
+        V1 = test_U * self.voltage_scale / self.vm_range
+        V2 = test2_U * self.voltage_scale / self.vm_range
+
+        delta_V = V2 - V1
+        delta_I = I2 - I1
+
+        if delta_I > 0.01:
+            R = delta_V / delta_I
+            self.dead_time_v = max(0.0, V2 - I2 * R)
+            logging.info("TMC 4671 '%s' differential calculation: R=%g Ω, V_dead=%g V",
+                         self.stepper_name, R, self.dead_time_v)
+        else:
+            R = V2 / I2
+            self.dead_time_v = 0.0
+            logging.warning("TMC 4671 '%s' differential current delta too small (%g A). "
+                            "Falling back to single-point R=%g Ω.",
+                            self.stepper_name, delta_I, R)
         self.motor_r = R
         logging.info("TMC 4671 '%s' est. motor R=%g Ω", self.stepper_name, R)
 
@@ -2087,7 +2108,9 @@ class TMC4671:
             else:
                 ac_U = int(32767.0 * (V_req / v_max_phase))
             ac_U = max(ac_U, 500)
-            v_ac = ac_U * v_max_phase / 32767.0
+            v_applied = ac_U * v_max_phase / 32767.0
+            # Compensate for measured inverter dead-time voltage drop
+            v_ac = max(0.01, v_applied - self.dead_time_v)
             
             # 4. Configure TMC4671 for Open-loop Injection
             self._write_field("PWM_CHOP", 7)
@@ -2184,7 +2207,7 @@ class TMC4671:
             gcmd.respond_info(
                 f"TMC4671 '{self.name}' Impedance Measurement Results:\n"
                 f"  R (measured): {R_ohms:.4f} Ohm\n"
-                f"  V_ac (applied): {v_ac:.4f} V (ac_U={ac_U})\n"
+                f"  V_ac (applied): {v_ac:.4f} V (ac_U={ac_U}, V_applied={v_applied:.4f}V, V_dead={self.dead_time_v:.4f}V)\n"
                 f"  Averaged Currents: Id={Id_amps:.4f} A, Iq={Iq_amps:.4f} A\n"
                 f"  Admittance Midpoint: G={G:.6f} S, B={B:.6f} S\n"
                 f"  Extracted Ld: {Ld * 1000.0:.3f} mH\n"
