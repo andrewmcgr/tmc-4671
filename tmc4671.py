@@ -2083,10 +2083,19 @@ class TMC4671:
         # 1. Verification and Setup
         if self.motor_r is None or self.motor_r < 1e-3:
             raise gcmd.error("Motor resistance R not measured. Please run alignment/startup calibration first.")
+        if self.motor_l is None or self.motor_l < 1e-6:
+            raise gcmd.error("Motor average inductance Lnot measured. Please run alignment/startup calibration first.")
             
         toolhead = self.printer.lookup_object('toolhead')
         enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
         
+        # Helper function for variance
+        def calculate_variance(data):
+            if len(data) < 2:
+                return 0.0
+            mu = sum(data) / len(data)
+            return sum((x - mu) ** 2 for x in data) / (len(data) - 1)
+            
         with self.mutex:
             print_time = toolhead.get_last_move_time()
             dwell = toolhead.dwell
@@ -2124,27 +2133,22 @@ class TMC4671:
                 # Compensate for measured inverter dead-time voltage drop
                 v_ac = max(0.01, v_applied - self.dead_time_v)
                 
-                # 4. Configure TMC4671 for Open-loop Injection
+                # 4. Configure TMC4671 for DC Static Bias (Rotor Alignment & Noise Calibration)
                 self._write_field("PWM_CHOP", 7)
                 self._write_field("PHI_E_SELECTION", 2)  # Open Loop Mode
                 self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
                 self._write_field("UQ_EXT", 0)
-                
-                # Convert f_inject to DDS format (angle step per cycle)
-                dds_value = int(f_inject * (2**32) / self.pwmfreq)
-                self._write_field("OPENLOOP_ACCELERATION", dds_value)
-                self._write_field("OPENLOOP_VELOCITY_TARGET", dds_value)
+                self._write_field("OPENLOOP_ACCELERATION", 0)
                 self._write_field("UD_EXT", ac_U)
                 self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
                 
-                # Allow mechanical/electrical settling
+                # Allow mechanical/electrical settling for DC alignment
                 dwell(0.5)
                 
-                # 5. Stochastic Polling Loop
-                sum_id = 0.0
-                sum_iq = 0.0
+                # Sample the baseline DC/Noise currents to measure background variance (switching, ADC noise, EMI)
+                dc_mags = []
                 convert_adc = self.current_helper.convert_adc_current
-                for _ in range(n_samples):
+                for _ in range(100):
                     reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
                     flux_raw = reg_val & 0xffff
                     if flux_raw >= 32768:
@@ -2155,80 +2159,123 @@ class TMC4671:
                     
                     id = convert_adc(flux_raw)
                     iq = convert_adc(torque_raw)
-                    sum_id += id
-                    sum_iq += iq
-                    dwell(0.001)  # Natural USB + OS scheduling jitter provides stochastic sampling
+                    dc_mags.append(math.sqrt(id**2 + iq**2))
+                    dwell(0.001)
                     
-                # 6. Disable injection immediately
+                I_dc_avg = sum(dc_mags) / len(dc_mags)
+                var_noise = calculate_variance(dc_mags)
+                
+                # 5. Configure and Start High-Frequency AC Injection
+                dds_value = int(f_inject * (2**32) / self.pwmfreq)
+                self._write_field("OPENLOOP_ACCELERATION", dds_value)
+                self._write_field("OPENLOOP_VELOCITY_TARGET", dds_value)
+                
+                # Allow electrical settling for the rotating field
+                dwell(0.5)
+                
+                # 6. Stochastic AC/Saliency Polling Loop with precise timestamping
+                ac_samples = []
+                t_start = time.time()
+                for _ in range(n_samples):
+                    t0 = time.time()
+                    reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
+                    t1 = time.time()
+                    
+                    flux_raw = reg_val & 0xffff
+                    if flux_raw >= 32768:
+                        flux_raw -= 65536
+                    torque_raw = (reg_val >> 16) & 0xffff
+                    if torque_raw >= 32768:
+                        torque_raw -= 65536
+                    
+                    id = convert_adc(flux_raw)
+                    iq = convert_adc(torque_raw)
+                    
+                    mag = math.sqrt(id**2 + iq**2)
+                    t_mid = (t0 + t1) / 2.0 - t_start
+                    ac_samples.append((mag, t_mid))
+                    dwell(0.001)  # Jitter allows equivalent time sampling
+                    
+                # 7. Disable injection immediately
                 self._write_field("UD_EXT", 0)
                 self._write_field("MODE_MOTION", MotionMode.stopped_mode)
                 
-                # 7. Admittance & Inductance Calculations
-                Id_amps = sum_id / n_samples
-                Iq_amps = sum_iq / n_samples
+                # =================================================================
+                # 8. DSP & Extraction Algorithms
+                # =================================================================
+                ac_mags = [mag for mag, _ in ac_samples]
+                I_avg = sum(ac_mags) / len(ac_mags)
                 
-                G = Id_amps / v_ac
-                B = -abs(Iq_amps / v_ac)  # Inductive susceptance must be negative
+                # --- Method A: Noise-Calibrated Standard Deviation Method ---
+                var_total = calculate_variance(ac_mags)
+                var_ripple = max(0.0, var_total - var_noise)
+                I_ripple_stdev = math.sqrt(2.0 * var_ripple)
                 
-                R_ohms = self.motor_r
-                Cx = 1.0 / (2.0 * R_ohms)
-                r = 1.0 / (2.0 * R_ohms)
+                I_max_stdev = I_avg + I_ripple_stdev
+                I_min_stdev = max(1e-6, I_avg - I_ripple_stdev)
                 
-                dx = G - Cx
-                dy = B
-                d = math.sqrt(dx**2 + dy**2)
+                # --- Method B: Least-Squares Sine Fit (Targeted Lomb-Scargle) ---
+                omega_ripple = 4.0 * math.pi * f_inject
+                y_vals = [mag - I_avg for mag in ac_mags]
                 
-                # Geometric Admittance Extraction Safeguard: Radial projection clamping
-                if d > r:
-                    logging.warning("TMC4671 '%s' measured admittance point (G=%.6f, B=%.6f) lies outside "
-                                    "the nominal DC resistance circle (center=%.6f, radius=%.6f, distance=%.6f). "
-                                    "Applying defensive radial projection clamping.",
-                                    self.name, G, B, Cx, r, d)
-                    # Project (G, B) radially onto 99.5% of the boundary to preserve numerical sanity
-                    scale = 0.995 * r / d
-                    G = Cx + dx * scale
-                    B = dy * scale
-                    # Re-calculate dx, dy, and d with the projected values
-                    dx = G - Cx
-                    dy = B
-                    d = math.sqrt(dx**2 + dy**2)
+                S_cc = sum(math.cos(omega_ripple * t)**2 for _, t in ac_samples)
+                S_ss = sum(math.sin(omega_ripple * t)**2 for _, t in ac_samples)
+                S_cs = sum(math.cos(omega_ripple * t) * math.sin(omega_ripple * t) for _, t in ac_samples)
+                S_yc = sum(y * math.cos(omega_ripple * t) for y, (_, t) in zip(y_vals, ac_samples))
+                S_ys = sum(y * math.sin(omega_ripple * t) for y, (_, t) in zip(y_vals, ac_samples))
                 
-                h_squared = max(0.0, r**2 - d**2)
-                h = math.sqrt(h_squared)
-                
-                if d < 1e-6:
-                    vx, vy = 0.0, -1.0
+                det = S_cc * S_ss - S_cs**2
+                if det > 1e-12:
+                    A_fit = (S_yc * S_ss - S_ys * S_cs) / det
+                    B_fit = (S_ys * S_cc - S_yc * S_cs) / det
                 else:
-                    vx = -dy / d
-                    vy = dx / d
-                    
-                # Locate distinct admittances on circle (guarantee B1, B2 <= -1e-6 to avoid capacitive artifacts)
-                G1 = G + (h * vx)
-                B1 = min(-1e-6, B + (h * vy))
-                G2 = G - (h * vx)
-                B2 = min(-1e-6, B - (h * vy))
+                    A_fit, B_fit = 0.0, 0.0
+                I_ripple_fit = math.sqrt(A_fit**2 + B_fit**2)
                 
-                omega = 2.0 * math.pi * f_inject
-                L1 = -B1 / (omega * (G1**2 + B1**2))
-                L2 = -B2 / (omega * (G2**2 + B2**2))
+                I_max_fit = I_avg + I_ripple_fit
+                I_min_fit = max(1e-6, I_avg - I_ripple_fit)
                 
-                Lq = max(L1, L2)
-                Ld = min(L1, L2)
+                # --- Inductance & Saliency Calculation ---
+                omega_inject = 2.0 * math.pi * f_inject
+                V_ac_eff = I_avg * math.sqrt(self.motor_r**2 + (omega_inject * self.motor_l)**2)
+                
+                # Method A Results
+                Ld_stdev = math.sqrt(max(0.0, (V_ac_eff / I_max_stdev)**2 - self.motor_r**2)) / omega_inject
+                Lq_stdev = math.sqrt(max(0.0, (V_ac_eff / I_min_stdev)**2 - self.motor_r**2)) / omega_inject
+                sal_stdev = Lq_stdev / Ld_stdev if Ld_stdev > 1e-9 else 1.0
+                
+                # Method B Results
+                Ld_fit = math.sqrt(max(0.0, (V_ac_eff / I_max_fit)**2 - self.motor_r**2)) / omega_inject
+                Lq_fit = math.sqrt(max(0.0, (V_ac_eff / I_min_fit)**2 - self.motor_r**2)) / omega_inject
+                sal_fit = Lq_fit / Ld_fit if Ld_fit > 1e-9 else 1.0
                 
                 # Report Results
-                gcmd.respond_info(
-                    f"TMC4671 '{self.name}' Impedance Measurement Results:\n"
-                    f"  R (measured): {R_ohms:.4f} Ohm\n"
-                    f"  V_ac (applied): {v_ac:.4f} V (ac_U={ac_U}, V_applied={v_applied:.4f}V, V_dead={self.dead_time_v:.4f}V)\n"
-                    f"  Averaged Currents: Id={Id_amps:.4f} A, Iq={Iq_amps:.4f} A\n"
-                    f"  Admittance Midpoint: G={G:.6f} S, B={B:.6f} S\n"
-                    f"  Extracted Ld: {Ld * 1000.0:.3f} mH\n"
-                    f"  Extracted Lq: {Lq * 1000.0:.3f} mH\n"
-                    f"  Saliency Ratio (Lq/Ld): {Lq/Ld:.3f}"
-                )
+                lines = [
+                    f"TMC4671 '{self.name}' Robust Saliency Measurement Results:",
+                    f"  R (measured): {self.motor_r:.4f} Ohm",
+                    f"  L_avg (baseline): {self.motor_l * 1000.0:.3f} mH",
+                    f"  V_ac (nominal applied): {v_ac:.4f} V (ac_U={ac_U}, V_applied={v_applied:.4f}V, V_dead={self.dead_time_v:.4f}V)",
+                    f"  V_ac_effective (calibrated): {V_ac_eff:.4f} V",
+                    f"  DC Bias Current: {I_dc_avg:.4f} A",
+                    f"  DC Background Noise (stdev): {math.sqrt(var_noise):.4f} A",
+                    f"  AC Average Current: {I_avg:.4f} A",
+                    "",
+                    "  [Method A] Noise-Calibrated Standard Deviation (Recommended):",
+                    f"    I_ripple: {I_ripple_stdev * 1000.0:.2f} mA",
+                    f"    Extracted Ld: {Ld_stdev * 1000.0:.3f} mH",
+                    f"    Extracted Lq: {Lq_stdev * 1000.0:.3f} mH",
+                    f"    Saliency Ratio (Lq/Ld): {sal_stdev:.3f}",
+                    "",
+                    "  [Method B] Least-Squares Sine Fit (Targeted Lomb-Scargle):",
+                    f"    I_ripple: {I_ripple_fit * 1000.0:.2f} mA",
+                    f"    Extracted Ld: {Ld_fit * 1000.0:.3f} mH",
+                    f"    Extracted Lq: {Lq_fit * 1000.0:.3f} mH",
+                    f"    Saliency Ratio (Lq/Ld): {sal_fit:.3f}"
+                ]
+                gcmd.respond_info("\n".join(lines))
                 
             finally:
-                # 8. Restore initial state
+                # 9. Restore initial state
                 self._write_field("UD_EXT", 0)
                 self._write_field("UQ_EXT", 0)
                 self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
