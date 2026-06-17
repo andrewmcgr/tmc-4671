@@ -687,7 +687,7 @@ class TMC4671:
         self.vm_offset = 32768
         self.vm_range = round(32767/2.5)
         # Correct for the OpenFFBoard
-        self.voltage_scale = config.getfloat('voltage_scale_ratio', 10.91,
+        self.voltage_scale = config.getfloat('voltage_scale_ratio', 40.875,
                                        above=0.)
         self.motor_r = 0.0
         self.motor_l = 0.0
