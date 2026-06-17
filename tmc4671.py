@@ -622,9 +622,16 @@ class MCU_TMC_SPI:
                 else:
                     raise self.printer.command_error(
                         "Unable to write tmc spi '%s' address register %s (last read %x)" % (self.name, reg_name, v))
+            
+            # Certain registers contain highly dynamic fields (e.g., OPENLOOP_PHI in 0x23, or
+            # OPENLOOP_VELOCITY_ACTUAL in 0x22) that are constantly updated by the internal DDS
+            # and change on every PWM clock cycle. Bypassing verification for these is mandatory
+            # to prevent spurious write-verification failures during startup/operation.
+            bypass_verify = reg_name in ["OPENLOOP_VELOCITY_ACTUAL", "OPENLOOP_PHI"]
+            
             for retry in range(5):
                 v = self.tmc_spi.reg_write(reg, val, print_time)
-                if v == val:
+                if bypass_verify or v == val:
                     return
         raise self.printer.command_error(
             "Unable to write tmc spi '%s' address register %s (last read %x)" % (self.name, reg_name, v))
@@ -2086,7 +2093,6 @@ class TMC4671:
             self._write_field("PWM_CHOP", 7)
             self._write_field("PHI_E_SELECTION", 2)  # Open Loop Mode
             self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
-            self._write_field("OPENLOOP_VELOCITY_ACTUAL", 0)
             self._write_field("UQ_EXT", 0)
             
             # Convert f_inject to DDS format (angle step per cycle)
@@ -2102,8 +2108,18 @@ class TMC4671:
             # 5. Stochastic Polling Loop
             sum_id = 0.0
             sum_iq = 0.0
+            convert_adc = self.current_helper.convert_adc_current
             for _ in range(n_samples):
-                iq, id = self.current_helper.get_qd_current()
+                reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
+                flux_raw = reg_val & 0xffff
+                if flux_raw >= 32768:
+                    flux_raw -= 65536
+                torque_raw = (reg_val >> 16) & 0xffff
+                if torque_raw >= 32768:
+                    torque_raw -= 65536
+                
+                id = convert_adc(flux_raw)
+                iq = convert_adc(torque_raw)
                 sum_id += id
                 sum_iq += iq
                 dwell(0.001)  # Natural USB + OS scheduling jitter provides stochastic sampling
