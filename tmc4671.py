@@ -9,6 +9,7 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import logging, collections
 import math
+import time
 from time import monotonic_ns
 from enum import IntEnum
 from statistics import median_low, mean, fmean
@@ -1245,15 +1246,18 @@ class TMC4671:
         dwell(0.75)  # 750 ms mechanical settling delay
 
         # --- Measure True DC Current Magnitude AND Raw Averages ---
+        dc_raw_qd_pairs = []
+        for i in range(10):
+            dc_raw_qd_pairs.append(self.current_helper.get_qd_current())
+            dwell(0.001)
+
         dc_mag_samples = []
         id_dc_raw_samples = []
         iq_dc_raw_samples = []
-        for i in range(10):
-            iq, id = self.current_helper.get_qd_current()
+        for iq, id in dc_raw_qd_pairs:
             dc_mag_samples.append(math.sqrt(id**2 + iq**2))
             id_dc_raw_samples.append(id)
             iq_dc_raw_samples.append(iq)
-            dwell(0.001)
 
         I_DC_MAG = mean(dc_mag_samples)
         I_DC_RAW_D = mean(id_dc_raw_samples)
@@ -1273,15 +1277,18 @@ class TMC4671:
 
         # Step 3: Read Currents
         # --- Measure True AC Current Magnitude AND Raw Averages ---
+        ac_raw_qd_pairs = []
+        for i in range(100):
+            ac_raw_qd_pairs.append(self.current_helper.get_qd_current())
+            dwell(0.001)
+
         ac_mag_samples = []
         id_ac_raw_samples = []
         iq_ac_raw_samples = []
-        for i in range(100):
-            iq, id = self.current_helper.get_qd_current()
+        for iq, id in ac_raw_qd_pairs:
             ac_mag_samples.append(math.sqrt(id**2 + iq**2))
             id_ac_raw_samples.append(id)
             iq_ac_raw_samples.append(iq)
-            dwell(0.001)
 
         I_AC_MAG = mean(ac_mag_samples)
         I_AC_RAW_D = mean(id_ac_raw_samples)
@@ -2103,11 +2110,16 @@ class TMC4671:
         # Allow mechanical/electrical settling for DC alignment
         dwell(0.5)
         
-        # Sample the baseline DC/Noise currents to measure background variance
+        # Phase 1: Pure register acquisition pass (minimized latency inside loop)
+        reg_vals = []
+        for _ in range(n_dc_samples):
+            reg_vals.append(self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL"))
+            dwell(0.001)
+
+        # Phase 2: Post-processing DSP mathematical calculation pass
         dc_mags = []
         convert_adc = self.current_helper.convert_adc_current
-        for _ in range(n_dc_samples):
-            reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
+        for reg_val in reg_vals:
             flux_raw = reg_val & 0xffff
             if flux_raw >= 32768:
                 flux_raw -= 65536
@@ -2118,14 +2130,12 @@ class TMC4671:
             id = convert_adc(flux_raw)
             iq = convert_adc(torque_raw)
             dc_mags.append(math.sqrt(id**2 + iq**2))
-            dwell(0.001)
             
         I_dc_avg = sum(dc_mags) / len(dc_mags) if dc_mags else 0.0
         var_noise = calculate_variance(dc_mags)
         return I_dc_avg, var_noise
 
     def _acquire_impedance_ac_samples(self, f_inject, n_samples, ac_U, dwell):
-        import time
         # Configure and Start High-Frequency AC Injection
         dds_value = int(f_inject * (2**32) / self.pwmfreq)
         self._write_field("OPENLOOP_ACCELERATION", dds_value)
@@ -2134,15 +2144,20 @@ class TMC4671:
         # Allow electrical settling for the rotating field
         dwell(0.5)
         
-        # Stochastic AC/Saliency Polling Loop with precise timestamping
-        ac_samples = []
-        convert_adc = self.current_helper.convert_adc_current
+        # Phase 1: Stochastic real-time physical acquisition pass
+        raw_samples = []
         t_start = time.time()
         for _ in range(n_samples):
             t0 = time.time()
             reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
             t1 = time.time()
+            raw_samples.append((reg_val, t0, t1))
+            dwell(0.001)  # Jitter allows equivalent time sampling
             
+        # Phase 2: Post-processing DSP mathematical calculation pass
+        ac_samples = []
+        convert_adc = self.current_helper.convert_adc_current
+        for reg_val, t0, t1 in raw_samples:
             flux_raw = reg_val & 0xffff
             if flux_raw >= 32768:
                 flux_raw -= 65536
@@ -2156,7 +2171,6 @@ class TMC4671:
             mag = math.sqrt(id**2 + iq**2)
             t_mid = (t0 + t1) / 2.0 - t_start
             ac_samples.append((mag, t_mid))
-            dwell(0.001)  # Jitter allows equivalent time sampling
             
         return ac_samples
 
