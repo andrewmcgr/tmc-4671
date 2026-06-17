@@ -2073,11 +2073,143 @@ class TMC4671:
 
         gcmd.respond_info("\n".join(lines))
 
+    def _calculate_ac_injection_voltage(self, target_current=None):
+        if target_current is None:
+            target_current = self.current_helper.run_current * 0.25
+        V_req = (target_current * self.motor_r * 2.0) + 1.2
+        vm = self._read_vm()
+        if self._read_field("MOTOR_TYPE") == 3:
+            v_max_phase = vm / math.sqrt(3.0)
+        else:
+            v_max_phase = vm
+        
+        if V_req > v_max_phase:
+            ac_U = 32767
+        else:
+            ac_U = int(32767.0 * (V_req / v_max_phase))
+        ac_U = max(ac_U, 500)
+        v_applied = ac_U * v_max_phase / 32767.0
+        v_ac = max(0.01, v_applied - self.dead_time_v)
+        return ac_U, v_applied, v_ac
+
+    def _measure_impedance_dc_baseline(self, dwell, n_dc_samples=100):
+        # Helper function for variance
+        def calculate_variance(data):
+            if len(data) < 2:
+                return 0.0
+            mu = sum(data) / len(data)
+            return sum((x - mu) ** 2 for x in data) / (len(data) - 1)
+
+        # Allow mechanical/electrical settling for DC alignment
+        dwell(0.5)
+        
+        # Sample the baseline DC/Noise currents to measure background variance
+        dc_mags = []
+        convert_adc = self.current_helper.convert_adc_current
+        for _ in range(n_dc_samples):
+            reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
+            flux_raw = reg_val & 0xffff
+            if flux_raw >= 32768:
+                flux_raw -= 65536
+            torque_raw = (reg_val >> 16) & 0xffff
+            if torque_raw >= 32768:
+                torque_raw -= 65536
+            
+            id = convert_adc(flux_raw)
+            iq = convert_adc(torque_raw)
+            dc_mags.append(math.sqrt(id**2 + iq**2))
+            dwell(0.001)
+            
+        I_dc_avg = sum(dc_mags) / len(dc_mags) if dc_mags else 0.0
+        var_noise = calculate_variance(dc_mags)
+        return I_dc_avg, var_noise
+
+    def _acquire_impedance_ac_samples(self, f_inject, n_samples, ac_U, dwell):
+        import time
+        # Configure and Start High-Frequency AC Injection
+        dds_value = int(f_inject * (2**32) / self.pwmfreq)
+        self._write_field("OPENLOOP_ACCELERATION", dds_value)
+        self._write_field("OPENLOOP_VELOCITY_TARGET", dds_value)
+        
+        # Allow electrical settling for the rotating field
+        dwell(0.5)
+        
+        # Stochastic AC/Saliency Polling Loop with precise timestamping
+        ac_samples = []
+        convert_adc = self.current_helper.convert_adc_current
+        t_start = time.time()
+        for _ in range(n_samples):
+            t0 = time.time()
+            reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
+            t1 = time.time()
+            
+            flux_raw = reg_val & 0xffff
+            if flux_raw >= 32768:
+                flux_raw -= 65536
+            torque_raw = (reg_val >> 16) & 0xffff
+            if torque_raw >= 32768:
+                torque_raw -= 65536
+            
+            id = convert_adc(flux_raw)
+            iq = convert_adc(torque_raw)
+            
+            mag = math.sqrt(id**2 + iq**2)
+            t_mid = (t0 + t1) / 2.0 - t_start
+            ac_samples.append((mag, t_mid))
+            dwell(0.001)  # Jitter allows equivalent time sampling
+            
+        return ac_samples
+
+    def _calculate_axis_inductances(self, I_avg, I_ripple, V_ac_eff, omega_inject, motor_r):
+        I_max = I_avg + I_ripple
+        I_min = max(1e-6, I_avg - I_ripple)
+        Ld = math.sqrt(max(0.0, (V_ac_eff / I_max)**2 - motor_r**2)) / omega_inject
+        Lq = math.sqrt(max(0.0, (V_ac_eff / I_min)**2 - motor_r**2)) / omega_inject
+        saliency = Lq / Ld if Ld > 1e-9 else 1.0
+        return Ld, Lq, saliency
+
+    def _calculate_impedance_method_a(self, ac_mags, var_noise, I_avg, V_ac_eff, omega_inject, motor_r):
+        def calculate_variance(data):
+            if len(data) < 2:
+                return 0.0
+            mu = sum(data) / len(data)
+            return sum((x - mu) ** 2 for x in data) / (len(data) - 1)
+        
+        var_total = calculate_variance(ac_mags)
+        var_ripple = max(0.0, var_total - var_noise)
+        I_ripple_stdev = math.sqrt(2.0 * var_ripple)
+        Ld, Lq, saliency = self._calculate_axis_inductances(
+            I_avg, I_ripple_stdev, V_ac_eff, omega_inject, motor_r
+        )
+        return I_ripple_stdev, Ld, Lq, saliency
+
+    def _calculate_impedance_method_b(self, ac_samples, I_avg, f_inject, V_ac_eff, omega_inject, motor_r):
+        ac_mags = [mag for mag, _ in ac_samples]
+        y_vals = [mag - I_avg for mag in ac_mags]
+        omega_ripple = 4.0 * math.pi * f_inject
+        
+        S_cc = sum(math.cos(omega_ripple * t)**2 for _, t in ac_samples)
+        S_ss = sum(math.sin(omega_ripple * t)**2 for _, t in ac_samples)
+        S_cs = sum(math.cos(omega_ripple * t) * math.sin(omega_ripple * t) for _, t in ac_samples)
+        S_yc = sum(y * math.cos(omega_ripple * t) for y, (_, t) in zip(y_vals, ac_samples))
+        S_ys = sum(y * math.sin(omega_ripple * t) for y, (_, t) in zip(y_vals, ac_samples))
+        
+        det = S_cc * S_ss - S_cs**2
+        if det > 1e-12:
+            A_fit = (S_yc * S_ss - S_ys * S_cs) / det
+            B_fit = (S_ys * S_cc - S_yc * S_cs) / det
+        else:
+            A_fit, B_fit = 0.0, 0.0
+        I_ripple_fit = math.sqrt(A_fit**2 + B_fit**2)
+        Ld, Lq, saliency = self._calculate_axis_inductances(
+            I_avg, I_ripple_fit, V_ac_eff, omega_inject, motor_r
+        )
+        return I_ripple_fit, Ld, Lq, saliency
+
     cmd_TMC_MEASURE_IMPEDANCE_help = (
         "Measure motor d/q axis inductances (Ld, Lq) and saliency ratio"
     )
     def cmd_TMC_MEASURE_IMPEDANCE(self, gcmd):
-        import time
         f_inject = gcmd.get_float('F_INJECT', 2317.0, minval=1.0)
         n_samples = gcmd.get_int('N_SAMPLES', 500, minval=10)
         
@@ -2090,13 +2222,6 @@ class TMC4671:
         toolhead = self.printer.lookup_object('toolhead')
         enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
         
-        # Helper function for variance
-        def calculate_variance(data):
-            if len(data) < 2:
-                return 0.0
-            mu = sum(data) / len(data)
-            return sum((x - mu) ** 2 for x in data) / (len(data) - 1)
-            
         with self.mutex:
             print_time = toolhead.get_last_move_time()
             dwell = toolhead.dwell
@@ -2116,23 +2241,7 @@ class TMC4671:
                 
             try:
                 # 3. Calculate safe AC Voltage Amplitude (V_ac)
-                # Target about 25% of run_current to prevent heating/vibration
-                I_target_A = self.current_helper.run_current * 0.25
-                V_req = (I_target_A * self.motor_r * 2.0) + 1.2
-                vm = self._read_vm()
-                if self._read_field("MOTOR_TYPE") == 3:
-                    v_max_phase = vm / math.sqrt(3.0)
-                else:
-                    v_max_phase = vm
-                
-                if V_req > v_max_phase:
-                    ac_U = 32767
-                else:
-                    ac_U = int(32767.0 * (V_req / v_max_phase))
-                ac_U = max(ac_U, 500)
-                v_applied = ac_U * v_max_phase / 32767.0
-                # Compensate for measured inverter dead-time voltage drop
-                v_ac = max(0.01, v_applied - self.dead_time_v)
+                ac_U, v_applied, v_ac = self._calculate_ac_injection_voltage()
                 
                 # 4. Configure TMC4671 for DC Static Bias (Rotor Alignment & Noise Calibration)
                 self._write_field("PWM_CHOP", 7)
@@ -2143,60 +2252,13 @@ class TMC4671:
                 self._write_field("UD_EXT", ac_U)
                 self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
                 
-                # Allow mechanical/electrical settling for DC alignment
-                dwell(0.5)
-                
-                # Sample the baseline DC/Noise currents to measure background variance (switching, ADC noise, EMI)
-                dc_mags = []
-                convert_adc = self.current_helper.convert_adc_current
-                for _ in range(100):
-                    reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
-                    flux_raw = reg_val & 0xffff
-                    if flux_raw >= 32768:
-                        flux_raw -= 65536
-                    torque_raw = (reg_val >> 16) & 0xffff
-                    if torque_raw >= 32768:
-                        torque_raw -= 65536
-                    
-                    id = convert_adc(flux_raw)
-                    iq = convert_adc(torque_raw)
-                    dc_mags.append(math.sqrt(id**2 + iq**2))
-                    dwell(0.001)
-                    
-                I_dc_avg = sum(dc_mags) / len(dc_mags)
-                var_noise = calculate_variance(dc_mags)
+                # Sample baseline DC/Noise currents
+                I_dc_avg, var_noise = self._measure_impedance_dc_baseline(dwell, 100)
                 
                 # 5. Configure and Start High-Frequency AC Injection
-                dds_value = int(f_inject * (2**32) / self.pwmfreq)
-                self._write_field("OPENLOOP_ACCELERATION", dds_value)
-                self._write_field("OPENLOOP_VELOCITY_TARGET", dds_value)
+                # 6. Stochastic AC/Saliency Polling Loop
+                ac_samples = self._acquire_impedance_ac_samples(f_inject, n_samples, ac_U, dwell)
                 
-                # Allow electrical settling for the rotating field
-                dwell(0.5)
-                
-                # 6. Stochastic AC/Saliency Polling Loop with precise timestamping
-                ac_samples = []
-                t_start = time.time()
-                for _ in range(n_samples):
-                    t0 = time.time()
-                    reg_val = self.mcu_tmc.get_register("PID_TORQUE_FLUX_ACTUAL")
-                    t1 = time.time()
-                    
-                    flux_raw = reg_val & 0xffff
-                    if flux_raw >= 32768:
-                        flux_raw -= 65536
-                    torque_raw = (reg_val >> 16) & 0xffff
-                    if torque_raw >= 32768:
-                        torque_raw -= 65536
-                    
-                    id = convert_adc(flux_raw)
-                    iq = convert_adc(torque_raw)
-                    
-                    mag = math.sqrt(id**2 + iq**2)
-                    t_mid = (t0 + t1) / 2.0 - t_start
-                    ac_samples.append((mag, t_mid))
-                    dwell(0.001)  # Jitter allows equivalent time sampling
-                    
                 # 7. Disable injection immediately
                 self._write_field("UD_EXT", 0)
                 self._write_field("MODE_MOTION", MotionMode.stopped_mode)
@@ -2206,49 +2268,18 @@ class TMC4671:
                 # =================================================================
                 ac_mags = [mag for mag, _ in ac_samples]
                 I_avg = sum(ac_mags) / len(ac_mags)
-                
-                # --- Method A: Noise-Calibrated Standard Deviation Method ---
-                var_total = calculate_variance(ac_mags)
-                var_ripple = max(0.0, var_total - var_noise)
-                I_ripple_stdev = math.sqrt(2.0 * var_ripple)
-                
-                I_max_stdev = I_avg + I_ripple_stdev
-                I_min_stdev = max(1e-6, I_avg - I_ripple_stdev)
-                
-                # --- Method B: Least-Squares Sine Fit (Targeted Lomb-Scargle) ---
-                omega_ripple = 4.0 * math.pi * f_inject
-                y_vals = [mag - I_avg for mag in ac_mags]
-                
-                S_cc = sum(math.cos(omega_ripple * t)**2 for _, t in ac_samples)
-                S_ss = sum(math.sin(omega_ripple * t)**2 for _, t in ac_samples)
-                S_cs = sum(math.cos(omega_ripple * t) * math.sin(omega_ripple * t) for _, t in ac_samples)
-                S_yc = sum(y * math.cos(omega_ripple * t) for y, (_, t) in zip(y_vals, ac_samples))
-                S_ys = sum(y * math.sin(omega_ripple * t) for y, (_, t) in zip(y_vals, ac_samples))
-                
-                det = S_cc * S_ss - S_cs**2
-                if det > 1e-12:
-                    A_fit = (S_yc * S_ss - S_ys * S_cs) / det
-                    B_fit = (S_ys * S_cc - S_yc * S_cs) / det
-                else:
-                    A_fit, B_fit = 0.0, 0.0
-                I_ripple_fit = math.sqrt(A_fit**2 + B_fit**2)
-                
-                I_max_fit = I_avg + I_ripple_fit
-                I_min_fit = max(1e-6, I_avg - I_ripple_fit)
-                
-                # --- Inductance & Saliency Calculation ---
                 omega_inject = 2.0 * math.pi * f_inject
                 V_ac_eff = I_avg * math.sqrt(self.motor_r**2 + (omega_inject * self.motor_l)**2)
                 
-                # Method A Results
-                Ld_stdev = math.sqrt(max(0.0, (V_ac_eff / I_max_stdev)**2 - self.motor_r**2)) / omega_inject
-                Lq_stdev = math.sqrt(max(0.0, (V_ac_eff / I_min_stdev)**2 - self.motor_r**2)) / omega_inject
-                sal_stdev = Lq_stdev / Ld_stdev if Ld_stdev > 1e-9 else 1.0
+                # --- Method A ---
+                I_ripple_stdev, Ld_stdev, Lq_stdev, sal_stdev = self._calculate_impedance_method_a(
+                    ac_mags, var_noise, I_avg, V_ac_eff, omega_inject, self.motor_r
+                )
                 
-                # Method B Results
-                Ld_fit = math.sqrt(max(0.0, (V_ac_eff / I_max_fit)**2 - self.motor_r**2)) / omega_inject
-                Lq_fit = math.sqrt(max(0.0, (V_ac_eff / I_min_fit)**2 - self.motor_r**2)) / omega_inject
-                sal_fit = Lq_fit / Ld_fit if Ld_fit > 1e-9 else 1.0
+                # --- Method B ---
+                I_ripple_fit, Ld_fit, Lq_fit, sal_fit = self._calculate_impedance_method_b(
+                    ac_samples, I_avg, f_inject, V_ac_eff, omega_inject, self.motor_r
+                )
                 
                 # Report Results
                 lines = [
