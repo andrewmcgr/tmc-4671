@@ -293,13 +293,13 @@ Fields["ADC_I1_RAW_ADC_I0_RAW"] = {
     "ADC_I0_RAW": 0xffff, "ADC_I1_RAW": 0xffff << 16
 }
 Fields["ADC_AGPI_A_RAW_ADC_VM_RAW"] = {
-    "ADC_AGPI_A_RAW": 0xffff, "ADC_VM_RAW": 0xffff << 16
+    "ADC_VM_RAW": 0xffff, "ADC_AGPI_A_RAW": 0xffff << 16
 }
 Fields["ADC_AENC_UX_RAW_ADC_AGPI_B_RAW"] = {
-    "ADC_AENC_UX_RAW": 0xffff, "ADC_AGPI_B_RAW": 0xffff << 16
+    "ADC_AGPI_B_RAW": 0xffff, "ADC_AENC_UX_RAW": 0xffff << 16
 }
 Fields["ADC_AENC_WY_RAW_ADC_AENC_VN_RAW"] = {
-    "ADC_AENC_WY_RAW": 0xffff, "ADC_AENC_VN_RAW": 0xffff << 16
+    "ADC_AENC_VN_RAW": 0xffff, "ADC_AENC_WY_RAW": 0xffff << 16
 }
 
 Fields["DSADC_MCFG_B_MCFG_A"] = {
