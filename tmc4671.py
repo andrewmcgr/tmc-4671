@@ -709,8 +709,8 @@ class TMC4671:
         self.stepper_enable = self.printer.load_object(config, "stepper_enable")
         self.printer.register_event_handler("klippy:mcu_identify",
                                             self._handle_mcu_identify)
-        self.printer.register_event_handler("klippy:connect",
-                                            self._handle_connect)
+        self.printer.register_event_handler("klippy:disconnect",
+                                            self._handle_disconnect)
         # Register commands
         self.step_helper = StepHelper(config, self.mcu_tmc)
         self.current_helper = CurrentHelper(config, self.mcu_tmc)
@@ -971,6 +971,14 @@ class TMC4671:
             logging.info("TMC %s failed to init: %s", self.name, str(e))
         enable_line.register_state_callback(self._handle_stepper_enable)
 
+    def _handle_disconnect(self):
+        if self.fields6100 is not None:
+            try:
+                self.mcu_tmc6100.set_register(
+                    "GCONF", self.fields6100.set_field("disable", 1), None)
+            except Exception:
+                pass
+
     def _handle_ready(self, print_time=None):
         # klippy:ready handlers are limited in what they may do. Communicating with a MCU
         # will pause the reactor and is thus forbidden. That code has to run outside of the event handler.
@@ -986,7 +994,6 @@ class TMC4671:
             self._write_field("PID_FLUX_TARGET", 0)
             self._write_field("PID_TORQUE_TARGET", 0)
             self._write_field("PID_VELOCITY_TARGET", 0)
-            self._write_field("ABN_DECODER_COUNT", 0)
             self._write_field("PID_POSITION_TARGET", 0)
             # Now enable 6100
             if self.fields6100 is not None:
@@ -995,15 +1002,19 @@ class TMC4671:
                                               print_time)
             enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
             enable_line.motor_enable(print_time)
-            # Calibrate current ADC first before any motor activation
-            self._calibrate_adc(print_time)
-            # Just align and measure, which sets up the encoder offsets
-            self._align_and_measure(True, print_time)
-            self._write_field("ABN_DECODER_COUNT", 0)
-            self._write_field("PID_POSITION_TARGET", 0)
+            try:
+                # Calibrate current ADC first before any motor activation
+                self._calibrate_adc(print_time)
+                # Just align and measure, which sets up the encoder offsets
+                self._align_and_measure(True, print_time)
+                self._write_field("ABN_DECODER_COUNT", 0)
+                self._write_field("PID_POSITION_TARGET", 0)
+                self.alignment_done = True
+            except self.printer.command_error as e:
+                logging.error("TMC %s: startup calibration failed: %s",
+                              self.name, str(e))
             print_time = self.printer.lookup_object('toolhead').get_last_move_time()
             enable_line.motor_disable(print_time)
-            self.alignment_done = True
             self._write_field("STATUS_MASK", 0)
             self._write_field("PID_FLUX_TARGET", 0)
             self._write_field("PID_TORQUE_TARGET", 0)
