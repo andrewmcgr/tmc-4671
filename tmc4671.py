@@ -685,9 +685,9 @@ class TMC4671:
             self.mcu_tmc6100 = None
         # These will be calibrated later, but this is roughly correct
         self.vm_offset = 32768
-        self.vm_range = round(32767/1.25)
+        self.vm_range = round(32767/2.5)
         # Correct for the OpenFFBoard
-        self.voltage_scale = config.getfloat('voltage_scale_ratio', 21.82,
+        self.voltage_scale = config.getfloat('voltage_scale_ratio', 10.91,
                                        above=0.)
         self.motor_r = 0.0
         self.motor_l = 0.0
@@ -1182,8 +1182,10 @@ class TMC4671:
         self._write_field("MODE_MOTION", MotionMode.stopped_mode)
         self._write_field("PHI_E_EXT", 0) # and, set this to be PHI_E = 0
         self._write_field("PHI_E_SELECTION", 1) # external mode, so it won't change.
-        # Start at some low voltage and see if we can read a current
-        test_U = round(self.vm_range / self.voltage_scale) # Should be about 1V
+        # Start at some low voltage and see if we can read a current.
+        # Read VM once; physical motor voltage = (UD_EXT / 32767) * vm.
+        vm = self._read_vm()
+        test_U = round(32767.0 / vm)
         self._write_field("UQ_EXT", 0)
         self._write_field("UD_EXT", test_U)
         self._reset_targets()
@@ -1212,8 +1214,8 @@ class TMC4671:
         I2 = max(abs(iux_second), abs(iwy_second))
 
         # Two-point differential measurement to exclude inverter dead-time
-        V1 = test_U * self.voltage_scale / self.vm_range
-        V2 = test2_U * self.voltage_scale / self.vm_range
+        V1 = (test_U  / 32767.0) * vm
+        V2 = (test2_U / 32767.0) * vm
 
         delta_V = V2 - V1
         delta_I = I2 - I1
