@@ -2077,6 +2077,7 @@ class TMC4671:
         "Measure motor d/q axis inductances (Ld, Lq) and saliency ratio"
     )
     def cmd_TMC_MEASURE_IMPEDANCE(self, gcmd):
+        import time
         f_inject = gcmd.get_float('F_INJECT', 2317.0, minval=1.0)
         n_samples = gcmd.get_int('N_SAMPLES', 500, minval=10)
         
