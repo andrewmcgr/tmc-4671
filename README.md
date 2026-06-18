@@ -184,7 +184,7 @@ Without `CURRENT`, reports the currently active limit. With `CURRENT`, updates t
 
 ### TMC_TUNE_PID
 
-Autotune flux and torque current-loop PID coefficients separately and queue the results for `SAVE_CONFIG`. With the bandwidth method (default), the flux and torque biquad filters are automatically configured as LPF at the respective tuned bandwidth.
+Autotune flux and torque current-loop PID coefficients separately and queue the results for `SAVE_CONFIG`. With the bandwidth method (default), the flux and torque biquad filters are automatically configured as LPF at the respective tuned bandwidth and their settings are also staged for `SAVE_CONFIG`.
 
 ```
 TMC_TUNE_PID STEPPER=stepper_x [FLUX_BANDWIDTH=<hz>] [TORQUE_BANDWIDTH=<hz>] [CURRENT_BANDWIDTH=<hz>] [SIMC=<0|1>] [CHECK=<0|1>] [DERATE=<factor>]

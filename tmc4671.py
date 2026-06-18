@@ -1840,6 +1840,15 @@ class TMC4671:
             configfile.set(cfgname, 'foc_PID_FLUX_I', "%.3f" % (I_flux,))
             configfile.set(cfgname, 'foc_PID_TORQUE_P', "%.3f" % (P_torque,))
             configfile.set(cfgname, 'foc_PID_TORQUE_I', "%.3f" % (I_torque,))
+            if not simc_flag:
+                for target in ('flux', 'torque'):
+                    bf = self.biquad_filters[target]
+                    configfile.set(cfgname, 'biquad_%s_filter' % (target,),
+                                   bf.type)
+                    configfile.set(cfgname, 'biquad_%s_frequency' % (target,),
+                                   "%d" % (bf.freq,))
+                    configfile.set(cfgname, 'biquad_%s_slope' % (target,),
+                                   "%.6g" % (bf.slope,))
 
         biquad_msg = ""
         if not simc_flag:
