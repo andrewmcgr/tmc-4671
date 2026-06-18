@@ -1117,12 +1117,6 @@ class TMC4671:
                 slope=slope,
             )
 
-    def _read_field(self, field):
-        return getattr(self.fields, field).read()
-
-    def _write_field(self, field, val):
-        getattr(self.fields, field).write(val)
-
     def enable_biquad(self, enable_field, *biquad):
         reg, addr = self.mcu_tmc.name_to_reg[enable_field]
         for o,i in enumerate(biquad):
@@ -1199,11 +1193,11 @@ class TMC4671:
             if print_time is None:
                 print_time = self.printer.lookup_object('toolhead').get_last_move_time()
             # Set these before setting enable to avoid yeeting the toolhead
-            self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-            self._write_field("STATUS_MASK", 0)
+            self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+            self.fields.STATUS_MASK.write(0)
             self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
-            self._write_field("PID_VELOCITY_TARGET", 0)
-            self._write_field("PID_POSITION_TARGET", 0)
+            self.fields.PID_VELOCITY_TARGET.write(0)
+            self.fields.PID_POSITION_TARGET.write(0)
             # Now enable 6100
             if self.fields6100 is not None:
                 self.mcu_tmc6100.set_register("GCONF",
@@ -1216,53 +1210,53 @@ class TMC4671:
                 self._calibrate_adc(print_time)
                 # Just align and measure, which sets up the encoder offsets
                 self._align_and_measure(True, print_time)
-                self._write_field("ABN_DECODER_COUNT", 0)
-                self._write_field("PID_POSITION_TARGET", 0)
+                self.fields.ABN_DECODER_COUNT.write(0)
+                self.fields.PID_POSITION_TARGET.write(0)
                 self.alignment_done = True
             except self.printer.command_error as e:
                 logging.error("TMC %s: startup calibration failed: %s",
                               self.name, str(e))
             print_time = self.printer.lookup_object('toolhead').get_last_move_time()
             enable_line.motor_disable(print_time)
-            self._write_field("STATUS_MASK", 0)
+            self.fields.STATUS_MASK.write(0)
             self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
-            self._write_field("PID_VELOCITY_TARGET", 0)
-            self._write_field("ABN_DECODER_COUNT", 0)
-            self._write_field("PID_POSITION_TARGET", 0)
-            self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+            self.fields.PID_VELOCITY_TARGET.write(0)
+            self.fields.ABN_DECODER_COUNT.write(0)
+            self.fields.PID_POSITION_TARGET.write(0)
+            self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
             self.init_done = True
 
     def _calibrate_adc(self, print_time):
-        self._write_field("PWM_CHOP", 0)
-        self._write_field("CFG_ADC_I0", 0)
-        self._write_field("CFG_ADC_I1", 0)
+        self.fields.PWM_CHOP.write(0)
+        self.fields.CFG_ADC_I0.write(0)
+        self.fields.CFG_ADC_I1.write(0)
         i0_off, i1_off = self._sample_adc("ADC_I1_RAW_ADC_I0_RAW")
         # Following code would calibrate the scalers as well.
         # However, not doing that makes things simpler, and the
         # calibration result is always +- 1 from nominal.
-        #self._write_field("CFG_ADC_I0", 2)
-        #self._write_field("CFG_ADC_I1", 2)
+        #self.fields.CFG_ADC_I0.write(2)
+        #self.fields.CFG_ADC_I1.write(2)
         #i0_l, i1_l = self._sample_adc("ADC_I1_RAW_ADC_I0_RAW")
-        #self._write_field("CFG_ADC_I0", 3)
-        #self._write_field("CFG_ADC_I1", 3)
+        #self.fields.CFG_ADC_I0.write(3)
+        #self.fields.CFG_ADC_I1.write(3)
         #i0_h, i1_h = self._sample_adc("ADC_I1_RAW_ADC_I0_RAW")
-        #self._write_field("CFG_ADC_I0", 0)
-        #self._write_field("CFG_ADC_I1", 0)
-        #self._write_field("ADC_I1_SCALE", (256*(i1_h-i1_l))//32768)
-        #self._write_field("ADC_I0_SCALE", (256*(i0_h-i0_l))//32768)
-        self._write_field("ADC_I1_SCALE", 256)
-        self._write_field("ADC_I0_SCALE", 256)
-        self._write_field("ADC_I1_OFFSET", i1_off)
-        self._write_field("ADC_I0_OFFSET", i0_off)
+        #self.fields.CFG_ADC_I0.write(0)
+        #self.fields.CFG_ADC_I1.write(0)
+        #self.fields.ADC_I1_SCALE.write((256*(i1_h-i1_l))//32768)
+        #self.fields.ADC_I0_SCALE.write((256*(i0_h-i0_l))//32768)
+        self.fields.ADC_I1_SCALE.write(256)
+        self.fields.ADC_I0_SCALE.write(256)
+        self.fields.ADC_I1_OFFSET.write(i1_off)
+        self.fields.ADC_I0_OFFSET.write(i0_off)
         # Calibrate for VM measurement
         # Chip errata? This doesn't work.
-        #self._write_field("CFG_ADC_VM", 5)
+        #self.fields.CFG_ADC_VM.write(5)
         #vml, vmh = self._sample_vm()
         #self.vm_offset = round(mean((vml, vmh)))
-        #self._write_field("CFG_ADC_VM", 7)
+        #self.fields.CFG_ADC_VM.write(7)
         #vml, vmh = self._sample_vm()
         #self.vm_range = self.vm_offset - round(mean((vml, vmh)))
-        #self._write_field("CFG_ADC_VM", 4)
+        #self.fields.CFG_ADC_VM.write(4)
         logging.info("TMC 4671 %s ADC offsets I0=%d I1=%d", self.name, i0_off, i1_off)
         #logging.info("TMC 4671 %s ADC VM offset=%d range=%s VM=%g", self.name,
         #             self.vm_offset, self.vm_range, self._read_vm())
@@ -1272,16 +1266,16 @@ class TMC4671:
         logging.info("TMC 4671 %s VM samples low=%d high=%d", self.name, vml, vmh)
         high = math.ceil(0.05*self.voltage_scale) + vmr//2 + vmh
         if high < 65536:
-            self._write_field("ADC_VM_LIMIT_HIGH", high)
-            self._write_field("ADC_VM_LIMIT_LOW", vmr//2 + vmh)
+            self.fields.ADC_VM_LIMIT_HIGH.write(high)
+            self.fields.ADC_VM_LIMIT_LOW.write(vmr//2 + vmh)
             logging.info("TMC 4671 %s brake thresholds low=%d(%g V) high=%d(%g V)", self.name,
                          vmr//2+vmh, self._convert_vm(vmr//2+vmh),
                          high, self._convert_vm(high))
         else:
             # What else can we do but turn the brake off?
-            self._write_field("ADC_VM_LIMIT_HIGH", 0)
-            self._write_field("ADC_VM_LIMIT_LOW", 0)
-        self._write_field("PWM_CHOP", 7)
+            self.fields.ADC_VM_LIMIT_HIGH.write(0)
+            self.fields.ADC_VM_LIMIT_LOW.write(0)
+        self.fields.PWM_CHOP.write(7)
 
     def _sample_adc(self, reg_name):
         self.printer.lookup_object('toolhead').dwell(0.2)
@@ -1303,7 +1297,7 @@ class TMC4671:
         vm = []
         n = 100
         for i in range(n):
-            vm.append(self._read_field("ADC_VM_RAW"))
+            vm.append(self.fields.ADC_VM_RAW.read())
             self.printer.lookup_object('toolhead').dwell(0.0005)
         return min(vm), max(vm)
 
@@ -1311,13 +1305,13 @@ class TMC4671:
         return ((val - self.vm_offset) / float(self.vm_range)) * self.voltage_scale
 
     def _read_vm(self):
-        return self._convert_vm(self._read_field("ADC_VM_RAW"))
+        return self._convert_vm(self.fields.ADC_VM_RAW.read())
 
     def _reset_targets(self):
-        self._write_field("PID_TORQUE_TARGET", 0)
-        self._write_field("PID_VELOCITY_TARGET", 0)
-        self._write_field("PID_POSITION_TARGET", 0)
-        self._write_field("PID_POSITION_ACTUAL", 0)
+        self.fields.PID_TORQUE_TARGET.write(0)
+        self.fields.PID_VELOCITY_TARGET.write(0)
+        self.fields.PID_POSITION_TARGET.write(0)
+        self.fields.PID_POSITION_ACTUAL.write(0)
 
     def _average_currents(self, samples=20, interval=0.005):
         dwell = self.printer.lookup_object('toolhead').dwell
@@ -1363,7 +1357,7 @@ class TMC4671:
 
     def _tune_motion_pid(self, Kt, l_v, l_p):
         Kadc = self.current_helper.current_scale * 1e-3
-        NPP = self._read_field("N_POLE_PAIRS")
+        NPP = self.fields.N_POLE_PAIRS.read()
         t_d = 1.
 
         k_v = Kadc / (Kt * math.pi)
@@ -1381,28 +1375,28 @@ class TMC4671:
     # Align motor and measure resistance and inductance on startup
     def _align_and_measure(self, offsets, print_time):
         dwell = self.printer.lookup_object('toolhead').dwell
-        old_phi_e_selection = self._read_field("PHI_E_SELECTION")
+        old_phi_e_selection = self.fields.PHI_E_SELECTION.read()
 
         # Temporarily disable biquad filters during measurement to prevent attenuation of the 1 kHz signal
         for register in BIQUAD_FILTER_TARGETS.values():
             self.disable_biquad(register)
 
-        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-        self._write_field("PHI_E_EXT", 0) # and, set this to be PHI_E = 0
-        self._write_field("PHI_E_SELECTION", 1) # external mode, so it won't change.
+        self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+        self.fields.PHI_E_EXT.write(0) # and, set this to be PHI_E = 0
+        self.fields.PHI_E_SELECTION.write(1) # external mode, so it won't change.
         # Start at some low voltage and see if we can read a current.
         # Read VM once; physical motor voltage = (UD_EXT / 32767) * vm.
         vm = self._read_vm()
         test_U = round(32767.0 / vm)
         self.fields.UQ_UD_EXT.write(test_U, 0)
         self._reset_targets()
-        self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
+        self.fields.MODE_MOTION.write(MotionMode.uq_ud_ext_mode)
         # Turn on the chopper and wait a bit to measure the resistance
-        self._write_field("PWM_CHOP", 7)
+        self.fields.PWM_CHOP.write(7)
         dwell(0.3)
         # Average current readings to filter noise and ripple
         iux_first, iwy_first, c = self._average_currents(20, 0.005)
-        self._write_field("PWM_CHOP", 0)
+        self.fields.PWM_CHOP.write(0)
         logging.info("TMC 4671 '%s' initial averaged I: Ux=%0.4fA, Wy=%0.4fA", self.stepper_name, iux_first, iwy_first)
         I1 = max(abs(iux_first), abs(iwy_first))
         if I1 < 1e-6:
@@ -1412,8 +1406,8 @@ class TMC4671:
         test2_U = round((c / 2.0) * test_U / I1)
         logging.info("TMC 4671 '%s' test U %g %g", self.stepper_name, test_U, test2_U)
         # Switch back on, and this time motor should self-align
-        self._write_field("UD_EXT", test2_U)
-        self._write_field("PWM_CHOP", 7)
+        self.fields.UD_EXT.write(test2_U)
+        self.fields.PWM_CHOP.write(7)
         dwell(0.5)
         # Average current readings to filter mechanical ringing and noise
         iux_second, iwy_second, _ = self._average_currents(20, 0.005)
@@ -1443,17 +1437,17 @@ class TMC4671:
 
         # Inductance Measurement Procedure
         # Step 1: Magnetic Alignment (DC)
-        self._write_field("PWM_CHOP", 7) # Re-enable the gate driver (crucial to apply AC voltage)
-        self._write_field("PHI_E_SELECTION", 2)  # Open Loop
-        self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
-        self._write_field("OPENLOOP_VELOCITY_ACTUAL", 0)  # Reset residual velocity from prior run
-        self._write_field("UQ_EXT", 0)
+        self.fields.PWM_CHOP.write(7) # Re-enable the gate driver (crucial to apply AC voltage)
+        self.fields.PHI_E_SELECTION.write(2)  # Open Loop
+        self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
+        self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)  # Reset residual velocity from prior run
+        self.fields.UQ_EXT.write(0)
 
         # Automated AC Voltage Calculation
         I_target_A = 0.4
         V_req = (I_target_A * self.motor_r * 2.0) + 1.2
         vm = self._read_vm()
-        if self._read_field("MOTOR_TYPE") == 3:
+        if self.fields.MOTOR_TYPE.read() == 3:
             V_max_phase = vm / math.sqrt(3.0)
         else:
             V_max_phase = vm
@@ -1465,7 +1459,7 @@ class TMC4671:
         ac_U = max(ac_U, 500)
 
         # Apply the exact same voltage for both tests to calibrate out dead-time
-        self._write_field("UD_EXT", ac_U)
+        self.fields.UD_EXT.write(ac_U)
         dwell(0.75)  # 750 ms mechanical settling delay
 
         # --- Measure True DC Current Magnitude AND Raw Averages ---
@@ -1494,8 +1488,8 @@ class TMC4671:
         f_test = 1000
         dds_value = int(f_test * (2**32) / self.pwmfreq)
 
-        self._write_field("OPENLOOP_ACCELERATION", dds_value)  # We want snap acceleration for this test
-        self._write_field("OPENLOOP_VELOCITY_TARGET", dds_value)
+        self.fields.OPENLOOP_ACCELERATION.write(dds_value)  # We want snap acceleration for this test
+        self.fields.OPENLOOP_VELOCITY_TARGET.write(dds_value)
         dwell(1.0)  # 1.0 s electrical settling delay (increased from 200 ms to ensure stability)
 
         # Step 3: Read Currents
@@ -1528,15 +1522,15 @@ class TMC4671:
 
         # Step 4: Cleanup and Re-alignment
         self.fields.UQ_UD_EXT.write(0, 0)
-        self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
-        self._write_field("OPENLOOP_ACCELERATION", 0)
+        self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
+        self.fields.OPENLOOP_ACCELERATION.write(0)
 
         # CRITICAL: Since the motor was spun electrically, we MUST re-align and magnetically
         # lock the rotor back to the electrical zero position (PHI_E_EXT = 0) before continuing,
         # otherwise the subsequent encoder calibration will be misaligned, causing a runaway ("yeeting the toolhead").
-        self._write_field("PHI_E_SELECTION", 1)  # External angle mode
-        self._write_field("PHI_E_EXT", 0)
-        self._write_field("UD_EXT", test2_U)
+        self.fields.PHI_E_SELECTION.write(1)  # External angle mode
+        self.fields.PHI_E_EXT.write(0)
+        self.fields.UD_EXT.write(test2_U)
         dwell(0.75)  # Let the rotor settle completely back to the aligned position
         # Now we should be mechanically aligned
 
@@ -1588,14 +1582,14 @@ class TMC4671:
 
         if offsets:
             # While we're here, set the offsets
-            self._write_field("HALL_PHI_E_OFFSET", -self._read_field("HALL_PHI_E") % 65536)
-            self._write_field("ABN_DECODER_COUNT", 0)
-            self._write_field("ABN_DECODER_PHI_E_OFFSET", 0)
+            self.fields.HALL_PHI_E_OFFSET.write(-self.fields.HALL_PHI_E.read() % 65536)
+            self.fields.ABN_DECODER_COUNT.write(0)
+            self.fields.ABN_DECODER_PHI_E_OFFSET.write(0)
         # Put motion config back how it was / safe stopped state
         self.fields.UQ_UD_EXT.write(0, 0)
         self._reset_targets()
-        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-        self._write_field("PHI_E_SELECTION", old_phi_e_selection)
+        self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+        self.fields.PHI_E_SELECTION.write(old_phi_e_selection)
 
         # Re-enable the configured biquad filters
         self._setup_filters()
@@ -1605,36 +1599,36 @@ class TMC4671:
     def _tune_pid(self, X, Kc, derate, test_existing, print_time):
         ch = self.current_helper
         dwell = self.printer.lookup_object('toolhead').dwell
-        old_mode = self._read_field("MODE_MOTION")
-        self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-        limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
-        old_flux_offset = self._read_field("PID_FLUX_OFFSET")
+        old_mode = self.fields.MODE_MOTION.read()
+        self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+        limit_cur = self.fields.PID_TORQUE_FLUX_LIMITS.read()
+        old_flux_offset = self.fields.PID_FLUX_OFFSET.read()
         self._reset_targets()
 
         # Switch to torque mode for the setpoint change experiment
-        self._write_field("MODE_MOTION", MotionMode.torque_mode)
+        self.fields.MODE_MOTION.write(MotionMode.torque_mode)
         test_cur = limit_cur
         dwell(0.2)
         if not test_existing:
             Kc0 = Kc
-            self._write_field("PID_%s_P"%X, self.pid_helpers["%s_P"%X].to_f(Kc0))
-            self._write_field("PID_%s_I"%X, self.pid_helpers["%s_I"%X].to_f(0.0))
+            getattr(self.fields, "PID_%s_P"%X).write(self.pid_helpers["%s_P"%X].to_f(Kc0))
+            getattr(self.fields, "PID_%s_I"%X).write(self.pid_helpers["%s_I"%X].to_f(0.0))
         else:
-            Kc0 = from_q4_12(self._read_field("PID_%s_P"%X))
+            Kc0 = from_q4_12(getattr(self.fields, "PID_%s_P"%X).read())
 
         # Do a setpoint change experiment
-        self._write_field("PID_%s_TARGET"%X, 0)
+        getattr(self.fields, "PID_%s_TARGET"%X).write(0)
         logging.info("test_cur = %d"%test_cur)
         n = 100
         c = self._dump_pid(n, X)
-        self._write_field("PID_%s_TARGET"%X, test_cur)
+        getattr(self.fields, "PID_%s_TARGET"%X).write(test_cur)
         c += self._dump_pid(n, X)
 
         # Experiment over, switch off target and restore motion settings
-        self._write_field("PID_%s_TARGET"%X, 0)
+        getattr(self.fields, "PID_%s_TARGET"%X).write(0)
         self._reset_targets()
-        self._write_field("MODE_MOTION", old_mode)
-        self._write_field("PID_FLUX_OFFSET", old_flux_offset)
+        self.fields.MODE_MOTION.write(old_mode)
+        self.fields.PID_FLUX_OFFSET.write(old_flux_offset)
 
         # Analysis and logging of setpoint change experiment results
         # At this point we can determine system model
@@ -1669,8 +1663,8 @@ class TMC4671:
         Ki = 2.0*Kc/(taui*self.pwmfreq)
         logging.info("TMC 4671 %s %s PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, X, Kc, taui, Ki))
         if not test_existing:
-            self._write_field("PID_%s_P"%X, self.pid_helpers["%s_P"%X].to_f(Kc))
-            self._write_field("PID_%s_I"%X, self.pid_helpers["%s_I"%X].to_f(Ki))
+            getattr(self.fields, "PID_%s_P"%X).write(self.pid_helpers["%s_P"%X].to_f(Kc))
+            getattr(self.fields, "PID_%s_I"%X).write(self.pid_helpers["%s_I"%X].to_f(Ki))
             # Store results for SAVE_CONFIG
             cfgname = "tmc4671 %s" % (self.name,)
             configfile = self.printer.lookup_object('configfile')
@@ -1685,7 +1679,7 @@ class TMC4671:
         c = [(0,0)]*(n)
         dwell = self.printer.lookup_object('toolhead').dwell
         for i in range(n):
-            cur = self._read_field(f)
+            cur = getattr(self.fields, f).read()
             c[i]=(monotonic_ns(), cur,)
             dwell(0.005)
         return c
@@ -1709,9 +1703,9 @@ class TMC4671:
             self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
             # Set torque and current in 4671 to zero
             self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
-            self._write_field("PID_VELOCITY_TARGET", 0)
-            self._write_field("PID_POSITION_TARGET", 0)
-            self._write_field("PWM_CHOP", 7)
+            self.fields.PID_VELOCITY_TARGET.write(0)
+            self.fields.PID_POSITION_TARGET.write(0)
+            self.fields.PWM_CHOP.write(7)
             # Send registers, 6100 first if configured then 4671
             if self.fields6100 is not None:
                 for reg_name in list(self.fields6100.registers.keys()):
@@ -1742,7 +1736,7 @@ class TMC4671:
 
         freq_s = self.pwmfreq
         if register == "CONFIG_BIQUAD_X_ENABLE":
-            freq_s = self.pwmfreq/(self._read_field("MODE_PID_SMPL")+1.0)
+            freq_s = self.pwmfreq/(self.fields.MODE_PID_SMPL.read()+1.0)
 
         if biquad_filter.type == "lpf":
             params = biquad_lpf(freq_s, biquad_filter.freq, biquad_filter.slope)
@@ -1792,10 +1786,10 @@ class TMC4671:
 
         p_v, i_v, p_p, i_p, k_v, k_p = self._tune_motion_pid(Kt, l_v, l_p)
 
-        self._write_field("PID_VELOCITY_P", self.pid_helpers["VELOCITY_P"].to_f(p_v))
-        self._write_field("PID_VELOCITY_I", self.pid_helpers["VELOCITY_I"].to_f(i_v))
-        self._write_field("PID_POSITION_P", self.pid_helpers["POSITION_P"].to_f(p_p))
-        self._write_field("PID_POSITION_I", self.pid_helpers["POSITION_I"].to_f(i_p))
+        self.fields.PID_VELOCITY_P.write(self.pid_helpers["VELOCITY_P"].to_f(p_v))
+        self.fields.PID_VELOCITY_I.write(self.pid_helpers["VELOCITY_I"].to_f(i_v))
+        self.fields.PID_POSITION_P.write(self.pid_helpers["POSITION_P"].to_f(p_p))
+        self.fields.PID_POSITION_I.write(self.pid_helpers["POSITION_I"].to_f(i_p))
         # Store results for SAVE_CONFIG
         cfgname = "tmc4671 %s" % (self.name,)
         configfile = self.printer.lookup_object('configfile')
@@ -1826,11 +1820,11 @@ class TMC4671:
                 P, I = self._tune_flux_pid(test_existing, derate, print_time)
             else:
                 P, I = self._tune_current_pid(current_bandwidth)
-            self._write_field("PID_FLUX_P", self.pid_helpers["FLUX_P"].to_f(P))
+            self.fields.PID_FLUX_P.write(self.pid_helpers["FLUX_P"].to_f(P))
 
-            self._write_field("PID_FLUX_I", self.pid_helpers["FLUX_I"].to_f(I))
-            self._write_field("PID_TORQUE_P", self.pid_helpers["TORQUE_P"].to_f(P))
-            self._write_field("PID_TORQUE_I", self.pid_helpers["TORQUE_I"].to_f(I))
+            self.fields.PID_FLUX_I.write(self.pid_helpers["FLUX_I"].to_f(I))
+            self.fields.PID_TORQUE_P.write(self.pid_helpers["TORQUE_P"].to_f(P))
+            self.fields.PID_TORQUE_I.write(self.pid_helpers["TORQUE_I"].to_f(I))
 
             # Store results for SAVE_CONFIG
             cfgname = "tmc4671 %s" % (self.name,)
@@ -1866,26 +1860,26 @@ class TMC4671:
 
     def _debug_pid_motion(self, velocity, mode, target_reg, print_time):
         with self.mutex:
-            #self._write_field("PWM_CHOP", 7)
-            old_mode = self._read_field("MODE_MOTION")
-            self._write_field("PID_POSITION_ACTUAL", 0)
+            #self.fields.PWM_CHOP.write(7)
+            old_mode = self.fields.MODE_MOTION.read()
+            self.fields.PID_POSITION_ACTUAL.write(0)
             self.printer.lookup_object('toolhead').dwell(0.2)
             # Clear all the status flags for later reference
             self.mcu_tmc.set_register_once(reg, 0, print_time)
-            limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
+            limit_cur = self.fields.PID_TORQUE_FLUX_LIMITS.read()
             self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
-            self._write_field(target_reg, 0)
-            self._write_field("MODE_MOTION", mode)
+            getattr(self.fields, target_reg).write(0)
+            self.fields.MODE_MOTION.write(mode)
             n2 = 20
             if mode == MotionMode.stopped_mode:
                 v = [velocity * i // (2*n2) for i in range(n2,2*n2)] + [velocity for i in range(n2*2)]
             else:
                 v = [velocity for i in range(n2,2*n2)] + [velocity for i in range(n2*2)]
             n = 500
-            c = self._dump_motion(n, f=lambda x : self._write_field(target_reg, x), v=v)
-            self._write_field("MODE_MOTION", old_mode)
-            self._write_field(target_reg, 0)
-            #self._write_field("PWM_CHOP", 0)
+            c = self._dump_motion(n, f=lambda x : getattr(self.fields, target_reg).write(x), v=v)
+            self.fields.MODE_MOTION.write(old_mode)
+            getattr(self.fields, target_reg).write(0)
+            #self.fields.PWM_CHOP.write(0)
         for i in range(n):
             logging.info(",".join(map(str, c[i])))
 
@@ -1899,61 +1893,61 @@ class TMC4671:
             if f is not None and i%n2 == 0:
                 f(v[i//n2])
             c[i]=(monotonic_ns()/1e9,
-                  self._read_field("PID_POSITION_ACTUAL"),
-                  self._read_field("PID_VELOCITY_ACTUAL"),
-                  self._read_field("PID_ERROR_PID_VELOCITY_ERROR"),
-                  self._read_field("INTERIM_PIDIN_TARGET_TORQUE"),
-                  self._read_field("PID_TORQUE_ACTUAL"),
-                  self._read_field("PID_ERROR_PID_TORQUE_ERROR"),
-                  self._read_field("PID_ERROR_PID_TORQUE_ERROR_SUM"),
-                  self._read_field("INTERIM_PIDIN_TARGET_FLUX"),
-                  self._read_field("PID_FLUX_ACTUAL"),
-                  self._read_field("PID_ERROR_PID_FLUX_ERROR"),
-                  self._read_field("PID_ERROR_PID_FLUX_ERROR_SUM"),
+                  self.fields.PID_POSITION_ACTUAL.read(),
+                  self.fields.PID_VELOCITY_ACTUAL.read(),
+                  self.fields.PID_ERROR_PID_VELOCITY_ERROR.read(),
+                  self.fields.INTERIM_PIDIN_TARGET_TORQUE.read(),
+                  self.fields.PID_TORQUE_ACTUAL.read(),
+                  self.fields.PID_ERROR_PID_TORQUE_ERROR.read(),
+                  self.fields.PID_ERROR_PID_TORQUE_ERROR_SUM.read(),
+                  self.fields.INTERIM_PIDIN_TARGET_FLUX.read(),
+                  self.fields.PID_FLUX_ACTUAL.read(),
+                  self.fields.PID_ERROR_PID_FLUX_ERROR.read(),
+                  self.fields.PID_ERROR_PID_FLUX_ERROR_SUM.read(),
                   ":::",
-                  self._read_field("ADC_I0_RAW"),
-                  self._read_field("ADC_I1_RAW"),
-                  self._read_field("ADC_IUX"),
-                  self._read_field("INTERIM_PWM_UX"),
-                  self._read_field("ADC_IV"),
-                  self._read_field("INTERIM_PWM_UV"),
-                  self._read_field("ADC_IWY"),
-                  self._read_field("INTERIM_PWM_WY"),
+                  self.fields.ADC_I0_RAW.read(),
+                  self.fields.ADC_I1_RAW.read(),
+                  self.fields.ADC_IUX.read(),
+                  self.fields.INTERIM_PWM_UX.read(),
+                  self.fields.ADC_IV.read(),
+                  self.fields.INTERIM_PWM_UV.read(),
+                  self.fields.ADC_IWY.read(),
+                  self.fields.INTERIM_PWM_WY.read(),
                   ":::",
-                  self._read_field("ABN_DECODER_PHI_M")%65536,
-                  self._read_field("ABN_DECODER_PHI_E")%65536,
-                  self._read_field("HALL_PHI_M")%65536,
-                  self._read_field("HALL_PHI_E")%65536,
-                  self._read_field("PHI_E")%65536,
-                  (self._read_field("PHI_E")-self._read_field("HALL_PHI_E")) % 65536,
-                  (self._read_field("PHI_E")-self._read_field("ABN_DECODER_PHI_E")) % 65536,
+                  self.fields.ABN_DECODER_PHI_M.read()%65536,
+                  self.fields.ABN_DECODER_PHI_E.read()%65536,
+                  self.fields.HALL_PHI_M.read()%65536,
+                  self.fields.HALL_PHI_E.read()%65536,
+                  self.fields.PHI_E.read()%65536,
+                  (self.fields.PHI_E.read()-self.fields.HALL_PHI_E.read()) % 65536,
+                  (self.fields.PHI_E.read()-self.fields.ABN_DECODER_PHI_E.read()) % 65536,
                   )
             self.printer.lookup_object('toolhead').dwell(15./n)
         return c
 
     def _debug_openloop_velocity_motion(self, velocity, print_time):
         with self.mutex:
-            self._write_field("PWM_CHOP", 7)
-            self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
-            limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
+            self.fields.PWM_CHOP.write(7)
+            self.fields.MODE_MOTION.write(MotionMode.uq_ud_ext_mode)
+            limit_cur = self.fields.PID_TORQUE_FLUX_LIMITS.read()
             self.fields.UQ_UD_EXT.write(limit_cur, 0)
-            old_phi_e_sel = self._read_field("PHI_E_SELECTION")
-            self._write_field("PHI_E_SELECTION", 2)
-            phi_e = self._read_field("PHI_E")
+            old_phi_e_sel = self.fields.PHI_E_SELECTION.read()
+            self.fields.PHI_E_SELECTION.write(2)
+            phi_e = self.fields.PHI_E.read()
             # Clear all the status flags for later reference
             self.mcu_tmc.set_register_once(reg, 0, print_time)
             # might not stick, so write with a one-shot
             n = 500
-            self._write_field("OPENLOOP_VELOCITY_TARGET", velocity)
-            self._write_field("OPENLOOP_ACCELERATION", 1000)
+            self.fields.OPENLOOP_VELOCITY_TARGET.write(velocity)
+            self.fields.OPENLOOP_ACCELERATION.write(1000)
             c = self._dump_motion(n)
-            self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
-            self._write_field("OPENLOOP_ACCELERATION", 0)
+            self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
+            self.fields.OPENLOOP_ACCELERATION.write(0)
             self.fields.UQ_UD_EXT.write(0, 0)
             self.printer.lookup_object('toolhead').dwell(0.2)
-            self._write_field("MODE_MOTION", MotionMode.stopped_mode)
-            self._write_field("PHI_E_SELECTION", old_phi_e_sel)
-            self._write_field("PWM_CHOP", 0)
+            self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+            self.fields.PHI_E_SELECTION.write(old_phi_e_sel)
+            self.fields.PWM_CHOP.write(0)
             for i in range(n):
                 logging.info(",".join(map(str, c[i])))
 
@@ -2154,13 +2148,13 @@ class TMC4671:
         # Read configured limits and status
         run_current = ch.run_current
         homing_current = ch.homing_current
-        limit_raw = self._read_field("PID_TORQUE_FLUX_LIMITS")
+        limit_raw = self.fields.PID_TORQUE_FLUX_LIMITS.read()
         limit_a = ch.convert_adc_current(limit_raw)
         
         # Read raw phase currents (ADC)
-        iux = ch.convert_adc_current(self._read_field("ADC_IUX"))
-        iv = ch.convert_adc_current(self._read_field("ADC_IV"))
-        iwy = ch.convert_adc_current(self._read_field("ADC_IWY"))
+        iux = ch.convert_adc_current(self.fields.ADC_IUX.read())
+        iv = ch.convert_adc_current(self.fields.ADC_IV.read())
+        iwy = ch.convert_adc_current(self.fields.ADC_IWY.read())
         
         # Read FOC Target Currents (d/q axis)
         flux_target_raw, torque_target_raw = self.fields.PID_TORQUE_FLUX_TARGET.read()
@@ -2264,16 +2258,16 @@ class TMC4671:
                 current_bandwidth, motor_r=eff_r, motor_l=eff_l
             )
             P_flux_cur = self.pid_helpers["FLUX_P"].from_f(
-                self._read_field("PID_FLUX_P")
+                self.fields.PID_FLUX_P.read()
             )
             I_flux_cur = self.pid_helpers["FLUX_I"].from_f(
-                self._read_field("PID_FLUX_I")
+                self.fields.PID_FLUX_I.read()
             )
             P_torq_cur = self.pid_helpers["TORQUE_P"].from_f(
-                self._read_field("PID_TORQUE_P")
+                self.fields.PID_TORQUE_P.read()
             )
             I_torq_cur = self.pid_helpers["TORQUE_I"].from_f(
-                self._read_field("PID_TORQUE_I")
+                self.fields.PID_TORQUE_I.read()
             )
             lines.append("  Computed:  P=%.4f  I=%.4f" % (P_new, I_new))
             lines.append(
@@ -2298,16 +2292,16 @@ class TMC4671:
                 Kt, l_v, l_p
             )
             p_v_cur = self.pid_helpers["VELOCITY_P"].from_f(
-                self._read_field("PID_VELOCITY_P")
+                self.fields.PID_VELOCITY_P.read()
             )
             i_v_cur = self.pid_helpers["VELOCITY_I"].from_f(
-                self._read_field("PID_VELOCITY_I")
+                self.fields.PID_VELOCITY_I.read()
             )
             p_p_cur = self.pid_helpers["POSITION_P"].from_f(
-                self._read_field("PID_POSITION_P")
+                self.fields.PID_POSITION_P.read()
             )
             i_p_cur = self.pid_helpers["POSITION_I"].from_f(
-                self._read_field("PID_POSITION_I")
+                self.fields.PID_POSITION_I.read()
             )
             lines.append(
                 "  Computed:  Velocity P=%.5f  I=%.5f" % (p_v_new, i_v_new)
@@ -2333,7 +2327,7 @@ class TMC4671:
             target_current = self.current_helper.run_current * 0.25
         V_req = (target_current * self.motor_r * 2.0) + 1.2
         vm = self._read_vm()
-        if self._read_field("MOTOR_TYPE") == 3:
+        if self.fields.MOTOR_TYPE.read() == 3:
             v_max_phase = vm / math.sqrt(3.0)
         else:
             v_max_phase = vm
@@ -2386,8 +2380,8 @@ class TMC4671:
     def _acquire_impedance_ac_samples(self, f_inject, n_samples, ac_U, dwell):
         # Configure and Start High-Frequency AC Injection
         dds_value = int(f_inject * (2**32) / self.pwmfreq)
-        self._write_field("OPENLOOP_ACCELERATION", dds_value)
-        self._write_field("OPENLOOP_VELOCITY_TARGET", dds_value)
+        self.fields.OPENLOOP_ACCELERATION.write(dds_value)
+        self.fields.OPENLOOP_VELOCITY_TARGET.write(dds_value)
         
         # Allow electrical settling for the rotating field
         dwell(0.5)
@@ -2487,8 +2481,8 @@ class TMC4671:
         with self.mutex:
             print_time = toolhead.get_last_move_time()
             dwell = toolhead.dwell
-            old_phi_e_selection = self._read_field("PHI_E_SELECTION")
-            old_mode_motion = self._read_field("MODE_MOTION")
+            old_phi_e_selection = self.fields.PHI_E_SELECTION.read()
+            old_mode_motion = self.fields.MODE_MOTION.read()
             
             # Enable motor hardware & gate driver (vital to allow current flow)
             if self.fields6100 is not None:
@@ -2506,13 +2500,13 @@ class TMC4671:
                 ac_U, v_applied, v_ac = self._calculate_ac_injection_voltage()
                 
                 # 4. Configure TMC4671 for DC Static Bias (Rotor Alignment & Noise Calibration)
-                self._write_field("PWM_CHOP", 7)
-                self._write_field("PHI_E_SELECTION", 2)  # Open Loop Mode
-                self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
-                self._write_field("UQ_EXT", 0)
-                self._write_field("OPENLOOP_ACCELERATION", 0)
-                self._write_field("UD_EXT", ac_U)
-                self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
+                self.fields.PWM_CHOP.write(7)
+                self.fields.PHI_E_SELECTION.write(2)  # Open Loop Mode
+                self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
+                self.fields.UQ_EXT.write(0)
+                self.fields.OPENLOOP_ACCELERATION.write(0)
+                self.fields.UD_EXT.write(ac_U)
+                self.fields.MODE_MOTION.write(MotionMode.uq_ud_ext_mode)
                 
                 # Sample baseline DC/Noise currents
                 I_dc_avg, var_noise = self._measure_impedance_dc_baseline(dwell, 100)
@@ -2522,8 +2516,8 @@ class TMC4671:
                 ac_samples = self._acquire_impedance_ac_samples(f_inject, n_samples, ac_U, dwell)
                 
                 # 7. Disable injection immediately
-                self._write_field("UD_EXT", 0)
-                self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+                self.fields.UD_EXT.write(0)
+                self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
                 
                 # =================================================================
                 # 8. DSP & Extraction Algorithms
@@ -2574,10 +2568,10 @@ class TMC4671:
             finally:
                 # 9. Restore initial state
                 self.fields.UQ_UD_EXT.write(0, 0)
-                self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
-                self._write_field("OPENLOOP_ACCELERATION", 0)
-                self._write_field("MODE_MOTION", old_mode_motion)
-                self._write_field("PHI_E_SELECTION", old_phi_e_selection)
+                self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
+                self.fields.OPENLOOP_ACCELERATION.write(0)
+                self.fields.MODE_MOTION.write(old_mode_motion)
+                self.fields.PHI_E_SELECTION.write(old_phi_e_selection)
                 self._setup_filters()
                 
                 # Disable motor hardware & gate driver to return to safe idle state
