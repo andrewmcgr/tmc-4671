@@ -1802,7 +1802,7 @@ class TMC4671:
         test_existing = gcmd.get_int('CHECK', 0)
         derate = gcmd.get_float('DERATE', 1.6)
         simc_flag = gcmd.get_int('SIMC', 0)
-        current_bandwidth = gcmd.get_float('CURRENT_BANDWIDTH', 1800.0)
+        current_bandwidth = gcmd.get_float('CURRENT_BANDWIDTH', 1200.0)
         flux_bandwidth = gcmd.get_float('FLUX_BANDWIDTH', current_bandwidth)
         torque_bandwidth = gcmd.get_float('TORQUE_BANDWIDTH', current_bandwidth)
         logging.info("TMC_TUNE_PID %s (SIMC=%d, flux_bw=%.1f, torque_bw=%.1f)",
@@ -2242,7 +2242,7 @@ class TMC4671:
         "Report what PID tuning helpers would compute without applying changes"
     )
     def cmd_TMC_DEBUG_TUNING(self, gcmd):
-        current_bandwidth = gcmd.get_float('CURRENT_BANDWIDTH', 1800.0)
+        current_bandwidth = gcmd.get_float('CURRENT_BANDWIDTH', 1200.0)
         l_v = gcmd.get_float('LAMBDA_V', 100.0)
         l_p = gcmd.get_float('LAMBDA_P', 400.0)
         I_h = gcmd.get_float('HOLDING_CURRENT', None)

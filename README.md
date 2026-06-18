@@ -194,7 +194,7 @@ TMC_TUNE_PID STEPPER=stepper_x [FLUX_BANDWIDTH=<hz>] [TORQUE_BANDWIDTH=<hz>] [CU
 |---|---|---|
 | `FLUX_BANDWIDTH` | `CURRENT_BANDWIDTH` | Target closed-loop bandwidth in Hz for the flux (d-axis) current loop. |
 | `TORQUE_BANDWIDTH` | `CURRENT_BANDWIDTH` | Target closed-loop bandwidth in Hz for the torque (q-axis) current loop. |
-| `CURRENT_BANDWIDTH` | 1800.0 | Fallback bandwidth when `FLUX_BANDWIDTH` or `TORQUE_BANDWIDTH` are not set. |
+| `CURRENT_BANDWIDTH` | 1200.0 | Fallback bandwidth when `FLUX_BANDWIDTH` or `TORQUE_BANDWIDTH` are not set. 1800 Hz is aggressive and noisy; 1200 Hz is a safer default. |
 | `SIMC` | 0 | Use S-IMC setpoint-change experiment instead of the bandwidth method. Flux and torque loops are each tuned with a separate experiment. |
 | `CHECK` | 0 | With `SIMC=1`: test the *existing* gains instead of starting from scratch. |
 | `DERATE` | 1.6 | With `SIMC=1`: initial gain derate factor. |
@@ -204,8 +204,8 @@ The bandwidth method derives P and I analytically from the measured motor R and 
 Output example:
 ```
 PID stepper_x parameters:
-  Flux biquad LPF: 1800 Hz
-  Torque biquad LPF: 1800 Hz
+  Flux biquad LPF: 1200 Hz
+  Torque biquad LPF: 1200 Hz
   Flux:   Kc=9.6600 Ki=0.4850
   Torque: Kc=9.6600 Ki=0.4850
 ```
@@ -240,7 +240,7 @@ TMC_DEBUG_TUNING STEPPER=stepper_x HOLDING_CURRENT=<a> HOLDING_TORQUE=<nm> [...]
 
 | Parameter | Default | Description |
 |---|---|---|
-| `CURRENT_BANDWIDTH` | 1800.0 | Bandwidth in Hz for the current PID calculation. |
+| `CURRENT_BANDWIDTH` | 1200.0 | Bandwidth in Hz for the current PID calculation. |
 | `LAMBDA_V` | 100.0 | Velocity loop time constant for the motion PID calculation. |
 | `LAMBDA_P` | 400.0 | Position loop time constant for the motion PID calculation. |
 | `KT` | — | Motor torque constant in Nm/A (required for motion PID section). |
