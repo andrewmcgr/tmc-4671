@@ -378,7 +378,7 @@ class FieldProxy:
             raise AttributeError("TMC4671 has no field or register %r" % name)
         if isinstance(entry, list):
             return MultiFieldAccessor(self, name, entry)
-        return SingleFieldAccessor(self, name, entry)
+        return SingleFieldAccessor(self, entry)
 
     def _name_for_desc(self, desc):
         return object.__getattribute__(self, '_desc_to_name').get(id(desc), "")
