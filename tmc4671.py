@@ -7,6 +7,7 @@
 # Copyright (C) 2018-2020  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
+import dataclasses
 import logging, collections
 import math
 import time
@@ -216,6 +217,182 @@ class FieldHelper:
         reg_fields = self.all_fields.get(reg_name, {reg_name: 0})
         return {field_name: self.get_field(field_name, reg_value, reg_name)
                 for field_name, mask in reg_fields.items()}
+
+
+######################################################################
+# Live field accessor: FieldProxy, SingleFieldAccessor, MultiFieldAccessor
+######################################################################
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class FieldDesc:
+    reg: int          # hardware SPI register address
+    addr: object      # mux selector value, or None for direct registers
+    mask: int         # bitmask for this field within the 32-bit register
+    shift: int        # ffs(mask) — precomputed
+
+
+def _build_field_descs(helper, name_to_reg):
+    """Build {name: FieldDesc | list[(name, FieldDesc)]} from FieldHelper + name_to_reg.
+
+    List values mean the key is a multi-field register exposed via MultiFieldAccessor.
+    FieldDesc values are single sub-fields or undivided whole-register entries.
+    """
+    descs = {}
+    for reg_name, (reg, addr) in name_to_reg.items():
+        reg_fields = helper.all_fields.get(reg_name)
+        if reg_fields and len(reg_fields) > 1:
+            field_list = []
+            for field_name, mask in reg_fields.items():
+                d = FieldDesc(reg=reg, addr=addr, mask=mask, shift=ffs(mask))
+                descs[field_name] = d
+                field_list.append((field_name, d))
+            descs[reg_name] = field_list
+        elif reg_fields and len(reg_fields) == 1:
+            field_name, mask = next(iter(reg_fields.items()))
+            d = FieldDesc(reg=reg, addr=addr, mask=mask, shift=ffs(mask))
+            descs[field_name] = d
+            descs[reg_name] = d
+        else:
+            d = FieldDesc(reg=reg, addr=addr, mask=0xffffffff, shift=0)
+            descs[reg_name] = d
+    return descs
+
+
+class SingleFieldAccessor:
+    __slots__ = ('_proxy', '_desc')
+
+    def __init__(self, proxy, desc):
+        object.__setattr__(self, '_proxy', proxy)
+        object.__setattr__(self, '_desc', desc)
+
+    def read(self):
+        d = object.__getattribute__(self, '_desc')
+        p = object.__getattribute__(self, '_proxy')
+        raw = p._spi_read(d.reg, d.addr)
+        val = (raw & d.mask) >> d.shift
+        if p._name_for_desc(d) in p._signed:
+            bits = (d.mask >> d.shift).bit_length()
+            if val >= (1 << (bits - 1)):
+                val -= 1 << bits
+        return val
+
+    def write(self, val, *, verify=False):
+        d = object.__getattribute__(self, '_desc')
+        p = object.__getattribute__(self, '_proxy')
+        if d.mask == 0xffffffff:
+            new_reg = int(val) & 0xffffffff
+        else:
+            current = p._shadow_get(d.reg, d.addr)
+            if current is None:
+                current = p._spi_read(d.reg, d.addr)
+            new_reg = (current & ~d.mask) | ((int(val) << d.shift) & d.mask)
+        p._spi_write(d.reg, d.addr, new_reg, verify=verify)
+
+
+class MultiFieldAccessor:
+    __slots__ = ('_proxy', '_reg_name', '_descs')
+
+    def __init__(self, proxy, reg_name, descs):
+        object.__setattr__(self, '_proxy', proxy)
+        object.__setattr__(self, '_reg_name', reg_name)
+        object.__setattr__(self, '_descs', descs)
+
+    def read(self):
+        descs = object.__getattribute__(self, '_descs')
+        p = object.__getattribute__(self, '_proxy')
+        raw = p._spi_read(descs[0][1].reg, descs[0][1].addr)
+        return tuple((raw & d.mask) >> d.shift for _, d in descs)
+
+    def write(self, *values, verify=False):
+        descs = object.__getattribute__(self, '_descs')
+        reg_name = object.__getattribute__(self, '_reg_name')
+        p = object.__getattribute__(self, '_proxy')
+        if len(values) != len(descs):
+            field_names = ', '.join(n for n, _ in descs)
+            raise ValueError(
+                "%s.write() expects %d arguments (%s), got %d"
+                % (reg_name, len(descs), field_names, len(values)))
+        new_reg = 0
+        for val, (_, d) in zip(values, descs):
+            new_reg |= (int(val) << d.shift) & d.mask
+        d0 = descs[0][1]
+        p._spi_write(d0.reg, d0.addr, new_reg, verify=verify)
+
+
+class FieldProxy:
+
+    def __init__(self, helper, mcu_tmc):
+        object.__setattr__(self, '_helper', helper)
+        object.__setattr__(self, '_mcu_tmc', mcu_tmc)
+        object.__setattr__(self, '_shadow', {})
+        descs = _build_field_descs(helper, mcu_tmc.name_to_reg)
+        object.__setattr__(self, '_descs', descs)
+        object.__setattr__(self, '_desc_to_name',
+                           {id(d): n for n, d in descs.items()
+                            if isinstance(d, FieldDesc)})
+        object.__setattr__(self, '_signed', helper.signed_fields)
+
+    @property
+    def all_fields(self):
+        return object.__getattribute__(self, '_helper').all_fields
+
+    @property
+    def signed_fields(self):
+        return object.__getattribute__(self, '_helper').signed_fields
+
+    @property
+    def registers(self):
+        return object.__getattribute__(self, '_helper').registers
+
+    @property
+    def field_to_register(self):
+        return object.__getattribute__(self, '_helper').field_to_register
+
+    @property
+    def field_setters(self):
+        return object.__getattribute__(self, '_helper').field_setters
+
+    def lookup_register(self, *a, **kw):
+        return object.__getattribute__(self, '_helper').lookup_register(*a, **kw)
+
+    def get_field(self, *a, **kw):
+        return object.__getattribute__(self, '_helper').get_field(*a, **kw)
+
+    def set_field(self, *a, **kw):
+        return object.__getattribute__(self, '_helper').set_field(*a, **kw)
+
+    def set_config_field(self, *a, **kw):
+        return object.__getattribute__(self, '_helper').set_config_field(*a, **kw)
+
+    def pretty_format(self, *a, **kw):
+        return object.__getattribute__(self, '_helper').pretty_format(*a, **kw)
+
+    def get_reg_fields(self, *a, **kw):
+        return object.__getattribute__(self, '_helper').get_reg_fields(*a, **kw)
+
+    def __getattr__(self, name):
+        descs = object.__getattribute__(self, '_descs')
+        entry = descs.get(name)
+        if entry is None:
+            raise AttributeError("TMC4671 has no field or register %r" % name)
+        if isinstance(entry, list):
+            return MultiFieldAccessor(self, name, entry)
+        return SingleFieldAccessor(self, name, entry)
+
+    def _name_for_desc(self, desc):
+        return object.__getattribute__(self, '_desc_to_name').get(id(desc), "")
+
+    def _shadow_get(self, reg, addr):
+        return object.__getattribute__(self, '_shadow').get((reg, addr))
+
+    def _spi_read(self, reg, addr):
+        return object.__getattribute__(self, '_mcu_tmc')._read_raw(reg, addr)
+
+    def _spi_write(self, reg, addr, val, *, verify=False):
+        object.__getattribute__(self, '_mcu_tmc')._write_raw(
+            reg, addr, val, verify=verify)
+        object.__getattribute__(self, '_shadow')[(reg, addr)] = val
 
 
 class PIDHelper:
@@ -568,6 +745,13 @@ class MCU_TMC_SPI_simple:
         params = self.spi.spi_transfer(cmd)
         pr = bytearray(params['response'])
         return (pr[1] << 24) | (pr[2] << 16) | (pr[3] << 8) | pr[4]
+    def reg_write_noread(self, reg, val, print_time=None):
+        minclock = 0
+        if print_time is not None:
+            minclock = self.spi.get_mcu().print_time_to_clock(print_time)
+        data = [(reg | 0x80) & 0xff, (val >> 24) & 0xff, (val >> 16) & 0xff,
+                (val >> 8) & 0xff, val & 0xff]
+        self.spi.spi_send(data, minclock)
     def reg_write(self, reg, val, print_time=None):
         minclock = 0
         if print_time is not None:
@@ -652,6 +836,39 @@ class MCU_TMC_SPI:
                                                 val,
                                                 reg_value=reg_value,
                                                 reg_name=reg_name))
+    def _read_raw(self, reg, addr):
+        with self.mutex:
+            if addr is not None:
+                for retry in range(5):
+                    v = self.tmc_spi.reg_write(reg + 1, addr)
+                    if v == addr:
+                        break
+                else:
+                    raise self.printer.command_error(
+                        "Unable to write tmc spi '%s' address selector "
+                        "(last read %x)" % (self.name, v))
+            return self.tmc_spi.reg_read(reg)
+    def _write_raw(self, reg, addr, val, *, verify=False):
+        with self.mutex:
+            if addr is not None:
+                for retry in range(5):
+                    v = self.tmc_spi.reg_write(reg + 1, addr)
+                    if v == addr:
+                        break
+                else:
+                    raise self.printer.command_error(
+                        "Unable to write tmc spi '%s' address selector "
+                        "(last read %x)" % (self.name, v))
+            if not verify:
+                self.tmc_spi.reg_write_noread(reg, val)
+                return
+            for retry in range(5):
+                v = self.tmc_spi.reg_write(reg, val)
+                if v == val:
+                    return
+        raise self.printer.command_error(
+            "Unable to write tmc spi '%s' register %x "
+            "(last read %x)" % (self.name, reg, v))
 
 ######################################################################
 # Main driver class
@@ -671,6 +888,7 @@ class TMC4671:
                                   float_fields=FloatFields,
                                   field_formatters=FieldFormatters,
                                   prefix="foc_")
+        field_meta = self.fields
         # 6100 is optional for boards without one.
         gcode = self.printer.lookup_object("gcode")
         if config.get("drv_cs_pin", None) is not None:
@@ -695,8 +913,9 @@ class TMC4671:
         self.motor_lq = 0.0
         self.motor_saliency = 1.0
         self.dead_time_v = 0.0
-        self.mcu_tmc = MCU_TMC_SPI(config, Registers, self.fields,
+        self.mcu_tmc = MCU_TMC_SPI(config, Registers, field_meta,
                                    TMC_FREQUENCY, pin_option="cs_pin")
+        self.fields = FieldProxy(field_meta, self.mcu_tmc)
         self.read_translate = None
         self.read_registers = Registers.keys()
         self.printer.register_event_handler("klippy:connect",
@@ -899,18 +1118,10 @@ class TMC4671:
             )
 
     def _read_field(self, field):
-        reg_name = self.fields.lookup_register(field)
-        reg_value = self.mcu_tmc.get_register(reg_name)
-        return self.fields.get_field(field, reg_value=reg_value,
-                                     reg_name=reg_name)
+        return getattr(self.fields, field).read()
 
     def _write_field(self, field, val):
-        reg_name = self.fields.lookup_register(field)
-        reg_value = self.mcu_tmc.get_register(reg_name)
-        self.mcu_tmc.set_register(reg_name,
-                                  self.fields.set_field(field, val,
-                                                        reg_value=reg_value,
-                                                        reg_name=reg_name))
+        getattr(self.fields, field).write(val)
 
     def enable_biquad(self, enable_field, *biquad):
         reg, addr = self.mcu_tmc.name_to_reg[enable_field]
@@ -928,11 +1139,11 @@ class TMC4671:
     def _do_enable(self, print_time):
         try:
             with self.mutex:
-                # If we were manually moved, we don't want any motion now
-                self._write_field("PID_POSITION_TARGET",
-                                  self._read_field("PID_POSITION_ACTUAL"))
+                self.fields.PID_POSITION_TARGET.write(
+                    self.fields.PID_POSITION_ACTUAL.read(), verify=True)
                 self.error_helper.start_checks()
-                self._write_field("MODE_MOTION", MotionMode.position_mode)
+                self.fields.MODE_MOTION.write(MotionMode.position_mode,
+                                              verify=True)
         except self.printer.command_error as e:
             self.printer.invoke_shutdown(str(e))
 
@@ -940,9 +1151,8 @@ class TMC4671:
         try:
             with self.mutex:
                 self.error_helper.stop_checks()
-                # Switching off the enable line will turn off the drivers
-                # but, belt and braces, stop the controller as well.
-                self._write_field("MODE_MOTION", MotionMode.stopped_mode)
+                self.fields.MODE_MOTION.write(MotionMode.stopped_mode,
+                                              verify=True)
         except self.printer.command_error as e:
             self.printer.invoke_shutdown(str(e))
 
@@ -991,8 +1201,7 @@ class TMC4671:
             # Set these before setting enable to avoid yeeting the toolhead
             self._write_field("MODE_MOTION", MotionMode.stopped_mode)
             self._write_field("STATUS_MASK", 0)
-            self._write_field("PID_FLUX_TARGET", 0)
-            self._write_field("PID_TORQUE_TARGET", 0)
+            self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
             self._write_field("PID_VELOCITY_TARGET", 0)
             self._write_field("PID_POSITION_TARGET", 0)
             # Now enable 6100
@@ -1016,8 +1225,7 @@ class TMC4671:
             print_time = self.printer.lookup_object('toolhead').get_last_move_time()
             enable_line.motor_disable(print_time)
             self._write_field("STATUS_MASK", 0)
-            self._write_field("PID_FLUX_TARGET", 0)
-            self._write_field("PID_TORQUE_TARGET", 0)
+            self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
             self._write_field("PID_VELOCITY_TARGET", 0)
             self._write_field("ABN_DECODER_COUNT", 0)
             self._write_field("PID_POSITION_TARGET", 0)
@@ -1186,8 +1394,7 @@ class TMC4671:
         # Read VM once; physical motor voltage = (UD_EXT / 32767) * vm.
         vm = self._read_vm()
         test_U = round(32767.0 / vm)
-        self._write_field("UQ_EXT", 0)
-        self._write_field("UD_EXT", test_U)
+        self.fields.UQ_UD_EXT.write(test_U, 0)
         self._reset_targets()
         self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
         # Turn on the chopper and wait a bit to measure the resistance
@@ -1320,8 +1527,7 @@ class TMC4671:
         I_AC_RAW_Q = mean(iq_ac_raw_samples)
 
         # Step 4: Cleanup and Re-alignment
-        self._write_field("UD_EXT", 0)
-        self._write_field("UQ_EXT", 0)
+        self.fields.UQ_UD_EXT.write(0, 0)
         self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
         self._write_field("OPENLOOP_ACCELERATION", 0)
 
@@ -1386,8 +1592,7 @@ class TMC4671:
             self._write_field("ABN_DECODER_COUNT", 0)
             self._write_field("ABN_DECODER_PHI_E_OFFSET", 0)
         # Put motion config back how it was / safe stopped state
-        self._write_field("UD_EXT", 0)
-        self._write_field("UQ_EXT", 0)
+        self.fields.UQ_UD_EXT.write(0, 0)
         self._reset_targets()
         self._write_field("MODE_MOTION", MotionMode.stopped_mode)
         self._write_field("PHI_E_SELECTION", old_phi_e_selection)
@@ -1503,8 +1708,7 @@ class TMC4671:
                                               print_time)
             self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
             # Set torque and current in 4671 to zero
-            self._write_field("PID_FLUX_TARGET", 0)
-            self._write_field("PID_TORQUE_TARGET", 0)
+            self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
             self._write_field("PID_VELOCITY_TARGET", 0)
             self._write_field("PID_POSITION_TARGET", 0)
             self._write_field("PWM_CHOP", 7)
@@ -1669,8 +1873,7 @@ class TMC4671:
             # Clear all the status flags for later reference
             self.mcu_tmc.set_register_once(reg, 0, print_time)
             limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
-            self._write_field("PID_FLUX_TARGET", 0)
-            self._write_field("PID_TORQUE_TARGET", 0)
+            self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
             self._write_field(target_reg, 0)
             self._write_field("MODE_MOTION", mode)
             n2 = 20
@@ -1733,8 +1936,7 @@ class TMC4671:
             self._write_field("PWM_CHOP", 7)
             self._write_field("MODE_MOTION", MotionMode.uq_ud_ext_mode)
             limit_cur = self._read_field("PID_TORQUE_FLUX_LIMITS")
-            self._write_field("UD_EXT", limit_cur)
-            self._write_field("UQ_EXT", 0)
+            self.fields.UQ_UD_EXT.write(limit_cur, 0)
             old_phi_e_sel = self._read_field("PHI_E_SELECTION")
             self._write_field("PHI_E_SELECTION", 2)
             phi_e = self._read_field("PHI_E")
@@ -1747,8 +1949,7 @@ class TMC4671:
             c = self._dump_motion(n)
             self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
             self._write_field("OPENLOOP_ACCELERATION", 0)
-            self._write_field("UD_EXT", 0)
-            self._write_field("UQ_EXT", 0)
+            self.fields.UQ_UD_EXT.write(0, 0)
             self.printer.lookup_object('toolhead').dwell(0.2)
             self._write_field("MODE_MOTION", MotionMode.stopped_mode)
             self._write_field("PHI_E_SELECTION", old_phi_e_sel)
@@ -1962,12 +2163,14 @@ class TMC4671:
         iwy = ch.convert_adc_current(self._read_field("ADC_IWY"))
         
         # Read FOC Target Currents (d/q axis)
-        flux_target = ch.convert_adc_current(self._read_field("PID_FLUX_TARGET"))
-        torque_target = ch.convert_adc_current(self._read_field("PID_TORQUE_TARGET"))
+        flux_target_raw, torque_target_raw = self.fields.PID_TORQUE_FLUX_TARGET.read()
+        flux_target = ch.convert_adc_current(flux_target_raw)
+        torque_target = ch.convert_adc_current(torque_target_raw)
         
         # Read FOC Actual Currents (d/q axis)
-        flux_actual = ch.convert_adc_current(self._read_field("PID_FLUX_ACTUAL"))
-        torque_actual = ch.convert_adc_current(self._read_field("PID_TORQUE_ACTUAL"))
+        flux_actual_raw, torque_actual_raw = self.fields.PID_TORQUE_FLUX_ACTUAL.read()
+        flux_actual = ch.convert_adc_current(flux_actual_raw)
+        torque_actual = ch.convert_adc_current(torque_actual_raw)
         
         # Read FOC Interim Currents
         reg_foc_val = self.mcu_tmc.get_register("INTERIM_FOC_IQ_ID")
@@ -2370,8 +2573,7 @@ class TMC4671:
                 
             finally:
                 # 9. Restore initial state
-                self._write_field("UD_EXT", 0)
-                self._write_field("UQ_EXT", 0)
+                self.fields.UQ_UD_EXT.write(0, 0)
                 self._write_field("OPENLOOP_VELOCITY_TARGET", 0)
                 self._write_field("OPENLOOP_ACCELERATION", 0)
                 self._write_field("MODE_MOTION", old_mode_motion)
