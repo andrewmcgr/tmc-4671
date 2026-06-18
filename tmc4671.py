@@ -1815,6 +1815,10 @@ class TMC4671:
             else:
                 flux_l = self.motor_ld if self.motor_ld != 0.0 else self.motor_l
                 torque_l = self.motor_lq if self.motor_lq != 0.0 else self.motor_l
+                if flux_l == 0.0 or torque_l == 0.0:
+                    raise gcmd.error(
+                        "Motor inductance not measured. Run TMC_ALIGN_MOTOR "
+                        "or FIRMWARE_RESTART to trigger startup calibration first.")
                 P_flux, I_flux = self._tune_current_pid(flux_bandwidth, motor_l=flux_l)
                 P_torque, I_torque = self._tune_current_pid(torque_bandwidth, motor_l=torque_l)
                 flux_filter = BiquadFilter(
