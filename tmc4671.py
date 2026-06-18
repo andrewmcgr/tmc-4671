@@ -1662,16 +1662,6 @@ class TMC4671:
         Kc *= 2.0
         Ki = 2.0*Kc/(taui*self.pwmfreq)
         logging.info("TMC 4671 %s %s PID coefficients Kc=%g, Ti=%g (Ki=%g)"%(self.name, X, Kc, taui, Ki))
-        if not test_existing:
-            getattr(self.fields, "PID_%s_P"%X).write(self.pid_helpers["%s_P"%X].to_f(Kc))
-            getattr(self.fields, "PID_%s_I"%X).write(self.pid_helpers["%s_I"%X].to_f(Ki))
-            # Store results for SAVE_CONFIG
-            cfgname = "tmc4671 %s" % (self.name,)
-            configfile = self.printer.lookup_object('configfile')
-            configfile.set(cfgname, 'foc_PID_FLUX_P', "%.3f" % (Kc,))
-            configfile.set(cfgname, 'foc_PID_FLUX_I', "%.3f" % (Ki,))
-            configfile.set(cfgname, 'foc_PID_TORQUE_P', "%.3f" % (Kc,))
-            configfile.set(cfgname, 'foc_PID_TORQUE_I', "%.3f" % (Ki,))
         return Kc, Ki
 
     def _dump_pid(self, n, X):
@@ -1813,30 +1803,55 @@ class TMC4671:
         derate = gcmd.get_float('DERATE', 1.6)
         simc_flag = gcmd.get_int('SIMC', 0)
         current_bandwidth = gcmd.get_float('CURRENT_BANDWIDTH', 1800.0)
-        logging.info("TMC_TUNE_PID %s (SIMC=%d, BANDWIDTH=%.1f)", self.name, simc_flag, current_bandwidth)
+        flux_bandwidth = gcmd.get_float('FLUX_BANDWIDTH', current_bandwidth)
+        torque_bandwidth = gcmd.get_float('TORQUE_BANDWIDTH', current_bandwidth)
+        logging.info("TMC_TUNE_PID %s (SIMC=%d, flux_bw=%.1f, torque_bw=%.1f)",
+                     self.name, simc_flag, flux_bandwidth, torque_bandwidth)
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         with self.mutex:
             if simc_flag:
-                P, I = self._tune_flux_pid(test_existing, derate, print_time)
+                P_flux, I_flux = self._tune_flux_pid(test_existing, derate, print_time)
+                P_torque, I_torque = self._tune_torque_pid(test_existing, derate, print_time)
             else:
-                P, I = self._tune_current_pid(current_bandwidth)
-            self.fields.PID_FLUX_P.write(self.pid_helpers["FLUX_P"].to_f(P))
+                P_flux, I_flux = self._tune_current_pid(flux_bandwidth)
+                P_torque, I_torque = self._tune_current_pid(torque_bandwidth)
+                flux_filter = BiquadFilter(
+                    type='lpf', freq=round(flux_bandwidth),
+                    slope=self.biquad_filters['flux'].slope)
+                self.biquad_filters['flux'] = flux_filter
+                self._setup_filter(BIQUAD_FILTER_TARGETS['flux'], flux_filter)
+                torque_filter = BiquadFilter(
+                    type='lpf', freq=round(torque_bandwidth),
+                    slope=self.biquad_filters['torque'].slope)
+                self.biquad_filters['torque'] = torque_filter
+                self._setup_filter(BIQUAD_FILTER_TARGETS['torque'], torque_filter)
 
-            self.fields.PID_FLUX_I.write(self.pid_helpers["FLUX_I"].to_f(I))
-            self.fields.PID_TORQUE_P.write(self.pid_helpers["TORQUE_P"].to_f(P))
-            self.fields.PID_TORQUE_I.write(self.pid_helpers["TORQUE_I"].to_f(I))
+            self.fields.PID_FLUX_P.write(self.pid_helpers["FLUX_P"].to_f(P_flux))
+            self.fields.PID_FLUX_I.write(self.pid_helpers["FLUX_I"].to_f(I_flux))
+            self.fields.PID_TORQUE_P.write(self.pid_helpers["TORQUE_P"].to_f(P_torque))
+            self.fields.PID_TORQUE_I.write(self.pid_helpers["TORQUE_I"].to_f(I_torque))
 
             # Store results for SAVE_CONFIG
             cfgname = "tmc4671 %s" % (self.name,)
             configfile = self.printer.lookup_object('configfile')
-            configfile.set(cfgname, 'foc_PID_FLUX_P', "%.3f" % (P,))
-            configfile.set(cfgname, 'foc_PID_FLUX_I', "%.3f" % (I,))
-            configfile.set(cfgname, 'foc_PID_TORQUE_P', "%.3f" % (P,))
-            configfile.set(cfgname, 'foc_PID_TORQUE_I', "%.3f" % (I,))
+            configfile.set(cfgname, 'foc_PID_FLUX_P', "%.3f" % (P_flux,))
+            configfile.set(cfgname, 'foc_PID_FLUX_I', "%.3f" % (I_flux,))
+            configfile.set(cfgname, 'foc_PID_TORQUE_P', "%.3f" % (P_torque,))
+            configfile.set(cfgname, 'foc_PID_TORQUE_I', "%.3f" % (I_torque,))
+
+        biquad_msg = ""
+        if not simc_flag:
+            biquad_msg = (
+                "\n  Flux biquad LPF: %d Hz"
+                "\n  Torque biquad LPF: %d Hz"
+                % (round(flux_bandwidth), round(torque_bandwidth)))
         gcmd.respond_info(
-            "PID %s parameters: Kc=%.2f Ki=%.3f\n"
+            "PID %s parameters:%s\n"
+            "  Flux:   Kc=%.4f Ki=%.4f\n"
+            "  Torque: Kc=%.4f Ki=%.4f\n"
             "The SAVE_CONFIG command will update the printer config file\n"
-            "with these parameters and restart the printer." % (self.name, P, I))
+            "with these parameters and restart the printer."
+            % (self.name, biquad_msg, P_flux, I_flux, P_torque, I_torque))
 
     cmd_TMC_DEBUG_MOVE_help = "Test TMC motion mode (motor must be free to move)"
     def cmd_TMC_DEBUG_MOVE(self, gcmd):
@@ -2202,14 +2217,23 @@ class TMC4671:
         ld_str = f"{self.motor_ld:.6f} H ({self.motor_ld * 1000.0:.3f} mH)" if self.motor_ld != 0.0 else "Not yet calibrated / measured"
         lq_str = f"{self.motor_lq:.6f} H ({self.motor_lq * 1000.0:.3f} mH)" if self.motor_lq != 0.0 else "Not yet calibrated / measured"
         sal_str = f"{self.motor_saliency:.4f}" if self.motor_saliency != 1.0 else "Not yet calibrated / measured"
-        
+
+        def _biquad_str(target):
+            bf = self.biquad_filters[target]
+            if bf.freq == 0:
+                return "disabled"
+            return f"{bf.type.upper()} {bf.freq} Hz (slope={bf.slope:.4f})"
+
         gcmd.respond_info(
             f"TMC 4671 '{self.name}' Motor Debug Report:\n"
             f"  Estimated Resistance (motor_r): {res_str}\n"
             f"  Estimated Inductance (motor_l): {ind_str}\n"
             f"  Estimated Ld Inductance (motor_ld): {ld_str}\n"
             f"  Estimated Lq Inductance (motor_lq): {lq_str}\n"
-            f"  Saliency Ratio (motor_saliency): {sal_str}"
+            f"  Saliency Ratio (motor_saliency): {sal_str}\n"
+            f"  Current Loop Filters:\n"
+            f"    Flux:   {_biquad_str('flux')}\n"
+            f"    Torque: {_biquad_str('torque')}"
         )
 
     cmd_TMC_DEBUG_TUNING_help = (
