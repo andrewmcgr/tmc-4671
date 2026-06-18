@@ -224,7 +224,7 @@ class FieldHelper:
 ######################################################################
 
 
-@dataclasses.dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True)
 class FieldDesc:
     reg: int          # hardware SPI register address
     addr: object      # mux selector value, or None for direct registers
