@@ -1813,8 +1813,10 @@ class TMC4671:
                 P_flux, I_flux = self._tune_flux_pid(test_existing, derate, print_time)
                 P_torque, I_torque = self._tune_torque_pid(test_existing, derate, print_time)
             else:
-                P_flux, I_flux = self._tune_current_pid(flux_bandwidth)
-                P_torque, I_torque = self._tune_current_pid(torque_bandwidth)
+                flux_l = self.motor_ld if self.motor_ld != 0.0 else self.motor_l
+                torque_l = self.motor_lq if self.motor_lq != 0.0 else self.motor_l
+                P_flux, I_flux = self._tune_current_pid(flux_bandwidth, motor_l=flux_l)
+                P_torque, I_torque = self._tune_current_pid(torque_bandwidth, motor_l=torque_l)
                 flux_filter = BiquadFilter(
                     type='lpf', freq=round(flux_bandwidth),
                     slope=self.biquad_filters['flux'].slope)
@@ -2253,6 +2255,10 @@ class TMC4671:
 
         eff_r = r_override if r_override is not None else self.motor_r
         eff_l = l_override if l_override is not None else self.motor_l
+        eff_ld = l_override if l_override is not None else (
+            self.motor_ld if self.motor_ld != 0.0 else self.motor_l)
+        eff_lq = l_override if l_override is not None else (
+            self.motor_lq if self.motor_lq != 0.0 else self.motor_l)
 
         lines = ["TMC 4671 '%s' Tuning Debug Report" % self.name]
 
@@ -2266,7 +2272,9 @@ class TMC4671:
             l_src = " (override)" if l_override is not None else ""
             lines.append(
                 "Motor parameters: R=%.4f Ω%s  L=%.6f H (%.3f mH)%s"
-                % (eff_r, r_src, eff_l, eff_l * 1000.0, l_src)
+                "  Ld=%.6f H (%.3f mH)  Lq=%.6f H (%.3f mH)"
+                % (eff_r, r_src, eff_l, eff_l * 1000.0, l_src,
+                   eff_ld, eff_ld * 1000.0, eff_lq, eff_lq * 1000.0)
             )
 
         # --- Current PID ---
@@ -2278,8 +2286,11 @@ class TMC4671:
         if eff_r == 0.0 or eff_l == 0.0:
             lines.append("  Cannot compute: motor parameters not yet calibrated")
         else:
-            P_new, I_new = self._tune_current_pid(
-                current_bandwidth, motor_r=eff_r, motor_l=eff_l
+            P_flux_new, I_flux_new = self._tune_current_pid(
+                current_bandwidth, motor_r=eff_r, motor_l=eff_ld
+            )
+            P_torq_new, I_torq_new = self._tune_current_pid(
+                current_bandwidth, motor_r=eff_r, motor_l=eff_lq
             )
             P_flux_cur = self.pid_helpers["FLUX_P"].from_f(
                 self.fields.PID_FLUX_P.read()
@@ -2293,7 +2304,12 @@ class TMC4671:
             I_torq_cur = self.pid_helpers["TORQUE_I"].from_f(
                 self.fields.PID_TORQUE_I.read()
             )
-            lines.append("  Computed:  P=%.4f  I=%.4f" % (P_new, I_new))
+            lines.append(
+                "  Computed:  Flux   P=%.4f  I=%.4f" % (P_flux_new, I_flux_new)
+            )
+            lines.append(
+                "             Torque P=%.4f  I=%.4f" % (P_torq_new, I_torq_new)
+            )
             lines.append(
                 "  Active:    Flux   P=%.4f  I=%.4f" % (P_flux_cur, I_flux_cur)
             )
