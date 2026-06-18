@@ -184,22 +184,31 @@ Without `CURRENT`, reports the currently active limit. With `CURRENT`, updates t
 
 ### TMC_TUNE_PID
 
-Autotune flux and torque PID coefficients and queue the results for `SAVE_CONFIG`.
+Autotune flux and torque current-loop PID coefficients separately and queue the results for `SAVE_CONFIG`. With the bandwidth method (default), the flux and torque biquad filters are automatically configured as LPF at the respective tuned bandwidth and their settings are also staged for `SAVE_CONFIG`.
 
 ```
-TMC_TUNE_PID STEPPER=stepper_x [CURRENT_BANDWIDTH=<hz>] [SIMC=<0|1>] [CHECK=<0|1>] [DERATE=<factor>]
+TMC_TUNE_PID STEPPER=stepper_x [FLUX_BANDWIDTH=<hz>] [TORQUE_BANDWIDTH=<hz>] [CURRENT_BANDWIDTH=<hz>] [SIMC=<0|1>] [CHECK=<0|1>] [DERATE=<factor>]
 ```
 
 | Parameter | Default | Description |
 |---|---|---|
-| `CURRENT_BANDWIDTH` | 1800.0 | Target closed-loop current bandwidth in Hz. Higher values are faster but noisier. |
-| `SIMC` | 0 | Use S-IMC setpoint-change experiment instead of the bandwidth method. |
+| `FLUX_BANDWIDTH` | `CURRENT_BANDWIDTH` | Target closed-loop bandwidth in Hz for the flux (d-axis) current loop. |
+| `TORQUE_BANDWIDTH` | `CURRENT_BANDWIDTH` | Target closed-loop bandwidth in Hz for the torque (q-axis) current loop. |
+| `CURRENT_BANDWIDTH` | 1200.0 | Fallback bandwidth when `FLUX_BANDWIDTH` or `TORQUE_BANDWIDTH` are not set. 1800 Hz is aggressive and noisy; 1200 Hz is a safer default. |
+| `SIMC` | 0 | Use S-IMC setpoint-change experiment instead of the bandwidth method. Flux and torque loops are each tuned with a separate experiment. |
 | `CHECK` | 0 | With `SIMC=1`: test the *existing* gains instead of starting from scratch. |
 | `DERATE` | 1.6 | With `SIMC=1`: initial gain derate factor. |
 
-The default (bandwidth) method derives P and I analytically from the measured motor R and L. The `SIMC` method runs a live setpoint-change experiment and fits a first-order-plus-dead-time model — more accurate but takes longer and requires the motor to be active.
+The bandwidth method derives P and I analytically from the measured motor R and L. The `SIMC` method runs a live setpoint-change experiment per loop and fits a first-order-plus-dead-time model — more accurate but slower and requires the motor to be active.
 
-Output example: `PID stepper_x parameters: Kc=9.66 Ki=0.485`
+Output example:
+```
+PID stepper_x parameters:
+  Flux biquad LPF: 1200 Hz
+  Torque biquad LPF: 1200 Hz
+  Flux:   Kc=9.6600 Ki=0.4850
+  Torque: Kc=9.6600 Ki=0.4850
+```
 
 ### TMC_TUNE_MOTION_PID
 
@@ -231,7 +240,7 @@ TMC_DEBUG_TUNING STEPPER=stepper_x HOLDING_CURRENT=<a> HOLDING_TORQUE=<nm> [...]
 
 | Parameter | Default | Description |
 |---|---|---|
-| `CURRENT_BANDWIDTH` | 1800.0 | Bandwidth in Hz for the current PID calculation. |
+| `CURRENT_BANDWIDTH` | 1200.0 | Bandwidth in Hz for the current PID calculation. |
 | `LAMBDA_V` | 100.0 | Velocity loop time constant for the motion PID calculation. |
 | `LAMBDA_P` | 400.0 | Position loop time constant for the motion PID calculation. |
 | `KT` | — | Motor torque constant in Nm/A (required for motion PID section). |
