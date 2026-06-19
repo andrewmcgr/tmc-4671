@@ -1658,15 +1658,9 @@ class TMC4671:
                     self.fields.ABN_DECODER_COUNT.write(0)
                     self.fields.PID_TORQUE_FLUX_TARGET.write(0, sign * iq_lsbs)
                     dwell(dt)
-                    # Read at the peak of the accel phase, before braking starts.
-                    # d_mid = ½·α·dt²; this avoids contamination from friction
-                    # asymmetry during the braking phase (which can cause the motor
-                    # to bounce back and land at an unpredictable resting position).
-                    raw = self.fields.ABN_DECODER_COUNT.read()
-                    self.fields.PID_TORQUE_FLUX_TARGET.write(0, -sign * iq_lsbs)
-                    dwell(dt)
                     self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
                     dwell(settle)
+                    raw = self.fields.ABN_DECODER_COUNT.read()
                     # Interpret as signed 32-bit
                     if raw > 0x7FFFFFFF:
                         raw -= 0x100000000
@@ -1690,7 +1684,9 @@ class TMC4671:
 
         d_avg = (d_fwd + d_bwd) / 2.0
 
-        # d_mid = ½·alpha·dt²  →  alpha [rad/s²] = d_mid [counts] * 4π / (PPR * dt²)
+        # d = total displacement (accel + unbraked coast-to-stop).
+        # Approximation: d ≈ ½·alpha·dt²  →  alpha [rad/s²] = d * 4π / (PPR * dt²)
+        # Coast contribution means motor_jt is a slight upper bound on true Kt/J.
         alpha = d_avg * 4.0 * math.pi / (ppr * dt * dt)
         self.motor_jt = alpha / iq_a   # Kt/J  [rad s⁻² A⁻¹]
 
