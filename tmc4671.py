@@ -1807,29 +1807,36 @@ class TMC4671:
             l_v = l_v if l_v is not None else 100.0
             l_p = l_p if l_p is not None else 400.0
             p_v, i_v, p_p, i_p, k_v, k_p = self._tune_motion_pid(Kt, l_v, l_p)
+            vel_filter_freq = round(3.0 * self.pwmfreq / l_v)
             msg = (
                 "Motion PID %s (SIMC/lambda).\n"
                 "k_v=%.5f  k_p=%.5f  KT=%.5f\n"
                 "Velocity P=%.5f  I=%.5f\n"
                 "Position  P=%.5f  I=%.5f\n"
-                "Suggested velocity/torque filter frequency: %d Hz\n"
+                "Velocity biquad LPF set to %d Hz\n"
                 "SAVE_CONFIG will write these values and restart."
-                % (self.name, k_v, k_p, Kt, p_v, i_v, p_p, i_p,
-                   round(3.0 * self.pwmfreq / l_v))
+                % (self.name, k_v, k_p, Kt, p_v, i_v, p_p, i_p, vel_filter_freq)
             )
         else:
             p_v, i_v = self._calc_velocity_pid(v_bw)
             p_p = self._calc_position_pid(v_bw, p_bw)
             i_p = 0.0
+            vel_filter_freq = round(v_bw)
             msg = (
                 "Motion PID %s (bandwidth).\n"
                 "Velocity bandwidth=%.1f Hz  Position bandwidth=%.1f Hz\n"
                 "Velocity P=%.5f  I=%.5f\n"
                 "Position  P=%.5f  I=%.5f\n"
+                "Velocity biquad LPF set to %d Hz\n"
                 "SAVE_CONFIG will write these values and restart."
-                % (self.name, v_bw, p_bw, p_v, i_v, p_p, i_p)
+                % (self.name, v_bw, p_bw, p_v, i_v, p_p, i_p, vel_filter_freq)
             )
 
+        vel_filter = BiquadFilter(
+            type='lpf', freq=vel_filter_freq,
+            slope=self.biquad_filters['velocity'].slope)
+        self.biquad_filters['velocity'] = vel_filter
+        self._setup_filter(BIQUAD_FILTER_TARGETS['velocity'], vel_filter)
         self.fields.PID_VELOCITY_P.write(self.pid_helpers["VELOCITY_P"].to_f(p_v))
         self.fields.PID_VELOCITY_I.write(self.pid_helpers["VELOCITY_I"].to_f(i_v))
         self.fields.PID_POSITION_P.write(self.pid_helpers["POSITION_P"].to_f(p_p))
@@ -1840,6 +1847,10 @@ class TMC4671:
         configfile.set(cfgname, 'foc_PID_VELOCITY_I', "%.3f" % (i_v,))
         configfile.set(cfgname, 'foc_PID_POSITION_P', "%.3f" % (p_p,))
         configfile.set(cfgname, 'foc_PID_POSITION_I', "%.3f" % (i_p,))
+        bf = self.biquad_filters['velocity']
+        configfile.set(cfgname, 'biquad_velocity_filter', bf.type)
+        configfile.set(cfgname, 'biquad_velocity_frequency', "%d" % (bf.freq,))
+        configfile.set(cfgname, 'biquad_velocity_slope', "%.6g" % (bf.slope,))
         gcmd.respond_info(msg)
 
     cmd_TMC_TUNE_PID_help = "Tune the current and torque PID coefficients"
