@@ -1629,7 +1629,7 @@ class TMC4671:
         self._setup_filters()
 
     # Measure Kt/J ratio via 4-pulse accel+brake cycles in closed-loop torque mode
-    def _measure_inertia_ratio(self, dwell, iq_lsbs, dt=0.2):
+    def _measure_inertia_ratio(self, dwell, iq_lsbs, dt=0.05):
         settle = max(0.3, dt)  # settling time between pulse pairs [s]
 
         ppr = self.fields.ABN_DECODER_PPR.read()
@@ -1717,8 +1717,8 @@ class TMC4671:
             raise gcmd.error(
                 "Motor resistance not calibrated. "
                 "Run startup calibration (FIRMWARE_RESTART) first.")
-        pulse_duration = gcmd.get_float('PULSE_DURATION', 0.2,
-                                        minval=0.05, maxval=2.0)
+        pulse_duration = gcmd.get_float('PULSE_DURATION', 0.05,
+                                        minval=0.01, maxval=2.0)
         current_override = gcmd.get_float('CURRENT', None, minval=0.1)
         toolhead = self.printer.lookup_object('toolhead')
         enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
