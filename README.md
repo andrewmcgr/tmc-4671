@@ -283,43 +283,53 @@ PID stepper_x parameters:
 
 ### TMC_TUNE_MOTION_PID
 
-Autotune velocity and position PID coefficients using S-IMC and queue the results for `SAVE_CONFIG`.
+Autotune velocity and position PID coefficients and queue the results for `SAVE_CONFIG`.
+
+Two paths are available:
+
+- **Bandwidth path** (default): computes gains from motor physics config variables (`jmotor`, `jload`, `motor_kt`, `velocity_alpha`). No extra parameters needed.
+- **SIMC/lambda path**: uses measured Kt and lambda time constants. Activated by supplying `KT` (or `HOLDING_CURRENT`+`HOLDING_TORQUE`).
 
 ```
+TMC_TUNE_MOTION_PID STEPPER=stepper_x [VELOCITY_BANDWIDTH=<hz>] [POSITION_BANDWIDTH=<hz>]
 TMC_TUNE_MOTION_PID STEPPER=stepper_x KT=<nm/a> [LAMBDA_V=<val>] [LAMBDA_P=<val>]
 TMC_TUNE_MOTION_PID STEPPER=stepper_x HOLDING_CURRENT=<a> HOLDING_TORQUE=<nm> [LAMBDA_V=<val>] [LAMBDA_P=<val>]
 ```
 
 | Parameter | Default | Description |
 |---|---|---|
-| `KT` | — | Motor torque constant in Nm/A. |
+| `VELOCITY_BANDWIDTH` | 450.0 | Velocity loop bandwidth in Hz (bandwidth path). |
+| `POSITION_BANDWIDTH` | 100.0 | Position loop bandwidth in Hz (bandwidth path). |
+| `KT` | — | Motor torque constant in Nm/A. Selects SIMC/lambda path. |
 | `HOLDING_CURRENT` | — | Rated holding current in A (alternative to `KT`). |
 | `HOLDING_TORQUE` | — | Rated holding torque in Nm (alternative to `KT`). |
-| `LAMBDA_V` | 100.0 | Velocity loop closed-loop time constant (smaller = faster/noisier). |
-| `LAMBDA_P` | 400.0 | Position loop closed-loop time constant. Should be at least 2× `LAMBDA_V`. |
+| `LAMBDA_V` | 100.0 | Velocity loop closed-loop time constant (SIMC path; smaller = faster/noisier). |
+| `LAMBDA_P` | 400.0 | Position loop closed-loop time constant (SIMC path; should be ≥ 2× `LAMBDA_V`). |
 
-The command also suggests biquad filter frequencies but does not apply them.
+Motor physics config variables (set in `[tmc4671 stepper_x]`): `jmotor` (default 8.45e-6 kg·m²), `jload` (default 5e-5 kg·m²), `motor_kt` (default 0.0156 Nm/A), `velocity_alpha` (default 0.35).
 
 ### TMC_DEBUG_TUNING
 
-Report what the PID tuning helpers would compute given the current motor parameters, without writing anything to the controller. Compares computed values against the currently active register values.
+Report what the PID tuning helpers would compute given the current motor parameters, without writing anything to the controller. Compares computed values against the currently active register values. Always shows the bandwidth-method section; shows the SIMC/lambda motion PID section only when `KT` is supplied.
 
 ```
-TMC_DEBUG_TUNING STEPPER=stepper_x [CURRENT_BANDWIDTH=<hz>] [LAMBDA_V=<val>] [LAMBDA_P=<val>] [KT=<nm/a>] [R=<ohm>] [L=<henry>]
+TMC_DEBUG_TUNING STEPPER=stepper_x [CURRENT_BANDWIDTH=<hz>] [VELOCITY_BANDWIDTH=<hz>] [POSITION_BANDWIDTH=<hz>] [LAMBDA_V=<val>] [LAMBDA_P=<val>] [KT=<nm/a>] [R=<ohm>] [L=<henry>]
 TMC_DEBUG_TUNING STEPPER=stepper_x HOLDING_CURRENT=<a> HOLDING_TORQUE=<nm> [...]
 ```
 
 | Parameter | Default | Description |
 |---|---|---|
-| `CURRENT_BANDWIDTH` | 1200.0 | Bandwidth in Hz for the current PID calculation. |
-| `LAMBDA_V` | 100.0 | Velocity loop time constant for the motion PID calculation. |
-| `LAMBDA_P` | 400.0 | Position loop time constant for the motion PID calculation. |
-| `KT` | — | Motor torque constant in Nm/A (required for motion PID section). |
+| `CURRENT_BANDWIDTH` | 1200.0 | Bandwidth in Hz for the current PID section. |
+| `VELOCITY_BANDWIDTH` | 450.0 | Velocity loop bandwidth in Hz for the bandwidth motion PID section. |
+| `POSITION_BANDWIDTH` | 100.0 | Position loop bandwidth in Hz for the bandwidth motion PID section. |
+| `LAMBDA_V` | 100.0 | Velocity loop time constant for the SIMC motion PID section. |
+| `LAMBDA_P` | 400.0 | Position loop time constant for the SIMC motion PID section. |
+| `KT` | — | Motor torque constant in Nm/A (required to show SIMC motion PID section). |
 | `HOLDING_CURRENT` + `HOLDING_TORQUE` | — | Alternative way to supply Kt. |
 | `R` | — | Override motor winding resistance in Ω. Defaults to the measured value. |
 | `L` | — | Override motor winding inductance in H. Defaults to the measured value. |
 
-If motor R and L have not yet been measured (startup alignment pending), the current PID section reports that instead of computing. Providing `R` or `L` overrides the measured value for the computation without changing what is stored; the output labels overridden values accordingly. The motion PID section is skipped if no torque constant is provided.
+If motor R and L have not yet been measured (startup alignment pending), the current PID section reports that instead of computing. Providing `R` or `L` overrides the measured value for the computation without changing what is stored; the output labels overridden values accordingly.
 
 ### SET_TMC_BIQUAD_FILTER
 
