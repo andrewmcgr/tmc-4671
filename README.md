@@ -397,28 +397,29 @@ The command applies a rotating AC voltage vector on top of the measured motor wi
 
 ### TMC_MEASURE_INERTIA
 
-Measure the Kt/J ratio (motor torque constant divided by rotor + load inertia, in rad s⁻² A⁻¹) using a 4-pulse accel+brake cycle in open-loop UQ/UD-EXT mode. All other TMC4671 axes are de-energised during the measurement to eliminate CoreXY magnetic coupling.
+Measure the Kt/J ratio (motor torque constant divided by rotor + load inertia, in rad s⁻² A⁻¹) using closed-loop torque-mode pulses. The command automatically selects a test current low enough that the motor coasts to rest before the next pulse, using successive approximation starting from 20 mA. All other TMC4671 axes are de-energised during the measurement to eliminate CoreXY magnetic coupling.
 
 **Before running:** position the toolhead so the axis under test can move approximately 5 mm in both directions without hitting an endstop or physical obstruction.
 
 ```
-TMC_MEASURE_INERTIA STEPPER=stepper_x [PULSE_DURATION=0.05] [SETTLE_DURATION=1.0] [CURRENT=<amps>]
+TMC_MEASURE_INERTIA STEPPER=stepper_x [PULSE_DURATION=0.05] [SETTLE_DURATION=1.0] [MAX_CURRENT=<amps>]
 ```
 
 | Parameter | Default | Description |
 |---|---|---|
 | `STEPPER` | — | Stepper name to measure (required) |
-| `PULSE_DURATION` | 0.05 | Duration of each accel and brake phase in seconds (0.01–2.0). Increase if displacement is too small (high stiction). |
-| `SETTLE_DURATION` | 1.0 | Settle time between pulse pairs in seconds (0.1–5.0). Increase if readings are inconsistent (motor still moving between pulses). |
-| `CURRENT` | run_current / 2 | Test current in amps. Increase for high-stiction machines. Must not exceed run_current. |
+| `PULSE_DURATION` | 0.05 | Duration of each torque pulse in seconds (0.01–2.0). Increase if displacement is too small (high stiction). |
+| `SETTLE_DURATION` | 1.0 | Settle time after each pulse in seconds (0.1–5.0). Increase if readings are inconsistent (motor still moving between pulses). |
+| `MAX_CURRENT` | run_current / 2 | Upper bound on test current in amps. The command auto-scales downward from this limit. Must not exceed run_current. |
 
 The command:
 
 1. De-energises all other TMC4671 axes (stopped mode, gate driver off).
 2. Aligns the target rotor to PHI_E = 0 at half run-current.
-3. Runs four accel+brake pulse pairs (forward × 2, reverse × 2) and reads encoder displacement after each.
-4. Computes `Kt/J = d × 2π / (PPR × Iq × dt²)` and stores the result in `motor_jt`.
-5. Restores all other axes to their normal idle state.
+3. Searches for a test current that produces ~1/8 revolution displacement per pulse (successive approximation, starting at 20 mA).
+4. Runs four pulse pairs (forward × 2, reverse × 2) and reads encoder displacement after each.
+5. Computes `Kt/J = d × 4π / (PPR × Iq × dt²)` and stores the result in `motor_jt`.
+6. Restores all other axes to their normal idle state.
 
 The result is reported immediately and also shown in `TMC_DEBUG_MOTOR`. Requires prior startup alignment (motor_r must be non-zero). The measurement adds approximately 2.8 s to the command runtime.
 

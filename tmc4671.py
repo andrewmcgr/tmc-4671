@@ -1621,9 +1621,11 @@ class TMC4671:
         # Re-enable the configured biquad filters
         self._setup_filters()
 
-    # Measure Kt/J ratio via 4-pulse accel+brake cycles in closed-loop torque mode
-    def _measure_inertia_ratio(self, dwell, iq_lsbs, dt=0.05, settle=1.0):
-        settle = max(settle, dt)  # settling time between pulse pairs [s]
+    # Measure Kt/J ratio via successive-approximation current search and
+    # 4-pulse closed-loop torque measurement.
+    def _measure_inertia_ratio(self, dwell, dt=0.05, settle=1.0,
+                               max_iq_lsbs=None):
+        settle = max(settle, dt)
 
         ppr = self.fields.ABN_DECODER_PPR.read()
         if ppr == 0:
@@ -1631,28 +1633,67 @@ class TMC4671:
                             self.stepper_name)
             return
 
-        if iq_lsbs == 0:
-            logging.warning("TMC 4671 '%s' inertia: test current is zero, skipping",
+        current_scale = self.current_helper.current_scale
+        if max_iq_lsbs is None:
+            max_iq_lsbs = round(
+                self.current_helper.get_run_current() * 500 / current_scale)
+        if max_iq_lsbs < 1:
+            logging.warning("TMC 4671 '%s' inertia: max current too small, skipping",
                             self.stepper_name)
             return
 
-        iq_a = iq_lsbs * self.current_helper.current_scale * 1e-3
-        if iq_a < 1e-6:
-            logging.warning("TMC 4671 '%s' inertia: computed IQ too small (%.4f A), skipping",
-                            self.stepper_name, iq_a)
-            return
+        # Target displacement: one-eighth revolution (~45°). Small enough to stay
+        # within the required free-movement range; large enough for reliable counting.
+        target_counts = max(ppr // 8, 10)
 
         # Closed-loop torque mode: FOC rotates the field vector with the rotor so
-        # torque stays constant regardless of angular position.  Fixed-angle voltage
-        # (uq_ud_ext_mode) gives torque ∝ cos(N·θ) and saturates at a fixed angle
-        # set by pole geometry, making displacement independent of pulse duration.
+        # torque stays constant regardless of angular position.
         self.fields.UQ_UD_EXT.write(0, 0)
         self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
         self.fields.PHI_E_SELECTION.write(3)
         self.fields.MODE_MOTION.write(MotionMode.torque_mode)
 
+        pulse_displacements = []
         try:
-            pulse_displacements = []
+            # Phase 1: successive approximation — find the smallest current that
+            # produces ~target_counts displacement so the motor settles within
+            # settle_duration.  Start at 20 mA and scale up proportionally.
+            iq_lsbs = max(round(20.0 / current_scale), 1)
+            d_cal = 0
+            for _iter in range(10):
+                iq_lsbs = min(iq_lsbs, max_iq_lsbs)
+                self.fields.ABN_DECODER_COUNT.write(0)
+                self.fields.PID_TORQUE_FLUX_TARGET.write(0, iq_lsbs)
+                dwell(dt)
+                self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
+                dwell(settle)
+                raw = self.fields.ABN_DECODER_COUNT.read()
+                if raw > 0x7FFFFFFF:
+                    raw -= 0x100000000
+                d_cal = abs(raw)
+                if d_cal >= target_counts:
+                    break
+                if iq_lsbs >= max_iq_lsbs:
+                    break
+                if d_cal >= 4:
+                    # Proportional step with slight undershoot to avoid overshoot
+                    iq_lsbs = min(
+                        round(iq_lsbs * target_counts / d_cal * 0.9),
+                        max_iq_lsbs)
+                else:
+                    iq_lsbs = min(iq_lsbs * 2, max_iq_lsbs)
+
+            if d_cal < 2:
+                logging.warning(
+                    "TMC 4671 '%s' inertia: displacement too small (%d counts) "
+                    "at max current — motor may be constrained or PPR "
+                    "misconfigured, skipping",
+                    self.stepper_name, d_cal)
+                return
+
+            iq_a = iq_lsbs * current_scale * 1e-3
+
+            # Phase 2: 4-pulse measurement with the found current.
             for sign in (+1, -1):
                 for _ in range(2):
                     self.fields.ABN_DECODER_COUNT.write(0)
@@ -1661,13 +1702,15 @@ class TMC4671:
                     self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
                     dwell(settle)
                     raw = self.fields.ABN_DECODER_COUNT.read()
-                    # Interpret as signed 32-bit
                     if raw > 0x7FFFFFFF:
                         raw -= 0x100000000
                     pulse_displacements.append(abs(raw))
         finally:
             self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
             self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+
+        if len(pulse_displacements) < 4:
+            return
 
         d_fwd_1, d_fwd_2, d_bwd_1, d_bwd_2 = pulse_displacements
 
@@ -1693,8 +1736,8 @@ class TMC4671:
         backlash = ((d_fwd_2 - d_fwd_1) + (d_bwd_2 - d_bwd_1)) / 2.0
         logging.info(
             "TMC 4671 '%s' inertia: Kt/J=%.2f rad/s²/A, backlash≈%.1f counts "
-            "(PPR=%d, fwd=[%d,%d], bwd=[%d,%d])",
-            self.stepper_name, self.motor_jt, backlash, ppr,
+            "(PPR=%d, cal=%d, fwd=[%d,%d], bwd=[%d,%d])",
+            self.stepper_name, self.motor_jt, backlash, ppr, d_cal,
             d_fwd_1, d_fwd_2, d_bwd_1, d_bwd_2)
 
     cmd_TMC_MEASURE_INERTIA_help = (
@@ -1710,7 +1753,7 @@ class TMC4671:
                                         minval=0.01, maxval=2.0)
         settle_duration = gcmd.get_float('SETTLE_DURATION', 1.0,
                                          minval=0.1, maxval=5.0)
-        current_override = gcmd.get_float('CURRENT', None, minval=0.1)
+        max_current = gcmd.get_float('MAX_CURRENT', None, minval=0.1)
         toolhead = self.printer.lookup_object('toolhead')
         enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
         dwell = toolhead.dwell
@@ -1742,13 +1785,14 @@ class TMC4671:
                 try:
                     vm = self._read_vm()
                     run_current = self.current_helper.get_run_current()
-                    target_a = (min(current_override, run_current)
-                                if current_override is not None
+                    max_iq_a = (min(max_current, run_current)
+                                if max_current is not None
                                 else run_current / 2.0)
-                    iq_lsbs = round(
-                        target_a * 1e3 / self.current_helper.current_scale)
+                    max_iq_lsbs = round(
+                        max_iq_a * 1e3 / self.current_helper.current_scale)
+                    align_a = run_current / 2.0
                     align_u = min(
-                        round((target_a * self.motor_r / vm) * 32767.0),
+                        round((align_a * self.motor_r / vm) * 32767.0),
                         16383)
                     align_u = max(align_u, 200)
 
@@ -1762,9 +1806,10 @@ class TMC4671:
                     dwell(0.75)
                     self.fields.ABN_DECODER_COUNT.write(0)
 
-                    self._measure_inertia_ratio(dwell, iq_lsbs,
+                    self._measure_inertia_ratio(dwell,
                                                 dt=pulse_duration,
-                                                settle=settle_duration)
+                                                settle=settle_duration,
+                                                max_iq_lsbs=max_iq_lsbs)
                 finally:
                     self.fields.UQ_UD_EXT.write(0, 0)
                     self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
