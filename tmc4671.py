@@ -685,8 +685,11 @@ class TMCVirtualPinHelper:
         logging.info("TMC virtual endstop %s, mask is %x", self.name, self.status_mask)
         ppins = self.printer.lookup_object("pins")
         ppins.register_chip("%s" % (self.name), self)
+        self.printer.register_event_handler("homing:homing_move_begin",
+                                            self.handle_homing_move_begin)
+        self.printer.register_event_handler("homing:homing_move_end",
+                                            self.handle_homing_move_end)
     def setup_pin(self, pin_type, pin_params):
-        # Validate pin
         ppins = self.printer.lookup_object('pins')
         if pin_type != 'endstop' or pin_params['pin'] != 'virtual_endstop':
             raise ppins.error("tmc virtual endstop only useful as endstop")
@@ -694,11 +697,6 @@ class TMCVirtualPinHelper:
             raise ppins.error("Can not pullup/invert tmc virtual pin")
         if self.diag_pin is None:
             raise ppins.error("tmc virtual endstop requires diag pin config")
-        # Setup for sensorless homing
-        self.printer.register_event_handler("homing:homing_move_begin",
-                                            self.handle_homing_move_begin)
-        self.printer.register_event_handler("homing:homing_move_end",
-                                            self.handle_homing_move_end)
         self.mcu_endstop = ppins.setup_pin('endstop', self.diag_pin)
         return self.mcu_endstop
     def handle_homing_move_begin(self, hmove):
