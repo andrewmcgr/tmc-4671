@@ -474,6 +474,10 @@ class CurrentHelper:
         self.flux_limit = self._calc_flux_limit(self.run_current)
         self._write_field("PID_TORQUE_FLUX_LIMITS", self.flux_limit)
         return self.flux_limit
+    def apply_current_limit(self, current):
+        flux_limit = self._calc_flux_limit(current)
+        self._write_field("PID_TORQUE_FLUX_LIMITS", flux_limit)
+        return flux_limit
     def set_flux_current(self, current):
         self.flux_current = current
         self.flux_limit = self._calc_flux_limit(self.flux_current)
@@ -712,7 +716,7 @@ class TMCVirtualPinHelper:
         if self.mcu_endstop not in hmove.get_mcu_endstops():
             return
         #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 3000)
-        self.current_helper.set_current(self.current_helper.get_homing_current())
+        self.current_helper.apply_current_limit(self.current_helper.get_homing_current())
     def handle_homing_move_end(self, hmove):
         status = self.mcu_tmc.get_register("STATUS_FLAGS")
         fmt = self.fields.pretty_format("STATUS_FLAGS", status)
@@ -724,7 +728,7 @@ class TMCVirtualPinHelper:
         if self.mcu_endstop not in hmove.get_mcu_endstops():
             return
         #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 0x300000)
-        self.current_helper.set_current(self.current_helper.get_run_current())
+        self.current_helper.apply_current_limit(self.current_helper.get_run_current())
 
 
 ######################################################################
