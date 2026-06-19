@@ -663,9 +663,14 @@ class TMCVirtualPinHelper:
         self.diag_pin = config.get('diag_pin', None)
         self.mcu_endstop = None
         self.en_pwm = False
-        # Stalls show up as either IQ_ERRSUM or V_OUTPUT.
-        # Include the reference switches so can connect endstops
-        # to driver boards.
+        self._saved_velocity_limit = 0x10000000
+        # PID_V_OUTPUT_LIMIT fires during position-mode homing acceleration
+        # (position PID immediately saturates on large position error, velocity
+        # I-term winds up before the motor reaches the hard stop), causing false
+        # triggers.  PID_IQ_TARGET_LIMIT is the reliable indicator: we set
+        # PID_VELOCITY_LIMIT to 0x7FFFFFFF during the homing move so the
+        # velocity PID output can grow until it exceeds PID_TORQUE_FLUX_LIMITS
+        # (homing current limit), firing within ~1 PWM cycle at true stall.
         self.status_mask_entries = config.getlist("homing_mask",
                                                   ["PID_IQ_OUTPUT_LIMIT",
                                                    "PID_ID_OUTPUT_LIMIT",
@@ -675,7 +680,7 @@ class TMCVirtualPinHelper:
                                                    "PID_IQ_TARGET_LIMIT",
                                                    "PID_ID_TARGET_LIMIT",
                                                    #"PID_X_OUTPUT_LIMIT",
-                                                   "PID_V_OUTPUT_LIMIT",
+                                                   #"PID_V_OUTPUT_LIMIT",
                                                    "REF_SW_R",
                                                    "REF_SW_L"])
         self.status_mask = 0
@@ -715,7 +720,8 @@ class TMCVirtualPinHelper:
         logging.info("TMC 4671 '%s' status at homing start %s", self.name, fmt)
         if self.mcu_endstop not in hmove.get_mcu_endstops():
             return
-        #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 3000)
+        self._saved_velocity_limit = self.mcu_tmc.get_register("PID_VELOCITY_LIMIT")
+        self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 0x7fffffff)
         self.current_helper.apply_current_limit(self.current_helper.get_homing_current())
     def handle_homing_move_end(self, hmove):
         status = self.mcu_tmc.get_register("STATUS_FLAGS")
@@ -727,7 +733,7 @@ class TMCVirtualPinHelper:
         self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         if self.mcu_endstop not in hmove.get_mcu_endstops():
             return
-        #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 0x300000)
+        self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", self._saved_velocity_limit)
         self.current_helper.apply_current_limit(self.current_helper.get_run_current())
 
 
