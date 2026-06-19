@@ -668,7 +668,7 @@ class TMCVirtualPinHelper:
                                                    "PID_X_ERRSUM_LIMIT",
                                                    #"PID_IQ_ERRSUM_LIMIT",
                                                    #"PID_ID_ERRSUM_LIMIT",
-                                                   #"PID_IQ_TARGET_LIMIT",
+                                                   "PID_IQ_TARGET_LIMIT",
                                                    "PID_ID_TARGET_LIMIT",
                                                    #"PID_X_OUTPUT_LIMIT",
                                                    "PID_V_OUTPUT_LIMIT",
