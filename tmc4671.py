@@ -1713,6 +1713,11 @@ class TMC4671:
                     other.error_helper.stop_checks()
                     other.fields.MODE_MOTION.write(MotionMode.stopped_mode)
                     other.fields.PWM_CHOP.write(0)
+                    if other.fields6100 is not None:
+                        other.mcu_tmc6100.set_register(
+                            "GCONF",
+                            other.fields6100.set_field("disable", 1),
+                            None)
 
             with self.mutex:
                 print_time = toolhead.get_last_move_time()
@@ -1754,6 +1759,11 @@ class TMC4671:
             for other in others:
                 with other.mutex:
                     other.fields.PWM_CHOP.write(7)
+                    if other.fields6100 is not None:
+                        other.mcu_tmc6100.set_register(
+                            "GCONF",
+                            other.fields6100.set_field("disable", 0),
+                            None)
 
         if self.motor_jt == 0.0:
             gcmd.respond_info(
