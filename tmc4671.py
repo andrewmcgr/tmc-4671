@@ -668,7 +668,7 @@ class TMCVirtualPinHelper:
                                                    "PID_X_ERRSUM_LIMIT",
                                                    #"PID_IQ_ERRSUM_LIMIT",
                                                    #"PID_ID_ERRSUM_LIMIT",
-                                                   #"PID_IQ_TARGET_LIMIT",
+                                                   "PID_IQ_TARGET_LIMIT",
                                                    "PID_ID_TARGET_LIMIT",
                                                    #"PID_X_OUTPUT_LIMIT",
                                                    "PID_V_OUTPUT_LIMIT",
@@ -685,8 +685,11 @@ class TMCVirtualPinHelper:
         logging.info("TMC virtual endstop %s, mask is %x", self.name, self.status_mask)
         ppins = self.printer.lookup_object("pins")
         ppins.register_chip("%s" % (self.name), self)
+        self.printer.register_event_handler("homing:homing_move_begin",
+                                            self.handle_homing_move_begin)
+        self.printer.register_event_handler("homing:homing_move_end",
+                                            self.handle_homing_move_end)
     def setup_pin(self, pin_type, pin_params):
-        # Validate pin
         ppins = self.printer.lookup_object('pins')
         if pin_type != 'endstop' or pin_params['pin'] != 'virtual_endstop':
             raise ppins.error("tmc virtual endstop only useful as endstop")
@@ -694,18 +697,11 @@ class TMCVirtualPinHelper:
             raise ppins.error("Can not pullup/invert tmc virtual pin")
         if self.diag_pin is None:
             raise ppins.error("tmc virtual endstop requires diag pin config")
-        # Setup for sensorless homing
-        self.printer.register_event_handler("homing:homing_move_begin",
-                                            self.handle_homing_move_begin)
-        self.printer.register_event_handler("homing:homing_move_end",
-                                            self.handle_homing_move_end)
         self.mcu_endstop = ppins.setup_pin('endstop', self.diag_pin)
         return self.mcu_endstop
     def handle_homing_move_begin(self, hmove):
-        if self.mcu_endstop not in hmove.get_mcu_endstops():
-            return
-        #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 3000)
-        self.current_helper.set_current(self.current_helper.get_homing_current())
+        # Always observe: set STATUS_MASK and log flags for any homing move on this axis.
+        # Homing current change is only applied when this is the active (virtual) endstop.
         self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         self.printer.lookup_object('toolhead').dwell(0.005)
         self.mcu_tmc.write_field("STATUS_MASK", self.status_mask)
@@ -713,17 +709,22 @@ class TMCVirtualPinHelper:
         status = self.mcu_tmc.get_register("STATUS_FLAGS")
         fmt = self.fields.pretty_format("STATUS_FLAGS", status)
         logging.info("TMC 4671 '%s' status at homing start %s", self.name, fmt)
+        if self.mcu_endstop not in hmove.get_mcu_endstops():
+            return
+        #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 3000)
+        self.current_helper.set_current(self.current_helper.get_homing_current())
     def handle_homing_move_end(self, hmove):
         status = self.mcu_tmc.get_register("STATUS_FLAGS")
         fmt = self.fields.pretty_format("STATUS_FLAGS", status)
         logging.info("TMC 4671 '%s' status at homing end %s", self.name, fmt)
+        # Always: clear STATUS_MASK after any homing move on this axis.
+        self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
+        self.mcu_tmc.write_field("STATUS_MASK", 0)
+        self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         if self.mcu_endstop not in hmove.get_mcu_endstops():
             return
         #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 0x300000)
-        self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         self.current_helper.set_current(self.current_helper.get_run_current())
-        self.mcu_tmc.write_field("STATUS_MASK", 0)
-        self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
 
 
 ######################################################################

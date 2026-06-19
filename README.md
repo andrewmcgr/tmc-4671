@@ -34,7 +34,7 @@ Klipper driver features:
 * PID configuration for the velocity and position loops (manual tuning required, for now)
 * ADC autocalibration
 * Encoder autoinitialisation for relative encoders, or absolute encoders not indexed to the electrical phase of the motor
-* Sensorless homing (not currently working) by setting a low homing current and detecting failure to track the commanded position within the driver
+* Sensorless homing by setting a low homing current and using `PID_IQ_TARGET_LIMIT` to detect stall within a few PWM cycles of contact
 * On-driver limit switch pin support
 * Optional TMC6100 output driver initialisation support (requred for the eval board, not used for OpenFFBoard or Ouroboros)
 * Virtual steps-per-revolution and microsteps. Klipper treats the TMC 4671 as if it were a conventional stepper driver, all servo activity takes place in hardware. Thus the steps and microsteps in the configuration have no particular relation to the motor, and instead are translated to position angle targets within the TMC 4671.
@@ -85,9 +85,10 @@ full_steps_per_rotation: 4096
 step_pin: tmcx:PB11
 dir_pin: tmcx:PA0
 enable_pin: tmcx:PE7
-endstop_pin: ^MCU_M1_STOP
+endstop_pin: ^MCU_M1_STOP                    # physical endstop
+#endstop_pin: tmc4671_stepper_x:virtual_endstop  # sensorless homing (diag_pin required)
 homing_speed: 40
-homing_retract_dist: 0
+homing_retract_dist: 5   # must not be 0 for sensorless homing; fine to reduce for physical endstop
 position_min: 0
 position_max: 350
 position_endstop: 350
@@ -98,6 +99,8 @@ spi_bus: spi1
 spi_speed: 1000000
 current_scale_ma_lsb: 1.155
 adc_temp_reg: AGPI_B
+#diag_pin: ^tmcx:PE8       # sensorless homing: OpenFFBoard STATUS output pin
+#homing_current: 0.5       # sensorless homing: start here, increase if false triggers (see Sensorless homing section)
 run_current: 3.54
 flux_current: 0.0
 foc_motor_type: 2
@@ -171,6 +174,62 @@ TMC_TUNE_MOTION_PID LAMBDA_V=80 LAMBDA_P=180 KT=0.022 STEPPER=stepper_y
 depending on whether you know a KT value (in nM/A) or holding specifications. Lambda_v and Lambda_p are measures of how aggressive the tuning will be. Lambda_v can go from approximately 45 up, and Lambda_p should be at least twice Lambda_v; the default values are Lambda_v=100 and Lambda_p=400. `SAVE_CONFIG` will save the tuning values. The command will also suggest filter frequencies, but will not apply them.
 
 If the motors make noise at rest after autotuning, increase the Lambda values. If not, consider decreasing them; the minimum value that remains quiet at rest is likely also the optimal value.
+
+## Sensorless homing
+
+The TMC 4671 can signal stall detection via its STATUS output pin, enabling sensorless homing without a physical endstop.
+
+**How it works:** at the start of a homing move the driver programs a STATUS_MASK into the chip. When the motor stalls, the current loop immediately demands more torque than `homing_current` allows — the `PID_IQ_TARGET_LIMIT` flag fires within a few PWM cycles (~40 µs at 25 kHz), the STATUS pin goes high, the MCU endstop triggers, and the homing move stops. This is a P-term response — no integrator wind-up required, so detection is nearly instantaneous at contact.
+
+### Hardware
+
+Connect the STATUS output of the TMC 4671 (or driver board) to a free MCU GPIO. Check your board schematic for the pin and its polarity; many boards need a pull-up (`^`).
+
+### Configuration
+
+In `[stepper_x]`, point the endstop at the virtual endstop and set a non-zero retract distance:
+
+```ini
+[stepper_x]
+endstop_pin: tmc4671_stepper_x:virtual_endstop
+homing_retract_dist: 5
+```
+
+In `[tmc4671 stepper_x]`, add the diag pin and homing current:
+
+```ini
+diag_pin: ^tmcx:PE8        # OpenFFBoard STATUS output pin; ^ for pull-up
+#diag_pin: ^MCU_DIAG_PIN  # other hardware: MCU GPIO connected to STATUS output
+homing_current: 0.5        # starting point — tune as described below
+```
+
+### Tuning homing_current
+
+`homing_current` is written to `PID_TORQUE_FLUX_LIMITS` at the start of each homing move. The detection fires the instant the velocity PID demands more current than this limit. During free motion the demanded current is only what is needed to overcome friction and inertia; at stall it saturates immediately.
+
+The correct value is **just above the peak current the motor needs to move freely at homing speed:**
+
+- **Start at 0.5 A.** If the homing move triggers the endstop before reaching the hard stop (false trigger during free motion), increase in steps of 0.1–0.25 A until false triggers stop.
+- **Do not set it to `run_current`.** At full rated current the motor pushes hard into the hard stop before stopping, stressing the frame and endstop unnecessarily.
+- A typical working range for NEMA-17 steppers at homing speeds up to 100 mm/s is **0.5–1.5 A.** Heavier carriages or faster homing speeds require more.
+
+To measure the actual free-motion demand: home the axis without touching the hard stop, then immediately run `TMC_DEBUG_CURRENT` and read the `IQ actual` value. Set `homing_current` to approximately 1.5× that value.
+
+### homing_retract_dist must not be zero
+
+If `homing_retract_dist: 0`, the carriage stays at the hard stop after the first homing pass. On the next G28 the STATUS pin is already high (stall flags are still set from the previous contact), so there is no rising edge for the MCU endstop to detect and the second pass will not stop on contact. Set `homing_retract_dist` to at least 3–5 mm.
+
+### Homing mask (advanced)
+
+The set of STATUS_FLAGS bits that activate the STATUS pin is configurable via `homing_mask`. The default is suitable for most installations:
+
+```ini
+homing_mask: PID_IQ_OUTPUT_LIMIT, PID_ID_OUTPUT_LIMIT, PID_X_ERRSUM_LIMIT,
+             PID_IQ_TARGET_LIMIT, PID_ID_TARGET_LIMIT, PID_V_OUTPUT_LIMIT,
+             REF_SW_R, REF_SW_L
+```
+
+`PID_IQ_TARGET_LIMIT` is the primary fast-acting stall flag. `REF_SW_R` and `REF_SW_L` allow physical limit switches to be wired to the driver board's reference switch inputs and used as endstops without an additional MCU GPIO. Most users should not need to change this.
 
 ## G-code command reference
 
