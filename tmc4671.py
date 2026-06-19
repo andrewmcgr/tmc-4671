@@ -1398,9 +1398,9 @@ class TMC4671:
         velocity_i = (1.0 - self.velocity_alpha) * omega_bw / (4.0 * f_loop)
         return velocity_p, velocity_i
 
-    def _calc_position_pid(self, velocity_bandwidth, position_bandwidth):
+    def _calc_position_pid(self, position_bandwidth):
         npoles = self.fields.N_POLE_PAIRS.read()
-        position_p = velocity_bandwidth * 60.0 * npoles / (position_bandwidth * 65536.0)
+        position_p = 2.0 * math.pi * position_bandwidth / npoles
         return position_p
 
     # Align motor and measure resistance and inductance on startup
@@ -1819,7 +1819,7 @@ class TMC4671:
             )
         else:
             p_v, i_v = self._calc_velocity_pid(v_bw)
-            p_p = self._calc_position_pid(v_bw, p_bw)
+            p_p = self._calc_position_pid(p_bw)
             i_p = 0.0
             vel_filter_freq = round(v_bw)
             msg = (
@@ -2437,7 +2437,7 @@ class TMC4671:
             "  POSITION_BANDWIDTH=%.1f Hz) ---" % (v_bw, p_bw)
         )
         p_v_bw, i_v_bw = self._calc_velocity_pid(v_bw)
-        p_p_bw = self._calc_position_pid(v_bw, p_bw)
+        p_p_bw = self._calc_position_pid(p_bw)
         p_v_cur = self.pid_helpers["VELOCITY_P"].from_f(
             self.fields.PID_VELOCITY_P.read()
         )
