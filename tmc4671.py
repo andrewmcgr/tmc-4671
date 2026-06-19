@@ -1656,11 +1656,15 @@ class TMC4671:
                 self.fields.ABN_DECODER_COUNT.write(0)
                 self.fields.UQ_EXT.write(sign * iq_test_u)
                 dwell(dt)
+                # Read at the peak of the accel phase, before braking starts.
+                # d_mid = ½·α·dt²; this avoids contamination from friction
+                # asymmetry during the braking phase (which can cause the motor
+                # to bounce back and land at an unpredictable resting position).
+                raw = self.fields.ABN_DECODER_COUNT.read()
                 self.fields.UQ_EXT.write(-sign * iq_test_u)
                 dwell(dt)
                 self.fields.UQ_EXT.write(0)
                 dwell(settle)
-                raw = self.fields.ABN_DECODER_COUNT.read()
                 # Interpret as signed 32-bit
                 if raw > 0x7FFFFFFF:
                     raw -= 0x100000000
@@ -1681,8 +1685,8 @@ class TMC4671:
 
         d_avg = (d_fwd + d_bwd) / 2.0
 
-        # d = alpha * dt^2  →  alpha [rad/s²] = d [counts] * 2π / (PPR * dt²)
-        alpha = d_avg * 2.0 * math.pi / (ppr * dt * dt)
+        # d_mid = ½·alpha·dt²  →  alpha [rad/s²] = d_mid [counts] * 4π / (PPR * dt²)
+        alpha = d_avg * 4.0 * math.pi / (ppr * dt * dt)
         self.motor_jt = alpha / iq_a   # Kt/J  [rad s⁻² A⁻¹]
 
         backlash = ((d_fwd_2 - d_fwd_1) + (d_bwd_2 - d_bwd_1)) / 2.0
