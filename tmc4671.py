@@ -924,6 +924,11 @@ class TMC4671:
         self.motor_lq = 0.0
         self.motor_saliency = 1.0
         self.dead_time_v = 0.0
+        self.jmotor = config.getfloat('jmotor', 8.45e-6, above=0.)
+        self.jload  = config.getfloat('jload',  5e-5,    above=0.)
+        self.motor_kt = config.getfloat('motor_kt', 0.0156, above=0.)
+        self.velocity_alpha = config.getfloat('velocity_alpha', 0.35,
+                                              minval=0., maxval=1.)
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, field_meta,
                                    TMC_FREQUENCY, pin_option="cs_pin")
         self.fields = FieldProxy(field_meta, self.mcu_tmc)
@@ -1382,6 +1387,16 @@ class TMC4671:
         i_p = 1. / t_ip
 
         return p_v, i_v, p_p, i_p, k_v, k_p
+
+    def _calc_velocity_pid(self, bandwidth):
+        omega_bw = 2.0 * math.pi * bandwidth
+        npoles = self.fields.N_POLE_PAIRS.read()
+        j_total = self.jmotor + self.jload
+        velocity_p = omega_bw * (2.0 * math.pi * j_total) / (60.0 * npoles * self.motor_kt)
+        nsmpl = self.fields.MODE_PID_SMPL.read()
+        f_loop = self.pwmfreq / (nsmpl + 1)
+        velocity_i = (1.0 - self.velocity_alpha) * omega_bw / (4.0 * f_loop)
+        return velocity_p, velocity_i
 
     # Align motor and measure resistance and inductance on startup
     def _align_and_measure(self, offsets, print_time):
