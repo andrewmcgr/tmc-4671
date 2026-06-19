@@ -923,6 +923,7 @@ class TMC4671:
         self.motor_ld = 0.0
         self.motor_lq = 0.0
         self.motor_saliency = 1.0
+        self.motor_jt = 0.0
         self.dead_time_v = 0.0
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, field_meta,
                                    TMC_FREQUENCY, pin_option="cs_pin")
@@ -1596,6 +1597,11 @@ class TMC4671:
             self.fields.HALL_PHI_E_OFFSET.write(-self.fields.HALL_PHI_E.read() % 65536)
             self.fields.ABN_DECODER_COUNT.write(0)
             self.fields.ABN_DECODER_PHI_E_OFFSET.write(0)
+            try:
+                self._measure_inertia_ratio(dwell, test2_U, vm)
+            except Exception as e:
+                logging.warning("TMC 4671 '%s' inertia measurement failed: %s",
+                                self.stepper_name, str(e))
         # Put motion config back how it was / safe stopped state
         self.fields.UQ_UD_EXT.write(0, 0)
         self._reset_targets()
@@ -1604,6 +1610,74 @@ class TMC4671:
 
         # Re-enable the configured biquad filters
         self._setup_filters()
+
+    # Measure Kt/J ratio via 4-pulse accel+brake cycles in UQ/UD-EXT mode
+    def _measure_inertia_ratio(self, dwell, iq_test_u, vm):
+        dt = 0.2      # accel / brake phase duration [s]
+        settle = 0.3  # settling time between pulse pairs [s]
+
+        ppr = self.fields.ABN_DECODER_PPR.read()
+        if ppr == 0:
+            logging.warning("TMC 4671 '%s' inertia: ABN_DECODER_PPR=0, skipping",
+                            self.stepper_name)
+            return
+
+        if iq_test_u == 0 or self.motor_r < 1e-6:
+            logging.warning("TMC 4671 '%s' inertia: test voltage or R is zero, skipping",
+                            self.stepper_name)
+            return
+
+        # DC-approximation current [A]: I ≈ V_q / R  (back-EMF negligible at these speeds)
+        iq_a = (iq_test_u / 32767.0) * vm / self.motor_r
+        if iq_a < 1e-6:
+            logging.warning("TMC 4671 '%s' inertia: computed IQ too small (%.4f A), skipping",
+                            self.stepper_name, iq_a)
+            return
+
+        # Release d-axis hold so the rotor can rotate freely under q-axis torque
+        self.fields.UD_EXT.write(0)
+
+        pulse_displacements = []
+        for sign in (+1, -1):
+            for _ in range(2):
+                self.fields.ABN_DECODER_COUNT.write(0)
+                self.fields.UQ_EXT.write(sign * iq_test_u)
+                dwell(dt)
+                self.fields.UQ_EXT.write(-sign * iq_test_u)
+                dwell(dt)
+                self.fields.UQ_EXT.write(0)
+                dwell(settle)
+                raw = self.fields.ABN_DECODER_COUNT.read()
+                # Interpret as signed 32-bit
+                if raw > 0x7FFFFFFF:
+                    raw -= 0x100000000
+                pulse_displacements.append(abs(raw))
+
+        d_fwd_1, d_fwd_2, d_bwd_1, d_bwd_2 = pulse_displacements
+
+        # Use the second pulse per direction (first may absorb backlash)
+        d_fwd = d_fwd_2
+        d_bwd = d_bwd_2
+
+        if d_fwd < 2 and d_bwd < 2:
+            logging.warning(
+                "TMC 4671 '%s' inertia: displacement too small (%d, %d counts) — "
+                "motor may be constrained or PPR misconfigured, skipping",
+                self.stepper_name, d_fwd, d_bwd)
+            return
+
+        d_avg = (d_fwd + d_bwd) / 2.0
+
+        # d = alpha * dt^2  →  alpha [rad/s²] = d [counts] * 2π / (PPR * dt²)
+        alpha = d_avg * 2.0 * math.pi / (ppr * dt * dt)
+        self.motor_jt = alpha / iq_a   # Kt/J  [rad s⁻² A⁻¹]
+
+        backlash = ((d_fwd_2 - d_fwd_1) + (d_bwd_2 - d_bwd_1)) / 2.0
+        logging.info(
+            "TMC 4671 '%s' inertia: Kt/J=%.2f rad/s²/A, backlash≈%.1f counts "
+            "(PPR=%d, fwd=[%d,%d], bwd=[%d,%d])",
+            self.stepper_name, self.motor_jt, backlash, ppr,
+            d_fwd_1, d_fwd_2, d_bwd_1, d_bwd_2)
 
     # Tune PID via a setpoint change experiment
     # See https://folk.ntnu.no/skoge/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf
@@ -2243,6 +2317,7 @@ class TMC4671:
         ld_str = f"{self.motor_ld:.6f} H ({self.motor_ld * 1000.0:.3f} mH)" if self.motor_ld != 0.0 else "Not yet calibrated / measured"
         lq_str = f"{self.motor_lq:.6f} H ({self.motor_lq * 1000.0:.3f} mH)" if self.motor_lq != 0.0 else "Not yet calibrated / measured"
         sal_str = f"{self.motor_saliency:.4f}" if self.motor_saliency != 1.0 else "Not yet calibrated / measured"
+        jt_str = f"{self.motor_jt:.2f} rad/s\u00b2/A" if self.motor_jt != 0.0 else "Not yet measured"
 
         def _biquad_str(target):
             bf = self.biquad_filters[target]
@@ -2257,6 +2332,7 @@ class TMC4671:
             f"  Estimated Ld Inductance (motor_ld): {ld_str}\n"
             f"  Estimated Lq Inductance (motor_lq): {lq_str}\n"
             f"  Saliency Ratio (motor_saliency): {sal_str}\n"
+            f"  Inertia ratio (Kt/J): {jt_str}\n"
             f"  Current Loop Filters:\n"
             f"    Flux:   {_biquad_str('flux')}\n"
             f"    Torque: {_biquad_str('torque')}"
