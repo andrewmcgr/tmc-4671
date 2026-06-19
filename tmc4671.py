@@ -885,6 +885,10 @@ class MCU_TMC_SPI:
 # Main driver class
 ######################################################################
 
+# All live TMC4671 instances — used by TMC_MEASURE_INERTIA to mute
+# other axes while measuring one axis at a time.
+_all_tmc4671s = []
+
 
 class TMC4671:
     def __init__(self, config):
@@ -893,6 +897,7 @@ class TMC4671:
         self.name = config.get_name().split()[-1]
         self.mutex = self.printer.get_reactor().mutex()
         self.init_done = False
+        _all_tmc4671s.append(self)
         self.alignment_done = False
         self.fields = FieldHelper(Fields,
                                   signed_fields=SignedFields,
@@ -1010,6 +1015,13 @@ class TMC4671:
             self.name,
             self.cmd_TMC_MEASURE_IMPEDANCE,
             desc=self.cmd_TMC_MEASURE_IMPEDANCE_help,
+        )
+        gcode.register_mux_command(
+            "TMC_MEASURE_INERTIA",
+            "STEPPER",
+            self.name,
+            self.cmd_TMC_MEASURE_INERTIA,
+            desc=self.cmd_TMC_MEASURE_INERTIA_help,
         )
         # Allow other registers to be set from the config
         set_config_field = self.fields.set_config_field
@@ -1188,6 +1200,8 @@ class TMC4671:
         enable_line.register_state_callback(self._handle_stepper_enable)
 
     def _handle_disconnect(self):
+        if self in _all_tmc4671s:
+            _all_tmc4671s.remove(self)
         if self.fields6100 is not None:
             try:
                 self.mcu_tmc6100.set_register(
@@ -1678,6 +1692,78 @@ class TMC4671:
             "(PPR=%d, fwd=[%d,%d], bwd=[%d,%d])",
             self.stepper_name, self.motor_jt, backlash, ppr,
             d_fwd_1, d_fwd_2, d_bwd_1, d_bwd_2)
+
+    cmd_TMC_MEASURE_INERTIA_help = (
+        "Measure Kt/J inertia ratio on one axis; "
+        "position toolhead where it can move ~5 mm in both directions first"
+    )
+    def cmd_TMC_MEASURE_INERTIA(self, gcmd):
+        if self.motor_r < 1e-6:
+            raise gcmd.error(
+                "Motor resistance not calibrated. "
+                "Run startup calibration (FIRMWARE_RESTART) first.")
+        toolhead = self.printer.lookup_object('toolhead')
+        enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
+        dwell = toolhead.dwell
+
+        others = [t for t in _all_tmc4671s if t is not self and t.init_done]
+        try:
+            for other in others:
+                with other.mutex:
+                    other.error_helper.stop_checks()
+                    other.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+                    other.fields.PWM_CHOP.write(0)
+
+            with self.mutex:
+                print_time = toolhead.get_last_move_time()
+                old_phi_e_selection = self.fields.PHI_E_SELECTION.read()
+
+                if self.fields6100 is not None:
+                    self.mcu_tmc6100.set_register(
+                        "GCONF",
+                        self.fields6100.set_field("disable", 0),
+                        print_time)
+                enable_line.motor_enable(print_time)
+
+                try:
+                    vm = self._read_vm()
+                    target_a = self.current_helper.get_run_current() / 2.0
+                    align_u = min(
+                        round((target_a * self.motor_r / vm) * 32767.0),
+                        16383)
+                    align_u = max(align_u, 200)
+
+                    self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+                    self.fields.PHI_E_EXT.write(0)
+                    self.fields.PHI_E_SELECTION.write(1)
+                    self.fields.UQ_UD_EXT.write(align_u, 0)
+                    self._reset_targets()
+                    self.fields.MODE_MOTION.write(MotionMode.uq_ud_ext_mode)
+                    self.fields.PWM_CHOP.write(7)
+                    dwell(0.75)
+                    self.fields.ABN_DECODER_COUNT.write(0)
+
+                    self._measure_inertia_ratio(dwell, align_u, vm)
+                finally:
+                    self.fields.UQ_UD_EXT.write(0, 0)
+                    self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+                    self.fields.PHI_E_SELECTION.write(old_phi_e_selection)
+                    print_time = toolhead.get_last_move_time()
+                    enable_line.motor_disable(print_time)
+        finally:
+            for other in others:
+                with other.mutex:
+                    other.fields.PWM_CHOP.write(7)
+
+        if self.motor_jt == 0.0:
+            gcmd.respond_info(
+                "TMC 4671 '%s' inertia measurement failed or displacement too "
+                "small. Ensure the toolhead can move ~5 mm freely in both "
+                "directions, then re-run." % self.name)
+        else:
+            gcmd.respond_info(
+                "TMC 4671 '%s' Kt/J = %.2f rad/s\u00b2/A" % (
+                    self.name, self.motor_jt))
 
     # Tune PID via a setpoint change experiment
     # See https://folk.ntnu.no/skoge/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf

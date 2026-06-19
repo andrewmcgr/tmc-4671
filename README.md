@@ -395,6 +395,26 @@ TMC_MEASURE_IMPEDANCE STEPPER=stepper_x [F_INJECT=<hz>] [N_SAMPLES=<int>]
 
 The command applies a rotating AC voltage vector on top of the measured motor winding resistance (using the motor resistance measured during startup alignment) and accumulates raw d/q current readings stochastically to extract distinct admittances, converting them to Ld and Lq inductances. Requires prior startup alignment.
 
+### TMC_MEASURE_INERTIA
+
+Measure the Kt/J ratio (motor torque constant divided by rotor + load inertia, in rad s⁻² A⁻¹) using a 4-pulse accel+brake cycle in open-loop UQ/UD-EXT mode. All other TMC4671 axes are de-energised during the measurement to eliminate CoreXY magnetic coupling.
+
+**Before running:** position the toolhead so the axis under test can move approximately 5 mm in both directions without hitting an endstop or physical obstruction.
+
+```
+TMC_MEASURE_INERTIA STEPPER=stepper_x
+```
+
+No parameters. The command:
+
+1. De-energises all other TMC4671 axes (stopped mode, gate driver off).
+2. Aligns the target rotor to PHI_E = 0 at half run-current.
+3. Runs four accel+brake pulse pairs (forward × 2, reverse × 2) and reads encoder displacement after each.
+4. Computes `Kt/J = d × 2π / (PPR × Iq × dt²)` and stores the result in `motor_jt`.
+5. Restores all other axes to their normal idle state.
+
+The result is reported immediately and also shown in `TMC_DEBUG_MOTOR`. Requires prior startup alignment (motor_r must be non-zero). The measurement adds approximately 2.8 s to the command runtime.
+
 ### TMC_DEBUG_MOTOR
 
 Report the motor resistance, average inductance, estimated Ld inductance, estimated Lq inductance, and spatial saliency ratio measured during the last startup alignment (or manual `TMC_MEASURE_IMPEDANCE` run).
