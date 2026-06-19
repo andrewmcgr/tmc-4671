@@ -99,7 +99,7 @@ spi_bus: spi1
 spi_speed: 1000000
 current_scale_ma_lsb: 1.155
 adc_temp_reg: AGPI_B
-#diag_pin: ^MCU_DIAG_PIN   # sensorless homing: MCU GPIO connected to driver STATUS output
+#diag_pin: ^tmcx:PE8       # sensorless homing: OpenFFBoard STATUS output pin
 #homing_current: 0.5       # sensorless homing: start here, increase if false triggers (see Sensorless homing section)
 run_current: 3.54
 flux_current: 0.0
@@ -198,8 +198,9 @@ homing_retract_dist: 5
 In `[tmc4671 stepper_x]`, add the diag pin and homing current:
 
 ```ini
-diag_pin: ^MCU_DIAG_PIN   # MCU GPIO connected to the STATUS output; ^ if open-drain
-homing_current: 0.5       # starting point — tune as described below
+diag_pin: ^tmcx:PE8        # OpenFFBoard STATUS output pin; ^ for pull-up
+#diag_pin: ^MCU_DIAG_PIN  # other hardware: MCU GPIO connected to STATUS output
+homing_current: 0.5        # starting point — tune as described below
 ```
 
 ### Tuning homing_current
