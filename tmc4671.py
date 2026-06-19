@@ -1626,9 +1626,8 @@ class TMC4671:
         self._setup_filters()
 
     # Measure Kt/J ratio via 4-pulse accel+brake cycles in UQ/UD-EXT mode
-    def _measure_inertia_ratio(self, dwell, iq_test_u, vm):
-        dt = 0.2      # accel / brake phase duration [s]
-        settle = 0.3  # settling time between pulse pairs [s]
+    def _measure_inertia_ratio(self, dwell, iq_test_u, vm, dt=0.2):
+        settle = max(0.3, dt)  # settling time between pulse pairs [s]
 
         ppr = self.fields.ABN_DECODER_PPR.read()
         if ppr == 0:
@@ -1702,6 +1701,9 @@ class TMC4671:
             raise gcmd.error(
                 "Motor resistance not calibrated. "
                 "Run startup calibration (FIRMWARE_RESTART) first.")
+        pulse_duration = gcmd.get_float('PULSE_DURATION', 0.2,
+                                        minval=0.05, maxval=2.0)
+        current_override = gcmd.get_float('CURRENT', None, minval=0.1)
         toolhead = self.printer.lookup_object('toolhead')
         enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
         dwell = toolhead.dwell
@@ -1732,7 +1734,9 @@ class TMC4671:
 
                 try:
                     vm = self._read_vm()
-                    target_a = self.current_helper.get_run_current() / 2.0
+                    target_a = (current_override
+                                if current_override is not None
+                                else self.current_helper.get_run_current() / 2.0)
                     align_u = min(
                         round((target_a * self.motor_r / vm) * 32767.0),
                         16383)
@@ -1748,7 +1752,8 @@ class TMC4671:
                     dwell(0.75)
                     self.fields.ABN_DECODER_COUNT.write(0)
 
-                    self._measure_inertia_ratio(dwell, align_u, vm)
+                    self._measure_inertia_ratio(dwell, align_u, vm,
+                                                dt=pulse_duration)
                 finally:
                     self.fields.UQ_UD_EXT.write(0, 0)
                     self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
