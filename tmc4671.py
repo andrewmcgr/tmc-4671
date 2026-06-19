@@ -1612,7 +1612,10 @@ class TMC4671:
             self.fields.ABN_DECODER_COUNT.write(0)
             self.fields.ABN_DECODER_PHI_E_OFFSET.write(0)
             try:
-                self._measure_inertia_ratio(dwell, test2_U, vm)
+                iq_lsbs = round(
+                    self.current_helper.get_run_current() * 500.0
+                    / self.current_helper.current_scale)
+                self._measure_inertia_ratio(dwell, iq_lsbs)
             except Exception as e:
                 logging.warning("TMC 4671 '%s' inertia measurement failed: %s",
                                 self.stepper_name, str(e))
@@ -1625,8 +1628,8 @@ class TMC4671:
         # Re-enable the configured biquad filters
         self._setup_filters()
 
-    # Measure Kt/J ratio via 4-pulse accel+brake cycles in UQ/UD-EXT mode
-    def _measure_inertia_ratio(self, dwell, iq_test_u, vm, dt=0.2):
+    # Measure Kt/J ratio via 4-pulse accel+brake cycles in closed-loop torque mode
+    def _measure_inertia_ratio(self, dwell, iq_lsbs, dt=0.2):
         settle = max(0.3, dt)  # settling time between pulse pairs [s]
 
         ppr = self.fields.ABN_DECODER_PPR.read()
@@ -1635,40 +1638,49 @@ class TMC4671:
                             self.stepper_name)
             return
 
-        if iq_test_u == 0 or self.motor_r < 1e-6:
-            logging.warning("TMC 4671 '%s' inertia: test voltage or R is zero, skipping",
+        if iq_lsbs == 0:
+            logging.warning("TMC 4671 '%s' inertia: test current is zero, skipping",
                             self.stepper_name)
             return
 
-        # DC-approximation current [A]: I ≈ V_q / R  (back-EMF negligible at these speeds)
-        iq_a = (iq_test_u / 32767.0) * vm / self.motor_r
+        iq_a = iq_lsbs * self.current_helper.current_scale * 1e-3
         if iq_a < 1e-6:
             logging.warning("TMC 4671 '%s' inertia: computed IQ too small (%.4f A), skipping",
                             self.stepper_name, iq_a)
             return
 
-        # Release d-axis hold so the rotor can rotate freely under q-axis torque
-        self.fields.UD_EXT.write(0)
+        # Closed-loop torque mode: FOC rotates the field vector with the rotor so
+        # torque stays constant regardless of angular position.  Fixed-angle voltage
+        # (uq_ud_ext_mode) gives torque ∝ cos(N·θ) and saturates at a fixed angle
+        # set by pole geometry, making displacement independent of pulse duration.
+        self.fields.UQ_UD_EXT.write(0, 0)
+        self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
+        self.fields.PHI_E_SELECTION.write(3)
+        self.fields.MODE_MOTION.write(MotionMode.torque_mode)
 
-        pulse_displacements = []
-        for sign in (+1, -1):
-            for _ in range(2):
-                self.fields.ABN_DECODER_COUNT.write(0)
-                self.fields.UQ_EXT.write(sign * iq_test_u)
-                dwell(dt)
-                # Read at the peak of the accel phase, before braking starts.
-                # d_mid = ½·α·dt²; this avoids contamination from friction
-                # asymmetry during the braking phase (which can cause the motor
-                # to bounce back and land at an unpredictable resting position).
-                raw = self.fields.ABN_DECODER_COUNT.read()
-                self.fields.UQ_EXT.write(-sign * iq_test_u)
-                dwell(dt)
-                self.fields.UQ_EXT.write(0)
-                dwell(settle)
-                # Interpret as signed 32-bit
-                if raw > 0x7FFFFFFF:
-                    raw -= 0x100000000
-                pulse_displacements.append(abs(raw))
+        try:
+            pulse_displacements = []
+            for sign in (+1, -1):
+                for _ in range(2):
+                    self.fields.ABN_DECODER_COUNT.write(0)
+                    self.fields.PID_TORQUE_FLUX_TARGET.write(0, sign * iq_lsbs)
+                    dwell(dt)
+                    # Read at the peak of the accel phase, before braking starts.
+                    # d_mid = ½·α·dt²; this avoids contamination from friction
+                    # asymmetry during the braking phase (which can cause the motor
+                    # to bounce back and land at an unpredictable resting position).
+                    raw = self.fields.ABN_DECODER_COUNT.read()
+                    self.fields.PID_TORQUE_FLUX_TARGET.write(0, -sign * iq_lsbs)
+                    dwell(dt)
+                    self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
+                    dwell(settle)
+                    # Interpret as signed 32-bit
+                    if raw > 0x7FFFFFFF:
+                        raw -= 0x100000000
+                    pulse_displacements.append(abs(raw))
+        finally:
+            self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
+            self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
 
         d_fwd_1, d_fwd_2, d_bwd_1, d_bwd_2 = pulse_displacements
 
@@ -1738,9 +1750,12 @@ class TMC4671:
 
                 try:
                     vm = self._read_vm()
-                    target_a = (current_override
+                    run_current = self.current_helper.get_run_current()
+                    target_a = (min(current_override, run_current)
                                 if current_override is not None
-                                else self.current_helper.get_run_current() / 2.0)
+                                else run_current / 2.0)
+                    iq_lsbs = round(
+                        target_a * 1e3 / self.current_helper.current_scale)
                     align_u = min(
                         round((target_a * self.motor_r / vm) * 32767.0),
                         16383)
@@ -1756,7 +1771,7 @@ class TMC4671:
                     dwell(0.75)
                     self.fields.ABN_DECODER_COUNT.write(0)
 
-                    self._measure_inertia_ratio(dwell, align_u, vm,
+                    self._measure_inertia_ratio(dwell, iq_lsbs,
                                                 dt=pulse_duration)
                 finally:
                     self.fields.UQ_UD_EXT.write(0, 0)
