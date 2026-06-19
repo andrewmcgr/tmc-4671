@@ -85,9 +85,10 @@ full_steps_per_rotation: 4096
 step_pin: tmcx:PB11
 dir_pin: tmcx:PA0
 enable_pin: tmcx:PE7
-endstop_pin: ^MCU_M1_STOP
+endstop_pin: ^MCU_M1_STOP                    # physical endstop
+#endstop_pin: tmc4671_stepper_x:virtual_endstop  # sensorless homing (diag_pin required)
 homing_speed: 40
-homing_retract_dist: 0
+homing_retract_dist: 5   # must not be 0 for sensorless homing; fine to reduce for physical endstop
 position_min: 0
 position_max: 350
 position_endstop: 350
@@ -98,6 +99,8 @@ spi_bus: spi1
 spi_speed: 1000000
 current_scale_ma_lsb: 1.155
 adc_temp_reg: AGPI_B
+#diag_pin: ^MCU_DIAG_PIN   # sensorless homing: MCU GPIO connected to driver STATUS output
+#homing_current: 0.5       # sensorless homing: start here, increase if false triggers (see Sensorless homing section)
 run_current: 3.54
 flux_current: 0.0
 foc_motor_type: 2
