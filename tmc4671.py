@@ -924,6 +924,11 @@ class TMC4671:
         self.motor_lq = 0.0
         self.motor_saliency = 1.0
         self.dead_time_v = 0.0
+        self.jmotor = config.getfloat('jmotor', 8.45e-6, above=0.)
+        self.jload  = config.getfloat('jload',  5e-5,    above=0.)
+        self.motor_kt = config.getfloat('motor_kt', 0.0156, above=0.)
+        self.velocity_alpha = config.getfloat('velocity_alpha', 0.35,
+                                              minval=0., maxval=1.)
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, field_meta,
                                    TMC_FREQUENCY, pin_option="cs_pin")
         self.fields = FieldProxy(field_meta, self.mcu_tmc)
@@ -1383,6 +1388,21 @@ class TMC4671:
 
         return p_v, i_v, p_p, i_p, k_v, k_p
 
+    def _calc_velocity_pid(self, bandwidth):
+        omega_bw = 2.0 * math.pi * bandwidth
+        npoles = self.fields.N_POLE_PAIRS.read()
+        j_total = self.jmotor + self.jload
+        velocity_p = omega_bw * (2.0 * math.pi * j_total) / (60.0 * npoles * self.motor_kt)
+        nsmpl = self.fields.MODE_PID_SMPL.read()
+        f_loop = self.pwmfreq / (nsmpl + 1)
+        velocity_i = (1.0 - self.velocity_alpha) * omega_bw / (4.0 * f_loop)
+        return velocity_p, velocity_i
+
+    def _calc_position_pid(self, position_bandwidth):
+        npoles = self.fields.N_POLE_PAIRS.read()
+        position_p = 2.0 * math.pi * position_bandwidth / npoles
+        return position_p
+
     # Align motor and measure resistance and inductance on startup
     def _align_and_measure(self, offsets, print_time):
         dwell = self.printer.lookup_object('toolhead').dwell
@@ -1771,42 +1791,67 @@ class TMC4671:
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         self._init_registers(print_time)
 
-    cmd_TMC_TUNE_MOTION_PID_help = "Tune the current and torque PID coefficients"
+    cmd_TMC_TUNE_MOTION_PID_help = "Tune velocity and position PID coefficients"
     def cmd_TMC_TUNE_MOTION_PID(self, gcmd):
-        l_v = gcmd.get_float('LAMBDA_V', 100)
-        l_p = gcmd.get_float('LAMBDA_P', 400)
+        v_bw = gcmd.get_float('VELOCITY_BANDWIDTH', 450.0, above=0.)
+        p_bw = gcmd.get_float('POSITION_BANDWIDTH', 100.0, above=0.)
+        l_v = gcmd.get_float('LAMBDA_V', None)
+        l_p = gcmd.get_float('LAMBDA_P', None)
         I_h = gcmd.get_float('HOLDING_CURRENT', None)
         T_h = gcmd.get_float('HOLDING_TORQUE', None)
         Kt = gcmd.get_float('KT', None)
-        if Kt is None:
-            if (I_h is None or T_h is None):
-                gcmd.respond_info("Must supply KT or both HOLDING_TORQUE and HOLDING_CURRENT.")
-                return
+        if Kt is None and I_h is not None and T_h is not None:
             Kt = T_h / I_h
-        rotation_distance, _ = self.stepper.get_rotation_distance()
 
-        p_v, i_v, p_p, i_p, k_v, k_p = self._tune_motion_pid(Kt, l_v, l_p)
+        if Kt is not None:
+            l_v = l_v if l_v is not None else 100.0
+            l_p = l_p if l_p is not None else 400.0
+            p_v, i_v, p_p, i_p, k_v, k_p = self._tune_motion_pid(Kt, l_v, l_p)
+            vel_filter_freq = round(3.0 * self.pwmfreq / l_v)
+            msg = (
+                "Motion PID %s (SIMC/lambda).\n"
+                "k_v=%.5f  k_p=%.5f  KT=%.5f\n"
+                "Velocity P=%.5f  I=%.5f\n"
+                "Position  P=%.5f  I=%.5f\n"
+                "Velocity biquad LPF set to %d Hz\n"
+                "SAVE_CONFIG will write these values and restart."
+                % (self.name, k_v, k_p, Kt, p_v, i_v, p_p, i_p, vel_filter_freq)
+            )
+        else:
+            p_v, i_v = self._calc_velocity_pid(v_bw)
+            p_p = self._calc_position_pid(p_bw)
+            i_p = 0.0
+            vel_filter_freq = round(v_bw)
+            msg = (
+                "Motion PID %s (bandwidth).\n"
+                "Velocity bandwidth=%.1f Hz  Position bandwidth=%.1f Hz\n"
+                "Velocity P=%.5f  I=%.5f\n"
+                "Position  P=%.5f  I=%.5f\n"
+                "Velocity biquad LPF set to %d Hz\n"
+                "SAVE_CONFIG will write these values and restart."
+                % (self.name, v_bw, p_bw, p_v, i_v, p_p, i_p, vel_filter_freq)
+            )
 
+        vel_filter = BiquadFilter(
+            type='lpf', freq=vel_filter_freq,
+            slope=self.biquad_filters['velocity'].slope)
+        self.biquad_filters['velocity'] = vel_filter
+        self._setup_filter(BIQUAD_FILTER_TARGETS['velocity'], vel_filter)
         self.fields.PID_VELOCITY_P.write(self.pid_helpers["VELOCITY_P"].to_f(p_v))
         self.fields.PID_VELOCITY_I.write(self.pid_helpers["VELOCITY_I"].to_f(i_v))
         self.fields.PID_POSITION_P.write(self.pid_helpers["POSITION_P"].to_f(p_p))
         self.fields.PID_POSITION_I.write(self.pid_helpers["POSITION_I"].to_f(i_p))
-        # Store results for SAVE_CONFIG
         cfgname = "tmc4671 %s" % (self.name,)
         configfile = self.printer.lookup_object('configfile')
         configfile.set(cfgname, 'foc_PID_VELOCITY_P', "%.3f" % (p_v,))
         configfile.set(cfgname, 'foc_PID_VELOCITY_I', "%.3f" % (i_v,))
         configfile.set(cfgname, 'foc_PID_POSITION_P', "%.3f" % (p_p,))
         configfile.set(cfgname, 'foc_PID_POSITION_I', "%.3f" % (i_p,))
-
-        gcmd.respond_info(
-            "PID %s parameters calculated.\n"
-            "k_v=%.5f k_p=%.5f\n KT=%.5f\n"
-            "p_v=%.5f i_v=%.5f p_p=%.5f i_p=%.5f\n"
-            "The SAVE_CONFIG command will update the printer config file\n"
-            "with these parameters and restart the printer.\n"
-            "Suggested torque and velocity filter frequency: %d\n"
-            % (self.name, k_v, k_p, Kt, p_v, i_v, p_p, i_p, 3.0*self.pwmfreq / l_v))
+        bf = self.biquad_filters['velocity']
+        configfile.set(cfgname, 'biquad_velocity_filter', bf.type)
+        configfile.set(cfgname, 'biquad_velocity_frequency', "%d" % (bf.freq,))
+        configfile.set(cfgname, 'biquad_velocity_slope', "%.6g" % (bf.slope,))
+        gcmd.respond_info(msg)
 
     cmd_TMC_TUNE_PID_help = "Tune the current and torque PID coefficients"
     def cmd_TMC_TUNE_PID(self, gcmd):
@@ -2269,6 +2314,8 @@ class TMC4671:
         current_bandwidth = gcmd.get_float('CURRENT_BANDWIDTH', 1200.0)
         l_v = gcmd.get_float('LAMBDA_V', 100.0)
         l_p = gcmd.get_float('LAMBDA_P', 400.0)
+        v_bw = gcmd.get_float('VELOCITY_BANDWIDTH', 450.0, above=0.)
+        p_bw = gcmd.get_float('POSITION_BANDWIDTH', 100.0, above=0.)
         I_h = gcmd.get_float('HOLDING_CURRENT', None)
         T_h = gcmd.get_float('HOLDING_TORQUE', None)
         Kt = gcmd.get_float('KT', None)
@@ -2383,6 +2430,38 @@ class TMC4671:
                 "  Suggested filter frequency: %d Hz"
                 % round(3.0 * self.pwmfreq / l_v)
             )
+
+        lines.append("")
+        lines.append(
+            "--- Motion PID (bandwidth, VELOCITY_BANDWIDTH=%.1f Hz"
+            "  POSITION_BANDWIDTH=%.1f Hz) ---" % (v_bw, p_bw)
+        )
+        p_v_bw, i_v_bw = self._calc_velocity_pid(v_bw)
+        p_p_bw = self._calc_position_pid(p_bw)
+        p_v_cur = self.pid_helpers["VELOCITY_P"].from_f(
+            self.fields.PID_VELOCITY_P.read()
+        )
+        i_v_cur = self.pid_helpers["VELOCITY_I"].from_f(
+            self.fields.PID_VELOCITY_I.read()
+        )
+        p_p_cur = self.pid_helpers["POSITION_P"].from_f(
+            self.fields.PID_POSITION_P.read()
+        )
+        i_p_cur = self.pid_helpers["POSITION_I"].from_f(
+            self.fields.PID_POSITION_I.read()
+        )
+        lines.append(
+            "  Computed:  Velocity P=%.5f  I=%.5f" % (p_v_bw, i_v_bw)
+        )
+        lines.append(
+            "             Position  P=%.5f  I=0.00000" % (p_p_bw,)
+        )
+        lines.append(
+            "  Active:    Velocity P=%.5f  I=%.5f" % (p_v_cur, i_v_cur)
+        )
+        lines.append(
+            "             Position  P=%.5f  I=%.5f" % (p_p_cur, i_p_cur)
+        )
 
         gcmd.respond_info("\n".join(lines))
 
