@@ -702,10 +702,8 @@ class TMCVirtualPinHelper:
         self.mcu_endstop = ppins.setup_pin('endstop', self.diag_pin)
         return self.mcu_endstop
     def handle_homing_move_begin(self, hmove):
-        if self.mcu_endstop not in hmove.get_mcu_endstops():
-            return
-        #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 3000)
-        self.current_helper.set_current(self.current_helper.get_homing_current())
+        # Always observe: set STATUS_MASK and log flags for any homing move on this axis.
+        # Homing current change is only applied when this is the active (virtual) endstop.
         self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         self.printer.lookup_object('toolhead').dwell(0.005)
         self.mcu_tmc.write_field("STATUS_MASK", self.status_mask)
@@ -713,17 +711,22 @@ class TMCVirtualPinHelper:
         status = self.mcu_tmc.get_register("STATUS_FLAGS")
         fmt = self.fields.pretty_format("STATUS_FLAGS", status)
         logging.info("TMC 4671 '%s' status at homing start %s", self.name, fmt)
+        if self.mcu_endstop not in hmove.get_mcu_endstops():
+            return
+        #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 3000)
+        self.current_helper.set_current(self.current_helper.get_homing_current())
     def handle_homing_move_end(self, hmove):
         status = self.mcu_tmc.get_register("STATUS_FLAGS")
         fmt = self.fields.pretty_format("STATUS_FLAGS", status)
         logging.info("TMC 4671 '%s' status at homing end %s", self.name, fmt)
+        # Always: clear STATUS_MASK after any homing move on this axis.
+        self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
+        self.mcu_tmc.write_field("STATUS_MASK", 0)
+        self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         if self.mcu_endstop not in hmove.get_mcu_endstops():
             return
         #self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 0x300000)
-        self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         self.current_helper.set_current(self.current_helper.get_run_current())
-        self.mcu_tmc.write_field("STATUS_MASK", 0)
-        self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
 
 
 ######################################################################
