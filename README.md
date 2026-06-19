@@ -308,6 +308,8 @@ TMC_TUNE_MOTION_PID STEPPER=stepper_x HOLDING_CURRENT=<a> HOLDING_TORQUE=<nm> [L
 
 Motor physics config variables (set in `[tmc4671 stepper_x]`): `jmotor` (default 8.45e-6 kg·m²), `jload` (default 5e-5 kg·m²), `motor_kt` (default 0.0156 Nm/A), `velocity_alpha` (default 0.35).
 
+The velocity biquad LPF is automatically set to the velocity bandwidth (bandwidth path) or `3 × pwmfreq / LAMBDA_V` (SIMC path) and queued for `SAVE_CONFIG` alongside the PID gains.
+
 ### TMC_DEBUG_TUNING
 
 Report what the PID tuning helpers would compute given the current motor parameters, without writing anything to the controller. Compares computed values against the currently active register values. Always shows the bandwidth-method section; shows the SIMC/lambda motion PID section only when `KT` is supplied.
