@@ -402,13 +402,14 @@ Measure the Kt/J ratio (motor torque constant divided by rotor + load inertia, i
 **Before running:** position the toolhead so the axis under test can move approximately 5 mm in both directions without hitting an endstop or physical obstruction.
 
 ```
-TMC_MEASURE_INERTIA STEPPER=stepper_x [PULSE_DURATION=0.05] [CURRENT=<amps>]
+TMC_MEASURE_INERTIA STEPPER=stepper_x [PULSE_DURATION=0.05] [SETTLE_DURATION=1.0] [CURRENT=<amps>]
 ```
 
 | Parameter | Default | Description |
 |---|---|---|
 | `STEPPER` | — | Stepper name to measure (required) |
 | `PULSE_DURATION` | 0.05 | Duration of each accel and brake phase in seconds (0.01–2.0). Increase if displacement is too small (high stiction). |
+| `SETTLE_DURATION` | 1.0 | Settle time between pulse pairs in seconds (0.1–5.0). Increase if readings are inconsistent (motor still moving between pulses). |
 | `CURRENT` | run_current / 2 | Test current in amps. Increase for high-stiction machines. Must not exceed run_current. |
 
 The command:

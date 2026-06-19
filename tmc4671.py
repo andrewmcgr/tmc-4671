@@ -1611,14 +1611,7 @@ class TMC4671:
             self.fields.HALL_PHI_E_OFFSET.write(-self.fields.HALL_PHI_E.read() % 65536)
             self.fields.ABN_DECODER_COUNT.write(0)
             self.fields.ABN_DECODER_PHI_E_OFFSET.write(0)
-            try:
-                iq_lsbs = round(
-                    self.current_helper.get_run_current() * 500.0
-                    / self.current_helper.current_scale)
-                self._measure_inertia_ratio(dwell, iq_lsbs)
-            except Exception as e:
-                logging.warning("TMC 4671 '%s' inertia measurement failed: %s",
-                                self.stepper_name, str(e))
+
         # Put motion config back how it was / safe stopped state
         self.fields.UQ_UD_EXT.write(0, 0)
         self._reset_targets()
@@ -1629,8 +1622,8 @@ class TMC4671:
         self._setup_filters()
 
     # Measure Kt/J ratio via 4-pulse accel+brake cycles in closed-loop torque mode
-    def _measure_inertia_ratio(self, dwell, iq_lsbs, dt=0.05):
-        settle = max(0.3, dt)  # settling time between pulse pairs [s]
+    def _measure_inertia_ratio(self, dwell, iq_lsbs, dt=0.05, settle=1.0):
+        settle = max(settle, dt)  # settling time between pulse pairs [s]
 
         ppr = self.fields.ABN_DECODER_PPR.read()
         if ppr == 0:
@@ -1719,6 +1712,8 @@ class TMC4671:
                 "Run startup calibration (FIRMWARE_RESTART) first.")
         pulse_duration = gcmd.get_float('PULSE_DURATION', 0.05,
                                         minval=0.01, maxval=2.0)
+        settle_duration = gcmd.get_float('SETTLE_DURATION', 1.0,
+                                         minval=0.1, maxval=5.0)
         current_override = gcmd.get_float('CURRENT', None, minval=0.1)
         toolhead = self.printer.lookup_object('toolhead')
         enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
@@ -1772,7 +1767,8 @@ class TMC4671:
                     self.fields.ABN_DECODER_COUNT.write(0)
 
                     self._measure_inertia_ratio(dwell, iq_lsbs,
-                                                dt=pulse_duration)
+                                                dt=pulse_duration,
+                                                settle=settle_duration)
                 finally:
                     self.fields.UQ_UD_EXT.write(0, 0)
                     self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
