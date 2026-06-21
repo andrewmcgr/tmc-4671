@@ -1460,6 +1460,20 @@ class TMC4671:
         # Read VM once; physical motor voltage = (UD_EXT / 32767) * vm.
         vm = self._read_vm()
         test_U = round(32767.0 / vm)
+        # Gently pre-align the motor to angle 0 before the measurement. Without
+        # this, a motor displaced from angle 0 after normal printing snaps hard
+        # and rings at its natural frequency (~30-40 Hz); the oscillation may not
+        # decay within the 300 ms measurement dwell and biases the averaged
+        # current, leading to wrong R → wrong test2_U → wrong L.
+        pre_align_U = max(1, test_U // 4)
+        self.fields.UQ_UD_EXT.write(pre_align_U, 0)
+        self._reset_targets()
+        self.fields.MODE_MOTION.write(MotionMode.uq_ud_ext_mode)
+        self.fields.PWM_CHOP.write(7)
+        dwell(2.0)
+        self.fields.PWM_CHOP.write(0)
+        self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+        dwell(0.1)
         self.fields.UQ_UD_EXT.write(test_U, 0)
         self._reset_targets()
         self.fields.MODE_MOTION.write(MotionMode.uq_ud_ext_mode)
