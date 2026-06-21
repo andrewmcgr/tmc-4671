@@ -1416,11 +1416,13 @@ class TMC4671:
         * PWM_CHOP             – gate driver left enabled from a prior run
         * UQ_UD_EXT            – residual external voltage command
         * PHI_E_EXT            – residual external angle
-        * OPENLOOP_VELOCITY_TARGET / ACCELERATION / VELOCITY_ACTUAL
+        * OPENLOOP_VELOCITY_TARGET / ACCELERATION / VELOCITY_ACTUAL / PHI
                                – residual DDS state from a previous inductance
                                  measurement.  VELOCITY_ACTUAL must be written
                                  explicitly: the DDS counter does not track
-                                 TARGET when ACCELERATION is 0.
+                                 TARGET when ACCELERATION is 0.  PHI holds the
+                                 DDS accumulated phase angle, which persists
+                                 after VELOCITY_ACTUAL is zeroed.
         * STATUS_MASK          – interrupt mask left set from a prior run
         * PID_TORQUE_FLUX_TARGET / PID_VELOCITY_TARGET / PID_POSITION_TARGET
                                – residual PID setpoints from a prior motor-
@@ -1439,6 +1441,7 @@ class TMC4671:
         self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
         self.fields.OPENLOOP_ACCELERATION.write(0)
         self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)
+        self.fields.OPENLOOP_PHI.write(0)
 
     # Align motor and measure resistance and inductance on startup
     def _align_and_measure(self, offsets, print_time):
