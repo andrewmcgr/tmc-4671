@@ -2643,20 +2643,29 @@ class TMC4671:
                 ac_U, v_applied, v_ac = self._calculate_ac_injection_voltage()
                 
                 # 4. Configure TMC4671 for DC Static Bias (Rotor Alignment & Noise Calibration)
+                # Use PHI_E_SELECTION=1 (external angle locked at PHI_E_EXT=0) rather than
+                # open-loop DDS mode.  The DDS updates OPENLOOP_VELOCITY_ACTUAL every PWM
+                # cycle and ignores host writes when ACCELERATION=0, so OPENLOOP_PHI keeps
+                # spinning at the injection frequency from a previous call.  A fixed external
+                # angle is completely immune to that state.
                 self.fields.PWM_CHOP.write(7)
-                self.fields.PHI_E_SELECTION.write(2)  # Open Loop Mode
-                self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
-                self.fields.OPENLOOP_ACCELERATION.write(0)
-                self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)  # Stop DDS; ACTUAL does not follow TARGET when ACCELERATION=0
+                self.fields.PHI_E_SELECTION.write(1)
+                self.fields.PHI_E_EXT.write(0)
                 self.fields.UQ_EXT.write(0)
                 self.fields.UD_EXT.write(ac_U)
                 self.fields.MODE_MOTION.write(MotionMode.uq_ud_ext_mode)
                 
                 # Sample baseline DC/Noise currents
                 I_dc_avg, var_noise = self._measure_impedance_dc_baseline(dwell, 100)
-                
-                # 5. Configure and Start High-Frequency AC Injection
-                # 6. Stochastic AC/Saliency Polling Loop
+
+                # 5. Switch to open-loop DDS mode for AC injection
+                self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
+                self.fields.OPENLOOP_ACCELERATION.write(0)
+                self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)
+                self.fields.PHI_E_SELECTION.write(2)
+
+                # 6. Configure and Start High-Frequency AC Injection
+                # 7. Stochastic AC/Saliency Polling Loop
                 ac_samples = self._acquire_impedance_ac_samples(f_inject, n_samples, ac_U, dwell)
                 
                 # 7. Disable injection immediately
@@ -2722,7 +2731,7 @@ class TMC4671:
                 self.fields.UQ_UD_EXT.write(0, 0)
                 self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
                 self.fields.OPENLOOP_ACCELERATION.write(0)
-                self.fields.MODE_MOTION.write(old_mode_motion)
+                self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)
                 self.fields.PHI_E_SELECTION.write(old_phi_e_selection)
                 self._setup_filters()
                 
