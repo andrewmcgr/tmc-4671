@@ -1403,8 +1403,49 @@ class TMC4671:
         position_p = 2.0 * math.pi * position_bandwidth / npoles
         return position_p
 
+    def _prepare_for_alignment(self):
+        """Stop the motor and restore motion-mode and external-input registers to
+        their power-on defaults prior to running _align_and_measure.
+
+        _align_and_measure was designed to run from the chip's hardware-reset
+        state.  After a normal klippy:ready initialisation the following
+        registers may hold stale values that cause the procedure to misbehave:
+
+        * MODE_MOTION          – may be position_mode or velocity_mode from a
+                                 prior motor-enable or motion command
+        * PWM_CHOP             – gate driver left enabled from a prior run
+        * UQ_UD_EXT            – residual external voltage command
+        * PHI_E_EXT            – residual external angle
+        * OPENLOOP_VELOCITY_TARGET / ACCELERATION / VELOCITY_ACTUAL / PHI
+                               – residual DDS state from a previous inductance
+                                 measurement.  VELOCITY_ACTUAL must be written
+                                 explicitly: the DDS counter does not track
+                                 TARGET when ACCELERATION is 0.  PHI holds the
+                                 DDS accumulated phase angle, which persists
+                                 after VELOCITY_ACTUAL is zeroed.
+        * STATUS_MASK          – interrupt mask left set from a prior run
+        * PID_TORQUE_FLUX_TARGET / PID_VELOCITY_TARGET / PID_POSITION_TARGET
+                               – residual PID setpoints from a prior motor-
+                                 enable sequence (_handle_ready_deferred)
+        * ABN_DECODER_COUNT    – residual encoder position from a prior run
+        """
+        self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+        self.fields.STATUS_MASK.write(0)
+        self.fields.PWM_CHOP.write(0)
+        self.fields.UQ_UD_EXT.write(0, 0)
+        self.fields.PHI_E_EXT.write(0)
+        self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
+        self.fields.PID_VELOCITY_TARGET.write(0)
+        self.fields.PID_POSITION_TARGET.write(0)
+        self.fields.ABN_DECODER_COUNT.write(0)
+        self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
+        self.fields.OPENLOOP_ACCELERATION.write(0)
+        self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)
+        self.fields.OPENLOOP_PHI.write(0)
+
     # Align motor and measure resistance and inductance on startup
     def _align_and_measure(self, offsets, print_time):
+        self._prepare_for_alignment()
         dwell = self.printer.lookup_object('toolhead').dwell
         old_phi_e_selection = self.fields.PHI_E_SELECTION.read()
 
@@ -1413,12 +1454,26 @@ class TMC4671:
             self.disable_biquad(register)
 
         self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+        self.fields.PHI_E_SELECTION.write(1) # external mode, so PHI_E won't change.
         self.fields.PHI_E_EXT.write(0) # and, set this to be PHI_E = 0
-        self.fields.PHI_E_SELECTION.write(1) # external mode, so it won't change.
         # Start at some low voltage and see if we can read a current.
         # Read VM once; physical motor voltage = (UD_EXT / 32767) * vm.
         vm = self._read_vm()
         test_U = round(32767.0 / vm)
+        # Gently pre-align the motor to angle 0 before the measurement. Without
+        # this, a motor displaced from angle 0 after normal printing snaps hard
+        # and rings at its natural frequency (~30-40 Hz); the oscillation may not
+        # decay within the 300 ms measurement dwell and biases the averaged
+        # current, leading to wrong R → wrong test2_U → wrong L.
+        pre_align_U = max(1, test_U // 4)
+        self.fields.UQ_UD_EXT.write(pre_align_U, 0)
+        self._reset_targets()
+        self.fields.MODE_MOTION.write(MotionMode.uq_ud_ext_mode)
+        self.fields.PWM_CHOP.write(7)
+        dwell(2.0)
+        self.fields.PWM_CHOP.write(0)
+        self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+        dwell(0.1)
         self.fields.UQ_UD_EXT.write(test_U, 0)
         self._reset_targets()
         self.fields.MODE_MOTION.write(MotionMode.uq_ud_ext_mode)
@@ -1468,11 +1523,16 @@ class TMC4671:
 
         # Inductance Measurement Procedure
         # Step 1: Magnetic Alignment (DC)
-        self.fields.PWM_CHOP.write(7) # Re-enable the gate driver (crucial to apply AC voltage)
-        self.fields.PHI_E_SELECTION.write(2)  # Open Loop
+        # Keep PHI_E_SELECTION=1 (external angle, fixed at PHI_E_EXT=0) here.  Switching to
+        # open-loop DDS mode (2) would expose the DC step to residual DDS velocity from a
+        # previous run: the chip ignores writes to OPENLOOP_VELOCITY_ACTUAL when
+        # ACCELERATION=0, so the DDS keeps spinning at the prior injection frequency.
+        # A fixed external angle is completely immune to that state.
+        self.fields.PWM_CHOP.write(0)
         self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
-        self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)  # Reset residual velocity from prior run
+        self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)  # Best-effort; may be ignored when ACCELERATION=0
         self.fields.UQ_EXT.write(0)
+        self.fields.PWM_CHOP.write(7) # Re-enable the gate driver (crucial to apply AC voltage)
 
         # Automated AC Voltage Calculation
         I_target_A = 0.4
@@ -1519,6 +1579,7 @@ class TMC4671:
         f_test = 1000
         dds_value = int(f_test * (2**32) / self.pwmfreq)
 
+        self.fields.PHI_E_SELECTION.write(2)  # Open Loop (DDS) — only needed for AC injection
         self.fields.OPENLOOP_ACCELERATION.write(dds_value)  # We want snap acceleration for this test
         self.fields.OPENLOOP_VELOCITY_TARGET.write(dds_value)
         dwell(1.0)  # 1.0 s electrical settling delay (increased from 200 ms to ensure stability)
@@ -1555,15 +1616,30 @@ class TMC4671:
         self.fields.UQ_UD_EXT.write(0, 0)
         self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
         self.fields.OPENLOOP_ACCELERATION.write(0)
+        self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)  # Stop DDS; ACTUAL does not follow TARGET when ACCELERATION=0
 
         # CRITICAL: Since the motor was spun electrically, we MUST re-align and magnetically
         # lock the rotor back to the electrical zero position (PHI_E_EXT = 0) before continuing,
         # otherwise the subsequent encoder calibration will be misaligned, causing a runaway ("yeeting the toolhead").
-        self.fields.PHI_E_SELECTION.write(1)  # External angle mode
         self.fields.PHI_E_EXT.write(0)
+        self.fields.PHI_E_SELECTION.write(1)  # External angle mode
         self.fields.UD_EXT.write(test2_U)
         dwell(0.75)  # Let the rotor settle completely back to the aligned position
         # Now we should be mechanically aligned
+
+        if offsets:
+            # While we're here, set the offsets
+            self.fields.HALL_PHI_E_OFFSET.write(-self.fields.HALL_PHI_E.read() % 65536)
+            self.fields.ABN_DECODER_COUNT.write(0)
+            self.fields.ABN_DECODER_PHI_E_OFFSET.write(0)
+        # Put motion config back how it was / safe stopped state
+        self.fields.UQ_UD_EXT.write(0, 0)
+        self._reset_targets()
+        self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+        self.fields.PHI_E_SELECTION.write(old_phi_e_selection)
+
+        # Re-enable the configured biquad filters
+        self._setup_filters()
 
         # =================================================================
         # Step 4: Hardware-Agnostic Impedance Math
@@ -1610,20 +1686,6 @@ class TMC4671:
                      I_DC_MAG, I_DC_RAW_D, I_DC_RAW_Q)
         logging.info("   -> AC: Mag=%.3f A (Raw ID=%.3f, IQ=%.3f)",
                      I_AC_MAG, I_AC_RAW_D, I_AC_RAW_Q)
-
-        if offsets:
-            # While we're here, set the offsets
-            self.fields.HALL_PHI_E_OFFSET.write(-self.fields.HALL_PHI_E.read() % 65536)
-            self.fields.ABN_DECODER_COUNT.write(0)
-            self.fields.ABN_DECODER_PHI_E_OFFSET.write(0)
-        # Put motion config back how it was / safe stopped state
-        self.fields.UQ_UD_EXT.write(0, 0)
-        self._reset_targets()
-        self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
-        self.fields.PHI_E_SELECTION.write(old_phi_e_selection)
-
-        # Re-enable the configured biquad filters
-        self._setup_filters()
 
     # Tune PID via a setpoint change experiment
     # See https://folk.ntnu.no/skoge/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf
@@ -2612,12 +2674,6 @@ class TMC4671:
         f_inject = gcmd.get_float('F_INJECT', 2317.0, minval=1.0)
         n_samples = gcmd.get_int('N_SAMPLES', 500, minval=10)
         
-        # 1. Verification and Setup
-        if self.motor_r is None or self.motor_r < 1e-3:
-            raise gcmd.error("Motor resistance R not measured. Please run alignment/startup calibration first.")
-        if self.motor_l is None or self.motor_l < 1e-6:
-            raise gcmd.error("Motor average inductance L not measured. Please run alignment/startup calibration first.")
-            
         toolhead = self.printer.lookup_object('toolhead')
         enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
         
@@ -2639,23 +2695,38 @@ class TMC4671:
                 self.disable_biquad(register)
                 
             try:
+                if not self.motor_r or self.motor_r < 1e-3:
+                    self._align_and_measure(False, print_time)
+                    for register in BIQUAD_FILTER_TARGETS.values():
+                        self.disable_biquad(register)
+
                 # 3. Calculate safe AC Voltage Amplitude (V_ac)
                 ac_U, v_applied, v_ac = self._calculate_ac_injection_voltage()
                 
                 # 4. Configure TMC4671 for DC Static Bias (Rotor Alignment & Noise Calibration)
+                # Use PHI_E_SELECTION=1 (external angle locked at PHI_E_EXT=0) rather than
+                # open-loop DDS mode.  The DDS updates OPENLOOP_VELOCITY_ACTUAL every PWM
+                # cycle and ignores host writes when ACCELERATION=0, so OPENLOOP_PHI keeps
+                # spinning at the injection frequency from a previous call.  A fixed external
+                # angle is completely immune to that state.
                 self.fields.PWM_CHOP.write(7)
-                self.fields.PHI_E_SELECTION.write(2)  # Open Loop Mode
-                self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
+                self.fields.PHI_E_SELECTION.write(1)
+                self.fields.PHI_E_EXT.write(0)
                 self.fields.UQ_EXT.write(0)
-                self.fields.OPENLOOP_ACCELERATION.write(0)
                 self.fields.UD_EXT.write(ac_U)
                 self.fields.MODE_MOTION.write(MotionMode.uq_ud_ext_mode)
                 
                 # Sample baseline DC/Noise currents
                 I_dc_avg, var_noise = self._measure_impedance_dc_baseline(dwell, 100)
-                
-                # 5. Configure and Start High-Frequency AC Injection
-                # 6. Stochastic AC/Saliency Polling Loop
+
+                # 5. Switch to open-loop DDS mode for AC injection
+                self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
+                self.fields.OPENLOOP_ACCELERATION.write(0)
+                self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)
+                self.fields.PHI_E_SELECTION.write(2)
+
+                # 6. Configure and Start High-Frequency AC Injection
+                # 7. Stochastic AC/Saliency Polling Loop
                 ac_samples = self._acquire_impedance_ac_samples(f_inject, n_samples, ac_U, dwell)
                 
                 # 7. Disable injection immediately
@@ -2668,7 +2739,15 @@ class TMC4671:
                 ac_mags = [mag for mag, _ in ac_samples]
                 I_avg = sum(ac_mags) / len(ac_mags)
                 omega_inject = 2.0 * math.pi * f_inject
-                V_ac_eff = I_avg * math.sqrt(self.motor_r**2 + (omega_inject * self.motor_l)**2)
+                # Derive effective AC voltage from the DC baseline measurement at the same
+                # ac_U amplitude (V = I*R at DC, pure resistive), mirroring the startup path.
+                # This avoids the circular dependency on the previously stored self.motor_l.
+                V_ac_eff = I_dc_avg * self.motor_r
+                if I_avg > 1e-6 and V_ac_eff > 1e-6:
+                    Z_sq = (V_ac_eff / I_avg) ** 2
+                    R_sq = self.motor_r ** 2
+                    if Z_sq > R_sq:
+                        self.motor_l = math.sqrt(Z_sq - R_sq) / omega_inject
                 
                 # --- Method A ---
                 I_ripple_stdev, Ld_stdev, Lq_stdev, sal_stdev = self._calculate_impedance_method_a(
@@ -2713,7 +2792,7 @@ class TMC4671:
                 self.fields.UQ_UD_EXT.write(0, 0)
                 self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
                 self.fields.OPENLOOP_ACCELERATION.write(0)
-                self.fields.MODE_MOTION.write(old_mode_motion)
+                self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)
                 self.fields.PHI_E_SELECTION.write(old_phi_e_selection)
                 self._setup_filters()
                 
