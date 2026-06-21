@@ -2612,12 +2612,6 @@ class TMC4671:
         f_inject = gcmd.get_float('F_INJECT', 2317.0, minval=1.0)
         n_samples = gcmd.get_int('N_SAMPLES', 500, minval=10)
         
-        # 1. Verification and Setup
-        if self.motor_r is None or self.motor_r < 1e-3:
-            raise gcmd.error("Motor resistance R not measured. Please run alignment/startup calibration first.")
-        if self.motor_l is None or self.motor_l < 1e-6:
-            raise gcmd.error("Motor average inductance Lnot measured. Please run alignment/startup calibration first.")
-            
         toolhead = self.printer.lookup_object('toolhead')
         enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
         
@@ -2639,6 +2633,11 @@ class TMC4671:
                 self.disable_biquad(register)
                 
             try:
+                if not self.motor_r or self.motor_r < 1e-3:
+                    self._align_and_measure(False, print_time)
+                    for register in BIQUAD_FILTER_TARGETS.values():
+                        self.disable_biquad(register)
+
                 # 3. Calculate safe AC Voltage Amplitude (V_ac)
                 ac_U, v_applied, v_ac = self._calculate_ac_injection_voltage()
                 
