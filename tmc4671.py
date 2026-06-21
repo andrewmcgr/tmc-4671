@@ -1509,10 +1509,14 @@ class TMC4671:
 
         # Inductance Measurement Procedure
         # Step 1: Magnetic Alignment (DC)
+        # Keep PHI_E_SELECTION=1 (external angle, fixed at PHI_E_EXT=0) here.  Switching to
+        # open-loop DDS mode (2) would expose the DC step to residual DDS velocity from a
+        # previous run: the chip ignores writes to OPENLOOP_VELOCITY_ACTUAL when
+        # ACCELERATION=0, so the DDS keeps spinning at the prior injection frequency.
+        # A fixed external angle is completely immune to that state.
         self.fields.PWM_CHOP.write(0)
-        self.fields.PHI_E_SELECTION.write(2)  # Open Loop
         self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
-        self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)  # Reset residual velocity from prior run
+        self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)  # Best-effort; may be ignored when ACCELERATION=0
         self.fields.UQ_EXT.write(0)
         self.fields.PWM_CHOP.write(7) # Re-enable the gate driver (crucial to apply AC voltage)
 
@@ -1561,6 +1565,7 @@ class TMC4671:
         f_test = 1000
         dds_value = int(f_test * (2**32) / self.pwmfreq)
 
+        self.fields.PHI_E_SELECTION.write(2)  # Open Loop (DDS) — only needed for AC injection
         self.fields.OPENLOOP_ACCELERATION.write(dds_value)  # We want snap acceleration for this test
         self.fields.OPENLOOP_VELOCITY_TARGET.write(dds_value)
         dwell(1.0)  # 1.0 s electrical settling delay (increased from 200 ms to ensure stability)
