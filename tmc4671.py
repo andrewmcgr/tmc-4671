@@ -2668,7 +2668,15 @@ class TMC4671:
                 ac_mags = [mag for mag, _ in ac_samples]
                 I_avg = sum(ac_mags) / len(ac_mags)
                 omega_inject = 2.0 * math.pi * f_inject
-                V_ac_eff = I_avg * math.sqrt(self.motor_r**2 + (omega_inject * self.motor_l)**2)
+                # Derive effective AC voltage from the DC baseline measurement at the same
+                # ac_U amplitude (V = I*R at DC, pure resistive), mirroring the startup path.
+                # This avoids the circular dependency on the previously stored self.motor_l.
+                V_ac_eff = I_dc_avg * self.motor_r
+                if I_avg > 1e-6 and V_ac_eff > 1e-6:
+                    Z_sq = (V_ac_eff / I_avg) ** 2
+                    R_sq = self.motor_r ** 2
+                    if Z_sq > R_sq:
+                        self.motor_l = math.sqrt(Z_sq - R_sq) / omega_inject
                 
                 # --- Method A ---
                 I_ripple_stdev, Ld_stdev, Lq_stdev, sal_stdev = self._calculate_impedance_method_a(
