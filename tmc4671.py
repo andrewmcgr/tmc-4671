@@ -1555,6 +1555,7 @@ class TMC4671:
         self.fields.UQ_UD_EXT.write(0, 0)
         self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
         self.fields.OPENLOOP_ACCELERATION.write(0)
+        self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)  # Stop DDS; ACTUAL does not follow TARGET when ACCELERATION=0
 
         # CRITICAL: Since the motor was spun electrically, we MUST re-align and magnetically
         # lock the rotor back to the electrical zero position (PHI_E_EXT = 0) before continuing,
@@ -2645,8 +2646,9 @@ class TMC4671:
                 self.fields.PWM_CHOP.write(7)
                 self.fields.PHI_E_SELECTION.write(2)  # Open Loop Mode
                 self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
-                self.fields.UQ_EXT.write(0)
                 self.fields.OPENLOOP_ACCELERATION.write(0)
+                self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)  # Stop DDS; ACTUAL does not follow TARGET when ACCELERATION=0
+                self.fields.UQ_EXT.write(0)
                 self.fields.UD_EXT.write(ac_U)
                 self.fields.MODE_MOTION.write(MotionMode.uq_ud_ext_mode)
                 
