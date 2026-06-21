@@ -1873,8 +1873,8 @@ class TMC4671:
                 torque_l = self.motor_lq if self.motor_lq != 0.0 else self.motor_l
                 if flux_l == 0.0 or torque_l == 0.0:
                     raise gcmd.error(
-                        "Motor inductance not measured. Run TMC_ALIGN_MOTOR "
-                        "or FIRMWARE_RESTART to trigger startup calibration first.")
+                        "Motor inductance not measured. Run "
+                        "FIRMWARE_RESTART to trigger startup calibration first.")
                 P_flux, I_flux = self._tune_current_pid(flux_bandwidth, motor_l=flux_l)
                 P_torque, I_torque = self._tune_current_pid(torque_bandwidth, motor_l=torque_l)
                 flux_filter = BiquadFilter(
@@ -2283,8 +2283,8 @@ class TMC4671:
 
     cmd_TMC_DEBUG_MOTOR_help = "Report estimated motor parameters (resistance and inductance)"
     def cmd_TMC_DEBUG_MOTOR(self, gcmd):
-        res_str = f"{self.motor_r:.4f} Ohms" if self.motor_r != 0.0 else "Not yet calibrated (run TMC_TUNE_PID first)"
-        ind_str = f"{self.motor_l:.6f} H ({self.motor_l * 1000.0:.3f} mH)" if self.motor_l != 0.0 else "Not yet calibrated (run TMC_TUNE_PID first)"
+        res_str = f"{self.motor_r:.4f} Ohms" if self.motor_r != 0.0 else "Not yet calibrated"
+        ind_str = f"{self.motor_l:.6f} H ({self.motor_l * 1000.0:.3f} mH)" if self.motor_l != 0.0 else "Not yet calibrated"
         ld_str = f"{self.motor_ld:.6f} H ({self.motor_ld * 1000.0:.3f} mH)" if self.motor_ld != 0.0 else "Not yet calibrated / measured"
         lq_str = f"{self.motor_lq:.6f} H ({self.motor_lq * 1000.0:.3f} mH)" if self.motor_lq != 0.0 else "Not yet calibrated / measured"
         sal_str = f"{self.motor_saliency:.4f}" if self.motor_saliency != 1.0 else "Not yet calibrated / measured"
@@ -2616,7 +2616,7 @@ class TMC4671:
         if self.motor_r is None or self.motor_r < 1e-3:
             raise gcmd.error("Motor resistance R not measured. Please run alignment/startup calibration first.")
         if self.motor_l is None or self.motor_l < 1e-6:
-            raise gcmd.error("Motor average inductance Lnot measured. Please run alignment/startup calibration first.")
+            raise gcmd.error("Motor average inductance L not measured. Please run alignment/startup calibration first.")
             
         toolhead = self.printer.lookup_object('toolhead')
         enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
