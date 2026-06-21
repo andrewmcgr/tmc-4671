@@ -1403,8 +1403,36 @@ class TMC4671:
         position_p = 2.0 * math.pi * position_bandwidth / npoles
         return position_p
 
+    def _prepare_for_alignment(self):
+        """Stop the motor and restore motion-mode and external-input registers to
+        their power-on defaults prior to running _align_and_measure.
+
+        _align_and_measure was designed to run from the chip's hardware-reset
+        state.  After a normal klippy:ready initialisation the following
+        registers may hold stale values that cause the procedure to misbehave:
+
+        * MODE_MOTION          – may be position_mode or velocity_mode from a
+                                 prior motor-enable or motion command
+        * PWM_CHOP             – gate driver left enabled from a prior run
+        * UQ_UD_EXT            – residual external voltage command
+        * PHI_E_EXT            – residual external angle
+        * OPENLOOP_VELOCITY_TARGET / ACCELERATION / VELOCITY_ACTUAL
+                               – residual DDS state from a previous inductance
+                                 measurement.  VELOCITY_ACTUAL must be written
+                                 explicitly: the DDS counter does not track
+                                 TARGET when ACCELERATION is 0.
+        """
+        self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+        self.fields.PWM_CHOP.write(0)
+        self.fields.UQ_UD_EXT.write(0, 0)
+        self.fields.PHI_E_EXT.write(0)
+        self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
+        self.fields.OPENLOOP_ACCELERATION.write(0)
+        self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)
+
     # Align motor and measure resistance and inductance on startup
     def _align_and_measure(self, offsets, print_time):
+        self._prepare_for_alignment()
         dwell = self.printer.lookup_object('toolhead').dwell
         old_phi_e_selection = self.fields.PHI_E_SELECTION.read()
 
