@@ -1413,8 +1413,8 @@ class TMC4671:
             self.disable_biquad(register)
 
         self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+        self.fields.PHI_E_SELECTION.write(1) # external mode, so PHI_E won't change.
         self.fields.PHI_E_EXT.write(0) # and, set this to be PHI_E = 0
-        self.fields.PHI_E_SELECTION.write(1) # external mode, so it won't change.
         # Start at some low voltage and see if we can read a current.
         # Read VM once; physical motor voltage = (UD_EXT / 32767) * vm.
         vm = self._read_vm()
@@ -1468,11 +1468,12 @@ class TMC4671:
 
         # Inductance Measurement Procedure
         # Step 1: Magnetic Alignment (DC)
-        self.fields.PWM_CHOP.write(7) # Re-enable the gate driver (crucial to apply AC voltage)
+        self.fields.PWM_CHOP.write(0)
         self.fields.PHI_E_SELECTION.write(2)  # Open Loop
         self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
         self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)  # Reset residual velocity from prior run
         self.fields.UQ_EXT.write(0)
+        self.fields.PWM_CHOP.write(7) # Re-enable the gate driver (crucial to apply AC voltage)
 
         # Automated AC Voltage Calculation
         I_target_A = 0.4
@@ -1560,11 +1561,25 @@ class TMC4671:
         # CRITICAL: Since the motor was spun electrically, we MUST re-align and magnetically
         # lock the rotor back to the electrical zero position (PHI_E_EXT = 0) before continuing,
         # otherwise the subsequent encoder calibration will be misaligned, causing a runaway ("yeeting the toolhead").
-        self.fields.PHI_E_SELECTION.write(1)  # External angle mode
         self.fields.PHI_E_EXT.write(0)
+        self.fields.PHI_E_SELECTION.write(1)  # External angle mode
         self.fields.UD_EXT.write(test2_U)
         dwell(0.75)  # Let the rotor settle completely back to the aligned position
         # Now we should be mechanically aligned
+
+        if offsets:
+            # While we're here, set the offsets
+            self.fields.HALL_PHI_E_OFFSET.write(-self.fields.HALL_PHI_E.read() % 65536)
+            self.fields.ABN_DECODER_COUNT.write(0)
+            self.fields.ABN_DECODER_PHI_E_OFFSET.write(0)
+        # Put motion config back how it was / safe stopped state
+        self.fields.UQ_UD_EXT.write(0, 0)
+        self._reset_targets()
+        self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+        self.fields.PHI_E_SELECTION.write(old_phi_e_selection)
+
+        # Re-enable the configured biquad filters
+        self._setup_filters()
 
         # =================================================================
         # Step 4: Hardware-Agnostic Impedance Math
@@ -1611,20 +1626,6 @@ class TMC4671:
                      I_DC_MAG, I_DC_RAW_D, I_DC_RAW_Q)
         logging.info("   -> AC: Mag=%.3f A (Raw ID=%.3f, IQ=%.3f)",
                      I_AC_MAG, I_AC_RAW_D, I_AC_RAW_Q)
-
-        if offsets:
-            # While we're here, set the offsets
-            self.fields.HALL_PHI_E_OFFSET.write(-self.fields.HALL_PHI_E.read() % 65536)
-            self.fields.ABN_DECODER_COUNT.write(0)
-            self.fields.ABN_DECODER_PHI_E_OFFSET.write(0)
-        # Put motion config back how it was / safe stopped state
-        self.fields.UQ_UD_EXT.write(0, 0)
-        self._reset_targets()
-        self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
-        self.fields.PHI_E_SELECTION.write(old_phi_e_selection)
-
-        # Re-enable the configured biquad filters
-        self._setup_filters()
 
     # Tune PID via a setpoint change experiment
     # See https://folk.ntnu.no/skoge/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf
