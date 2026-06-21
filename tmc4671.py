@@ -1421,11 +1421,21 @@ class TMC4671:
                                  measurement.  VELOCITY_ACTUAL must be written
                                  explicitly: the DDS counter does not track
                                  TARGET when ACCELERATION is 0.
+        * STATUS_MASK          – interrupt mask left set from a prior run
+        * PID_TORQUE_FLUX_TARGET / PID_VELOCITY_TARGET / PID_POSITION_TARGET
+                               – residual PID setpoints from a prior motor-
+                                 enable sequence (_handle_ready_deferred)
+        * ABN_DECODER_COUNT    – residual encoder position from a prior run
         """
         self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+        self.fields.STATUS_MASK.write(0)
         self.fields.PWM_CHOP.write(0)
         self.fields.UQ_UD_EXT.write(0, 0)
         self.fields.PHI_E_EXT.write(0)
+        self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
+        self.fields.PID_VELOCITY_TARGET.write(0)
+        self.fields.PID_POSITION_TARGET.write(0)
+        self.fields.ABN_DECODER_COUNT.write(0)
         self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
         self.fields.OPENLOOP_ACCELERATION.write(0)
         self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)
