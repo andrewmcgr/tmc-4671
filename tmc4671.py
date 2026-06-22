@@ -554,19 +554,26 @@ class TMCErrorCheck:
                              }
         self.monitor_data.update({'current_ux': 0., 'current_v': 0.,
                                   'current_wy': 0.})
-        # Setup for temperature query
-        # Per the OpenFFBoard firmware source
-        #[thermistor ffboard]
-        #temperature1: 25
-        #resistance1: 10000
-        #beta: 4300
+        # Setup for temperature query via AGPI_A or AGPI_B
         self.adc_temp = None
         self.adc_temp_reg = config.getchoice("adc_temp_reg",
                                              ADC_GPIO_FIELDS,
                                              default=None)
+        self._thermistor = None
+        self.temp_callback = None
+        self.last_temp = 0.
+        self.temp_minmax = (0., 999.)
         if self.adc_temp_reg is not None:
+            pullup = config.getfloat("adc_temp_pullup_resistor", 1500.,
+                                     above=0.)
+            t1 = config.getfloat("adc_temp_t1", 25.)
+            r1 = config.getfloat("adc_temp_r1", 10000., above=0.)
+            beta = config.getfloat("adc_temp_beta", 4300., above=0.)
+            self._thermistor = thermistor.Thermistor(pullup, 0.)
+            self._thermistor.setup_coefficients_beta(t1, r1, beta)
             pheaters = self.printer.load_object(config, 'heaters')
-            pheaters.register_monitor(config)
+            sensor_name = "tmc4671_agpi %s" % (self.stepper_name,)
+            pheaters.add_sensor_factory(sensor_name, lambda cfg: self)
     def _make_mask(self, entries):
         mask = 0
         for f in entries:
@@ -586,19 +593,22 @@ class TMCErrorCheck:
             fmt = self.fields.pretty_format("STATUS_FLAGS", status)
             raise self.printer.command_error("TMC 4671 '%s' reports error: %s"
                                              % (self.stepper_name, fmt))
-    def _query_temperature(self):
-        try:
-            if self.adc_temp_reg is not None:
-                self.adc_temp = self.mcu_tmc.read_field(self.adc_temp_reg)
-                # TODO: remove this, just temp logging
-                self._convert_temp(self.adc_temp)
-        except self.printer.command_error as e:
-            # Ignore comms error for temperature
-            self.adc_temp = None
+    def _query_temperature(self, eventtime):
+        if self.adc_temp_reg is None:
             return
+        try:
+            self.adc_temp = self.mcu_tmc.read_field(self.adc_temp_reg)
+            temp = self._convert_temp(self.adc_temp)
+            if temp is not None:
+                self.last_temp = temp
+                if self.temp_callback is not None:
+                    self.temp_callback(eventtime, temp)
+        except self.printer.command_error:
+            self.adc_temp = None
     def _do_periodic_check(self, eventtime):
         try:
             self._query_status()
+            self._query_temperature(eventtime)
             ch = self.current_helper
             self.monitor_data['current_ux'] = ch.convert_adc_current(
                 ch._read_field("ADC_IUX"))
@@ -623,29 +633,28 @@ class TMCErrorCheck:
         self.check_timer = reactor.register_timer(self._do_periodic_check,
                                                   curtime + 1.)
         return True
-    def _convert_temp(self, adc):
-        v = adc - 0x7fff
-        if v < 0:
-            temp = 0.0
-        else:
-            #temp = 1500.0 * 43252.0 / float(v)
-            #temp = 64878000.0 / float(v)
-            temp = 129756000.0 / float(v)
-            #temp = (1.0/298.15) + math.log(temp / 10000.0) / 4300.0
-            temp = (0.003354016) + math.log(temp / 10000.0) / 4300.0
-            temp = 1.0 / temp
-            temp -= 273.15
-        logging.info("TMC %s temp: %g", self.stepper_name, temp)
+    def _convert_temp(self, adc_raw):
+        # ADC u16: midscale 0x8000 = 0 V, full range ±2.5 V (single-ended,
+        # INN tied to GNDA). adc_fraction = V_AGPI / 2.5 V.
+        # Circuit: thermistor on high side, pullup on low side → flip fraction.
+        v = adc_raw - 32768
+        if v <= 0:
+            return None
+        adc_fraction = v / 32767.0
+        return self._thermistor.calc_temp(1.0 - adc_fraction)
+    def setup_minmax(self, min_temp, max_temp):
+        self.temp_minmax = (min_temp, max_temp)
+    def setup_callback(self, temperature_callback):
+        self.temp_callback = temperature_callback
+    def get_report_time_delta(self):
+        return 1.
     def get_status(self, eventtime=None):
         res = {'drv_status': None, 'temperature': None}
         res.update(self.monitor_data)
         if self.check_timer is None:
             return res
-        temp = None
-        if self.adc_temp is not None:
-            # Convert it to temp here
-            temp = self._convert_temp(self.adc_temp)
-        res['temperature'] = temp
+        if self.adc_temp_reg is not None:
+            res['temperature'] = self.last_temp
         return res
 
 
