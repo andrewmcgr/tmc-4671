@@ -9,7 +9,7 @@ from typing import NamedTuple
 
 class BiquadFilter(NamedTuple):
     type: str
-    freq: int
+    freq: float
     slope: float
 
 

@@ -1117,7 +1117,7 @@ class TMC4671:
                 BIQUAD_FILTER_TYPES,
                 default="lpf",
             )
-            freq = config.getint(
+            freq = config.getfloat(
                 f"biquad_{target}_frequency",
                 minval=0,
                 maxval=4.0 * TMC_FREQUENCY,
@@ -1915,7 +1915,7 @@ class TMC4671:
         configfile.set(cfgname, 'foc_PID_POSITION_I', "%.3f" % (i_p,))
         bf = self.biquad_filters['velocity']
         configfile.set(cfgname, 'biquad_velocity_filter', bf.type)
-        configfile.set(cfgname, 'biquad_velocity_frequency', "%d" % (bf.freq,))
+        configfile.set(cfgname, 'biquad_velocity_frequency', "%.6g" % (bf.freq,))
         configfile.set(cfgname, 'biquad_velocity_slope', "%.6g" % (bf.slope,))
         gcmd.respond_info(msg)
 
@@ -1972,7 +1972,7 @@ class TMC4671:
                     configfile.set(cfgname, 'biquad_%s_filter' % (target,),
                                    bf.type)
                     configfile.set(cfgname, 'biquad_%s_frequency' % (target,),
-                                   "%d" % (bf.freq,))
+                                   "%.6g" % (bf.freq,))
                     configfile.set(cfgname, 'biquad_%s_slope' % (target,),
                                    "%.6g" % (bf.slope,))
 
@@ -2231,7 +2231,7 @@ class TMC4671:
                 % (filter_type, ", ".join(BIQUAD_FILTER_TYPES))
             )
 
-        freq = gcmd.get_int(
+        freq = gcmd.get_float(
             "FREQUENCY", minval=0, maxval=4 * TMC_FREQUENCY, default=current_filter.freq,
         )
         slope = gcmd.get_float("SLOPE", above=0.0, default=current_filter.slope)
@@ -2359,7 +2359,7 @@ class TMC4671:
             bf = self.biquad_filters[target]
             if bf.freq == 0:
                 return "disabled"
-            return f"{bf.type.upper()} {bf.freq} Hz (slope={bf.slope:.4f})"
+            return f"{bf.type.upper()} {bf.freq:g} Hz (slope={bf.slope:.4f})"
 
         gcmd.respond_info(
             f"TMC 4671 '{self.name}' Motor Debug Report:\n"
