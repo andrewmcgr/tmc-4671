@@ -48,6 +48,19 @@ function check_download {
 function link_extension {
     echo "[INSTALL] Linking extension to Klipper..."
 
+    # When targeting plugins/, remove any stale symlinks left in extras/ by a
+    # previous installation.  Kalico's _load_modules raises an error if the same
+    # module name appears in both directories, so the old extras/ links must go.
+    local extras_path="${KLIPPER_PATH}/klippy/extras"
+    if [[ "${KLIPPER_PLUGINS_PATH}" != "${extras_path}/" ]]; then
+        for f in tmc4671.py tmc4671_regs.py tmc4671_biquad.py tmc4671_temperature_sensor.py; do
+            if [[ -L "${extras_path}/${f}" ]]; then
+                echo "[INSTALL] Removing stale extras/ symlink: ${f}"
+                rm -f "${extras_path}/${f}"
+            fi
+        done
+    fi
+
     ln -srfn "${TMC4671_PATH}/tmc4671.py" "${KLIPPER_PLUGINS_PATH}/tmc4671.py"
     ln -srfn "${TMC4671_PATH}/tmc4671_regs.py" "${KLIPPER_PLUGINS_PATH}/tmc4671_regs.py"
     ln -srfn "${TMC4671_PATH}/tmc4671_biquad.py" "${KLIPPER_PLUGINS_PATH}/tmc4671_biquad.py"
