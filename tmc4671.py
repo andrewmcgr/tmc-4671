@@ -936,16 +936,16 @@ class TMC4671:
         self.read_registers = Registers.keys()
         self.printer.register_event_handler("klippy:connect",
                                             self._handle_connect)
-        self.printer.register_event_handler("klippy:ready",
-                                            self._handle_ready)
         #self.printer.register_event_handler("idle_timeout:ready",
-        #                                    self._handle_ready)
+        #                                    self._handle_connect)
         self.stepper = None
         self.stepper_enable = self.printer.load_object(config, "stepper_enable")
         self.printer.register_event_handler("klippy:mcu_identify",
                                             self._handle_mcu_identify)
         self.printer.register_event_handler("klippy:disconnect",
                                             self._handle_disconnect)
+        self.printer.register_event_handler("homing:home_rails_begin",
+                                            self._handle_home_rails_begin)
         # Register commands
         self.step_helper = StepHelper(config, self.mcu_tmc)
         self.current_helper = CurrentHelper(config, self.mcu_tmc)
@@ -1181,50 +1181,29 @@ class TMC4671:
         self.printer.get_reactor().register_callback(cb)
 
     def _handle_connect(self):
-        print_time = self.printer.lookup_object('toolhead').get_last_move_time()
-        # Check for soft stepper enable/disable
         enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
-        # Send init
         try:
             self._init_registers()
         except self.printer.command_error as e:
             logging.info("TMC %s failed to init: %s", self.name, str(e))
-        enable_line.register_state_callback(self._handle_stepper_enable)
-
-    def _handle_disconnect(self):
-        if self.fields6100 is not None:
-            try:
-                self.mcu_tmc6100.set_register(
-                    "GCONF", self.fields6100.set_field("disable", 1), None)
-            except Exception:
-                pass
-
-    def _handle_ready(self, print_time=None):
-        # klippy:ready handlers are limited in what they may do. Communicating with a MCU
-        # will pause the reactor and is thus forbidden. That code has to run outside of the event handler.
-        self.printer.reactor.register_callback((lambda ev: self._handle_ready_deferred(print_time)))
-
-    def _handle_ready_deferred(self, print_time=None):
+        # Grab a fresh print_time *after* _init_registers() finishes: that function
+        # internally runs ~0.5 s of toolhead dwell for ADC calibration, so any
+        # print_time captured before it would translate to an MCU clock value
+        # already in the past, triggering "Timer too close" on motor_enable.
+        print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         with self.mutex:
-            if print_time is None:
-                print_time = self.printer.lookup_object('toolhead').get_last_move_time()
-            # Set these before setting enable to avoid yeeting the toolhead
             self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
             self.fields.STATUS_MASK.write(0)
             self.fields.PID_TORQUE_FLUX_TARGET.write(0, 0)
             self.fields.PID_VELOCITY_TARGET.write(0)
             self.fields.PID_POSITION_TARGET.write(0)
-            # Now enable 6100
             if self.fields6100 is not None:
                 self.mcu_tmc6100.set_register("GCONF",
                                               self.fields6100.set_field("disable", 0),
                                               print_time)
-            enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
             enable_line.motor_enable(print_time)
             try:
-                # Calibrate current ADC first before any motor activation
-                self._calibrate_adc(print_time)
-                # Just align and measure, which sets up the encoder offsets
+                # _init_registers() already ran _calibrate_adc(); skip it here.
                 self._align_and_measure(True, print_time)
                 self.fields.ABN_DECODER_COUNT.write(0)
                 self.fields.PID_POSITION_TARGET.write(0)
@@ -1241,6 +1220,28 @@ class TMC4671:
             self.fields.PID_POSITION_TARGET.write(0)
             self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
             self.init_done = True
+        enable_line.register_state_callback(self._handle_stepper_enable)
+
+    def _handle_disconnect(self):
+        if self.fields6100 is not None:
+            try:
+                self.mcu_tmc6100.set_register(
+                    "GCONF", self.fields6100.set_field("disable", 1), None)
+            except Exception:
+                pass
+
+    def _handle_home_rails_begin(self, homing_state, rails):
+        if self.init_done:
+            return
+        for rail in rails:
+            for stepper in rail.get_steppers():
+                if stepper.get_name() == self.stepper_name:
+                    raise self.printer.command_error(
+                        "Cannot home '%s': TMC4671 startup initialisation "
+                        "has not completed. Wait for calibration to finish "
+                        "or run FIRMWARE_RESTART if it failed."
+                        % (self.stepper_name,)
+                    )
 
     def _calibrate_adc(self, print_time):
         self.fields.PWM_CHOP.write(0)
@@ -1426,7 +1427,7 @@ class TMC4671:
         * STATUS_MASK          – interrupt mask left set from a prior run
         * PID_TORQUE_FLUX_TARGET / PID_VELOCITY_TARGET / PID_POSITION_TARGET
                                – residual PID setpoints from a prior motor-
-                                 enable sequence (_handle_ready_deferred)
+                               enable sequence (_handle_connect)
         * ABN_DECODER_COUNT    – residual encoder position from a prior run
         """
         self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
