@@ -1134,17 +1134,19 @@ class TMC4671:
             )
 
     def enable_biquad(self, enable_field, *biquad):
-        reg, addr = self.mcu_tmc.name_to_reg[enable_field]
-        for o,i in enumerate(biquad):
-            self.mcu_tmc.tmc_spi.reg_write(reg+1, addr-6+o)
-            self.mcu_tmc.tmc_spi.reg_write(reg, i)
-        self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
-        self.mcu_tmc.tmc_spi.reg_write(reg, 1)
+        with self.mcu_tmc.tmc_spi.mutex:
+            reg, addr = self.mcu_tmc.name_to_reg[enable_field]
+            for o, i in enumerate(biquad):
+                self.mcu_tmc.tmc_spi.reg_write(reg+1, addr-6+o)
+                self.mcu_tmc.tmc_spi.reg_write(reg, i)
+            self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
+            self.mcu_tmc.tmc_spi.reg_write(reg, 1)
 
     def disable_biquad(self, enable_field):
-        reg, addr = self.mcu_tmc.name_to_reg[enable_field]
-        self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
-        self.mcu_tmc.tmc_spi.reg_write(reg, 0)
+        with self.mcu_tmc.tmc_spi.mutex:
+            reg, addr = self.mcu_tmc.name_to_reg[enable_field]
+            self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
+            self.mcu_tmc.tmc_spi.reg_write(reg, 0)
 
     def _do_enable(self, print_time):
         try:
