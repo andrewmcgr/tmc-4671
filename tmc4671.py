@@ -641,6 +641,8 @@ class TMCErrorCheck:
         # Circuit: thermistor on high side, pullup on low side → flip fraction.
         v = adc_raw - 32768
         if v <= 0:
+            logging.debug("TMC %s AGPI raw=%d (v=%d ≤ 0, no positive voltage)",
+                          self.stepper_name, adc_raw, v)
             return None
         adc_fraction = v / 32767.0
         return self._thermistor.calc_temp(1.0 - adc_fraction)
@@ -657,6 +659,7 @@ class TMCErrorCheck:
             return res
         if self.adc_temp_reg is not None:
             res['temperature'] = self.last_temp
+            res['adc_temp_raw'] = self.adc_temp
         return res
 
 
