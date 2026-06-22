@@ -1134,17 +1134,19 @@ class TMC4671:
             )
 
     def enable_biquad(self, enable_field, *biquad):
-        reg, addr = self.mcu_tmc.name_to_reg[enable_field]
-        for o,i in enumerate(biquad):
-            self.mcu_tmc.tmc_spi.reg_write(reg+1, addr-6+o)
-            self.mcu_tmc.tmc_spi.reg_write(reg, i)
-        self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
-        self.mcu_tmc.tmc_spi.reg_write(reg, 1)
+        with self.mcu_tmc.tmc_spi.mutex:
+            reg, addr = self.mcu_tmc.name_to_reg[enable_field]
+            for o, i in enumerate(biquad):
+                self.mcu_tmc.tmc_spi.reg_write(reg+1, addr-6+o)
+                self.mcu_tmc.tmc_spi.reg_write(reg, i)
+            self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
+            self.mcu_tmc.tmc_spi.reg_write(reg, 1)
 
     def disable_biquad(self, enable_field):
-        reg, addr = self.mcu_tmc.name_to_reg[enable_field]
-        self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
-        self.mcu_tmc.tmc_spi.reg_write(reg, 0)
+        with self.mcu_tmc.tmc_spi.mutex:
+            reg, addr = self.mcu_tmc.name_to_reg[enable_field]
+            self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
+            self.mcu_tmc.tmc_spi.reg_write(reg, 0)
 
     def _do_enable(self, print_time):
         try:
@@ -1297,16 +1299,17 @@ class TMC4671:
     def _sample_adc(self, reg_name):
         self.printer.lookup_object('toolhead').dwell(0.2)
         reg, addr = self.mcu_tmc.name_to_reg[reg_name]
-        self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
         i1 = []
         i0 = []
         n = 100
-        for i in range(n):
-            v = self.fields.get_reg_fields(reg_name,
-                                           self.mcu_tmc.tmc_spi.reg_read(reg))
-            i1.append(v["ADC_I1_RAW"])
-            i0.append(v["ADC_I0_RAW"])
-            self.printer.lookup_object('toolhead').dwell(0.0005)
+        with self.mcu_tmc.tmc_spi.mutex:
+            self.mcu_tmc.tmc_spi.reg_write(reg+1, addr)
+            for i in range(n):
+                v = self.fields.get_reg_fields(reg_name,
+                                               self.mcu_tmc.tmc_spi.reg_read(reg))
+                i1.append(v["ADC_I1_RAW"])
+                i0.append(v["ADC_I0_RAW"])
+                self.printer.lookup_object('toolhead').dwell(0.0005)
         return int(round(fmean(i0))), int(round(fmean(i1)))
 
     def _sample_vm(self):
