@@ -571,9 +571,11 @@ class TMCErrorCheck:
             beta = config.getfloat("adc_temp_beta", 4300., above=0.)
             self._thermistor = thermistor.Thermistor(pullup, 0.)
             self._thermistor.setup_coefficients_beta(t1, r1, beta)
-            pheaters = self.printer.load_object(config, 'heaters')
-            sensor_name = "tmc4671_agpi %s" % (self.stepper_name,)
-            pheaters.add_sensor_factory(sensor_name, lambda cfg: self)
+            # Register this object by name so tmc4671_temperature_sensor
+            # sections can look it up at connect time, regardless of section
+            # ordering in the config file.
+            obj_name = "tmc4671_agpi %s" % (self.stepper_name,)
+            self.printer.add_object(obj_name, self)
     def _make_mask(self, entries):
         mask = 0
         for f in entries:
