@@ -946,6 +946,8 @@ class TMC4671:
                                             self._handle_mcu_identify)
         self.printer.register_event_handler("klippy:disconnect",
                                             self._handle_disconnect)
+        self.printer.register_event_handler("homing:home_rails_begin",
+                                            self._handle_home_rails_begin)
         # Register commands
         self.step_helper = StepHelper(config, self.mcu_tmc)
         self.current_helper = CurrentHelper(config, self.mcu_tmc)
@@ -1198,6 +1200,19 @@ class TMC4671:
                     "GCONF", self.fields6100.set_field("disable", 1), None)
             except Exception:
                 pass
+
+    def _handle_home_rails_begin(self, homing_state, rails):
+        if self.init_done:
+            return
+        for rail in rails:
+            for stepper in rail.get_steppers():
+                if stepper.get_name() == self.stepper_name:
+                    raise self.printer.command_error(
+                        "Cannot home '%s': TMC4671 startup initialisation "
+                        "has not completed. Wait for calibration to finish "
+                        "or run FIRMWARE_RESTART if it failed."
+                        % (self.stepper_name,)
+                    )
 
     def _handle_ready(self, print_time=None):
         # klippy:ready handlers are limited in what they may do. Communicating with a MCU
