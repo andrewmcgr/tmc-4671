@@ -1181,12 +1181,16 @@ class TMC4671:
         self.printer.get_reactor().register_callback(cb)
 
     def _handle_connect(self):
-        print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         enable_line = self.stepper_enable.lookup_enable(self.stepper_name)
         try:
             self._init_registers()
         except self.printer.command_error as e:
             logging.info("TMC %s failed to init: %s", self.name, str(e))
+        # Grab a fresh print_time *after* _init_registers() finishes: that function
+        # internally runs ~0.5 s of toolhead dwell for ADC calibration, so any
+        # print_time captured before it would translate to an MCU clock value
+        # already in the past, triggering "Timer too close" on motor_enable.
+        print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         with self.mutex:
             self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
             self.fields.STATUS_MASK.write(0)
@@ -1199,7 +1203,7 @@ class TMC4671:
                                               print_time)
             enable_line.motor_enable(print_time)
             try:
-                self._calibrate_adc(print_time)
+                # _init_registers() already ran _calibrate_adc(); skip it here.
                 self._align_and_measure(True, print_time)
                 self.fields.ABN_DECODER_COUNT.write(0)
                 self.fields.PID_POSITION_TARGET.write(0)
