@@ -1444,7 +1444,19 @@ class TMC4671:
         return velocity_p, velocity_i
 
     def _calc_position_pid(self, position_bandwidth):
-        position_p = 2.0 * math.pi * position_bandwidth / self.vpoles()
+        # The position controller output is a velocity command (in RPM of whatever
+        # type VELOCITY_SELECTION uses).  ERROR_POSITION is in angle counts where
+        # 65536 counts = one revolution of the *selected position source*:
+        #   phi_m sources (POSITION_SELECTION 9-12): 65536 = one mechanical rev
+        #   phi_e sources (POSITION_SELECTION 0-8):  65536 = one electrical rev
+        #                                             = 1/N_POLE_PAIRS mech rev
+        #
+        # Switching from phi_m to phi_e multiplies ERROR_POSITION by N_POLE_PAIRS
+        # for the same physical error, so position_p must be divided by ppoles()
+        # to keep the same closed-loop bandwidth.  Similarly vpoles() accounts for
+        # whether the velocity controller uses mechanical or electrical RPM.
+        position_p = (2.0 * math.pi * position_bandwidth
+                      / (self.vpoles() * self.ppoles()))
         return position_p
 
     def _prepare_for_alignment(self):
