@@ -53,7 +53,7 @@ function link_extension {
     # module name appears in both directories, so the old extras/ links must go.
     local extras_path="${KLIPPER_PATH}/klippy/extras"
     if [[ "${KLIPPER_PLUGINS_PATH}" != "${extras_path}/" ]]; then
-        for f in tmc4671.py tmc4671_regs.py tmc4671_biquad.py tmc4671_temperature_sensor.py; do
+        for f in tmc4671.py tmc4671_regs.py tmc4671_biquad.py tmc4671_temperature_sensor.py tmc4671_profiles.py foc_motor.py tmc4671_board.py; do
             if [[ -L "${extras_path}/${f}" ]]; then
                 echo "[INSTALL] Removing stale extras/ symlink: ${f}"
                 rm -f "${extras_path}/${f}"
@@ -65,6 +65,9 @@ function link_extension {
     ln -srfn "${TMC4671_PATH}/tmc4671_regs.py" "${KLIPPER_PLUGINS_PATH}/tmc4671_regs.py"
     ln -srfn "${TMC4671_PATH}/tmc4671_biquad.py" "${KLIPPER_PLUGINS_PATH}/tmc4671_biquad.py"
     ln -srfn "${TMC4671_PATH}/tmc4671_temperature_sensor.py" "${KLIPPER_PLUGINS_PATH}/tmc4671_temperature_sensor.py"
+    ln -srfn "${TMC4671_PATH}/tmc4671_profiles.py" "${KLIPPER_PLUGINS_PATH}/tmc4671_profiles.py"
+    ln -srfn "${TMC4671_PATH}/foc_motor.py" "${KLIPPER_PLUGINS_PATH}/foc_motor.py"
+    ln -srfn "${TMC4671_PATH}/tmc4671_board.py" "${KLIPPER_PLUGINS_PATH}/tmc4671_board.py"
 }
 
 function restart_klipper {

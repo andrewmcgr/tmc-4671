@@ -12,6 +12,9 @@ tmc-4671/
 ├── tmc4671_regs.py                  # SPI registers
 ├── tmc4671_biquad.py                # Biquad filter design utilities (BiquadFilter, design functions, TMC normalisation)
 ├── tmc4671.py                       # Core driver implementation (PID tuning, calibration, SPI, G-code commands)
+├── tmc4671_profiles.py              # Profile infrastructure: _MISSING, ConfigWithDefaults, FocProfile, BUILTIN_MOTORS, BUILTIN_BOARDS
+├── foc_motor.py                     # [foc_motor] config section — motor-specific hardware parameters (pole pairs, encoder, Kt, inertia)
+├── tmc4671_board.py                 # [tmc4671_board] config section — board-specific parameters (scaling, ADC channels, thermistor, 6100)
 ├── tmc4671_temperature_sensor.py    # [tmc4671_temperature_sensor] config section — wires AGPI thermistor into Kalico sensor infrastructure
 ├── pyproject.toml                   # Project configuration defining the "kalico.plugins" entry-point
 └── README.md                        # Hardware setup, wiring, moonraker configuration, and PID tuning instructions
