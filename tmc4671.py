@@ -247,7 +247,13 @@ def _build_field_descs(helper, name_to_reg):
                 d = FieldDesc(reg=reg, addr=addr, mask=mask, shift=ffs(mask))
                 descs[field_name] = d
                 field_list.append((field_name, d))
-            descs[reg_name] = field_list
+            # Don't overwrite a field-name entry with the register-level list
+            # when the register name collides with one of its own field names
+            # (e.g. VELOCITY_SELECTION register contains a VELOCITY_SELECTION
+            # field) — the individual SingleFieldAccessor must win.
+            own_field_names = {fn for fn, _ in field_list}
+            if reg_name not in own_field_names:
+                descs[reg_name] = field_list
         elif reg_fields and len(reg_fields) == 1:
             field_name, mask = next(iter(reg_fields.items()))
             d = FieldDesc(reg=reg, addr=addr, mask=mask, shift=ffs(mask))
