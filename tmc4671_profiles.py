@@ -92,22 +92,13 @@ class ConfigWithDefaults:
         return self._config.get(name, *args, **kwargs)
 
     # ------------------------------------------------------------------
-    # Pass-through methods (not intercepted)
+    # Pass-through: delegate any attribute not explicitly defined above
+    # to the underlying config object.  This covers has_section(),
+    # getlists(), getsection(), get_name(), get_printer(), error(), and
+    # anything else Klipper may call on the config object.
 
-    def getlists(self, name, *args, **kwargs):
-        return self._config.getlists(name, *args, **kwargs)
-
-    def getsection(self, name):
-        return self._config.getsection(name)
-
-    def get_name(self):
-        return self._config.get_name()
-
-    def get_printer(self):
-        return self._config.get_printer()
-
-    def error(self, msg):
-        return self._config.error(msg)
+    def __getattr__(self, name):
+        return getattr(self._config, name)
 
 
 class FocProfile:
