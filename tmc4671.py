@@ -951,6 +951,16 @@ class TMC4671:
         self.motor_kt = config.getfloat('motor_kt', 0.0156, above=0.)
         self.velocity_alpha = config.getfloat('velocity_alpha', 0.35,
                                               minval=0., maxval=1.)
+        self.current_bandwidth = config.getfloat('current_bandwidth', 1200.0,
+                                                  above=0.)
+        self.flux_bandwidth = config.getfloat('flux_bandwidth',
+                                               self.current_bandwidth, above=0.)
+        self.torque_bandwidth = config.getfloat('torque_bandwidth',
+                                                 self.current_bandwidth, above=0.)
+        self.velocity_bandwidth = config.getfloat('velocity_bandwidth', 450.0,
+                                                   above=0.)
+        self.position_bandwidth = config.getfloat('position_bandwidth', 100.0,
+                                                   above=0.)
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, field_meta,
                                    TMC_FREQUENCY, pin_option="cs_pin")
         self.fields = FieldProxy(field_meta, self.mcu_tmc)
@@ -1132,6 +1142,9 @@ class TMC4671:
                              for n in self.fields.get_reg_fields(reg_name, 0)
                              }
 
+        self.tune_current_pid = config.getboolean('tune_current_pid', False)
+        self.tune_motion_pid = config.getboolean('tune_motion_pid', False)
+
         self.biquad_filters = {}
         for target in BIQUAD_FILTER_TARGETS.keys():
             filter_type = config.getchoice(
@@ -1139,10 +1152,15 @@ class TMC4671:
                 BIQUAD_FILTER_TYPES,
                 default="lpf",
             )
+            freq_kwargs = {}
+            if (self.tune_current_pid and target in ('flux', 'torque')) or \
+               (self.tune_motion_pid and target == 'velocity'):
+                freq_kwargs['default'] = 0.0
             freq = config.getfloat(
                 f"biquad_{target}_frequency",
                 minval=0,
                 maxval=4.0 * TMC_FREQUENCY,
+                **freq_kwargs
             )
             slope = config.getfloat(
                 f"biquad_{target}_slope",
@@ -1243,6 +1261,24 @@ class TMC4671:
             self.fields.ABN_DECODER_COUNT.write(0)
             self.fields.PID_POSITION_TARGET.write(0)
             self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+            if self.tune_current_pid:
+                try:
+                    self._apply_current_pid(self.flux_bandwidth,
+                                            self.torque_bandwidth)
+                    logging.info("TMC %s: startup current PID tuning complete",
+                                 self.name)
+                except self.printer.command_error as e:
+                    logging.error("TMC %s: startup current PID tuning failed: %s",
+                                  self.name, str(e))
+            if self.tune_motion_pid:
+                try:
+                    self._apply_motion_pid(self.velocity_bandwidth,
+                                           self.position_bandwidth)
+                    logging.info("TMC %s: startup motion PID tuning complete",
+                                 self.name)
+                except self.printer.command_error as e:
+                    logging.error("TMC %s: startup motion PID tuning failed: %s",
+                                  self.name, str(e))
             self.init_done = True
         self.error_helper.start_monitoring()
         enable_line.register_state_callback(self._handle_stepper_enable)
@@ -1468,6 +1504,65 @@ class TMC4671:
         position_p = (2.0 * math.pi * position_bandwidth
                       / (self.vpoles() * self.ppoles()))
         return position_p
+
+    def _apply_current_pid(self, flux_bw, torque_bw):
+        flux_l = self.motor_ld if self.motor_ld != 0.0 else self.motor_l
+        torque_l = self.motor_lq if self.motor_lq != 0.0 else self.motor_l
+        if flux_l == 0.0 or torque_l == 0.0:
+            raise self.printer.command_error(
+                "Motor inductance not measured. Run "
+                "FIRMWARE_RESTART to trigger startup calibration first.")
+        P_flux, I_flux = self._tune_current_pid(flux_bw, motor_l=flux_l)
+        P_torque, I_torque = self._tune_current_pid(torque_bw, motor_l=torque_l)
+        for target, bw in (('flux', flux_bw), ('torque', torque_bw)):
+            bf = BiquadFilter(
+                type='lpf', freq=round(bw),
+                slope=self.biquad_filters[target].slope)
+            self.biquad_filters[target] = bf
+            self._setup_filter(BIQUAD_FILTER_TARGETS[target], bf)
+        self.fields.PID_FLUX_P.write(self.pid_helpers["FLUX_P"].to_f(P_flux))
+        self.fields.PID_FLUX_I.write(self.pid_helpers["FLUX_I"].to_f(I_flux))
+        self.fields.PID_TORQUE_P.write(self.pid_helpers["TORQUE_P"].to_f(P_torque))
+        self.fields.PID_TORQUE_I.write(self.pid_helpers["TORQUE_I"].to_f(I_torque))
+        cfgname = "tmc4671 %s" % (self.name,)
+        configfile = self.printer.lookup_object('configfile')
+        configfile.set(cfgname, 'foc_PID_FLUX_P', "%.3f" % (P_flux,))
+        configfile.set(cfgname, 'foc_PID_FLUX_I', "%.3f" % (I_flux,))
+        configfile.set(cfgname, 'foc_PID_TORQUE_P', "%.3f" % (P_torque,))
+        configfile.set(cfgname, 'foc_PID_TORQUE_I', "%.3f" % (I_torque,))
+        for target in ('flux', 'torque'):
+            bf = self.biquad_filters[target]
+            configfile.set(cfgname, 'biquad_%s_filter' % (target,), bf.type)
+            configfile.set(cfgname, 'biquad_%s_frequency' % (target,),
+                           "%.6g" % (bf.freq,))
+            configfile.set(cfgname, 'biquad_%s_slope' % (target,),
+                           "%.6g" % (bf.slope,))
+        return P_flux, I_flux, P_torque, I_torque
+
+    def _apply_motion_pid(self, v_bw, p_bw):
+        p_v, i_v = self._calc_velocity_pid(v_bw)
+        p_p = self._calc_position_pid(p_bw)
+        i_p = 0.0
+        vel_filter = BiquadFilter(
+            type='lpf', freq=round(v_bw),
+            slope=self.biquad_filters['velocity'].slope)
+        self.biquad_filters['velocity'] = vel_filter
+        self._setup_filter(BIQUAD_FILTER_TARGETS['velocity'], vel_filter)
+        self.fields.PID_VELOCITY_P.write(self.pid_helpers["VELOCITY_P"].to_f(p_v))
+        self.fields.PID_VELOCITY_I.write(self.pid_helpers["VELOCITY_I"].to_f(i_v))
+        self.fields.PID_POSITION_P.write(self.pid_helpers["POSITION_P"].to_f(p_p))
+        self.fields.PID_POSITION_I.write(self.pid_helpers["POSITION_I"].to_f(i_p))
+        cfgname = "tmc4671 %s" % (self.name,)
+        configfile = self.printer.lookup_object('configfile')
+        configfile.set(cfgname, 'foc_PID_VELOCITY_P', "%.3f" % (p_v,))
+        configfile.set(cfgname, 'foc_PID_VELOCITY_I', "%.3f" % (i_v,))
+        configfile.set(cfgname, 'foc_PID_POSITION_P', "%.3f" % (p_p,))
+        configfile.set(cfgname, 'foc_PID_POSITION_I', "%.3f" % (i_p,))
+        bf = self.biquad_filters['velocity']
+        configfile.set(cfgname, 'biquad_velocity_filter', bf.type)
+        configfile.set(cfgname, 'biquad_velocity_frequency', "%.6g" % (bf.freq,))
+        configfile.set(cfgname, 'biquad_velocity_slope', "%.6g" % (bf.slope,))
+        return p_v, i_v, p_p, i_p
 
     def _prepare_for_alignment(self):
         """Stop the motor and restore motion-mode and external-input registers to
@@ -1921,8 +2016,10 @@ class TMC4671:
 
     cmd_TMC_TUNE_MOTION_PID_help = "Tune velocity and position PID coefficients"
     def cmd_TMC_TUNE_MOTION_PID(self, gcmd):
-        v_bw = gcmd.get_float('VELOCITY_BANDWIDTH', 450.0, above=0.)
-        p_bw = gcmd.get_float('POSITION_BANDWIDTH', 100.0, above=0.)
+        v_bw = gcmd.get_float('VELOCITY_BANDWIDTH', self.velocity_bandwidth,
+                              above=0.)
+        p_bw = gcmd.get_float('POSITION_BANDWIDTH', self.position_bandwidth,
+                              above=0.)
         l_v = gcmd.get_float('LAMBDA_V', None)
         l_p = gcmd.get_float('LAMBDA_P', None)
         I_h = gcmd.get_float('HOLDING_CURRENT', None)
@@ -1936,6 +2033,31 @@ class TMC4671:
             l_p = l_p if l_p is not None else 400.0
             p_v, i_v, p_p, i_p, k_v, k_p = self._tune_motion_pid(Kt, l_v, l_p)
             vel_filter_freq = round(3.0 * self.pwmfreq / l_v)
+            vel_filter = BiquadFilter(
+                type='lpf', freq=vel_filter_freq,
+                slope=self.biquad_filters['velocity'].slope)
+            self.biquad_filters['velocity'] = vel_filter
+            self._setup_filter(BIQUAD_FILTER_TARGETS['velocity'], vel_filter)
+            self.fields.PID_VELOCITY_P.write(
+                self.pid_helpers["VELOCITY_P"].to_f(p_v))
+            self.fields.PID_VELOCITY_I.write(
+                self.pid_helpers["VELOCITY_I"].to_f(i_v))
+            self.fields.PID_POSITION_P.write(
+                self.pid_helpers["POSITION_P"].to_f(p_p))
+            self.fields.PID_POSITION_I.write(
+                self.pid_helpers["POSITION_I"].to_f(i_p))
+            cfgname = "tmc4671 %s" % (self.name,)
+            configfile = self.printer.lookup_object('configfile')
+            configfile.set(cfgname, 'foc_PID_VELOCITY_P', "%.3f" % (p_v,))
+            configfile.set(cfgname, 'foc_PID_VELOCITY_I', "%.3f" % (i_v,))
+            configfile.set(cfgname, 'foc_PID_POSITION_P', "%.3f" % (p_p,))
+            configfile.set(cfgname, 'foc_PID_POSITION_I', "%.3f" % (i_p,))
+            bf = self.biquad_filters['velocity']
+            configfile.set(cfgname, 'biquad_velocity_filter', bf.type)
+            configfile.set(cfgname, 'biquad_velocity_frequency',
+                           "%.6g" % (bf.freq,))
+            configfile.set(cfgname, 'biquad_velocity_slope',
+                           "%.6g" % (bf.slope,))
             msg = (
                 "Motion PID %s (SIMC/lambda).\n"
                 "k_v=%.5f  k_p=%.5f  KT=%.5f\n"
@@ -1946,10 +2068,7 @@ class TMC4671:
                 % (self.name, k_v, k_p, Kt, p_v, i_v, p_p, i_p, vel_filter_freq)
             )
         else:
-            p_v, i_v = self._calc_velocity_pid(v_bw)
-            p_p = self._calc_position_pid(p_bw)
-            i_p = 0.0
-            vel_filter_freq = round(v_bw)
+            p_v, i_v, p_p, i_p = self._apply_motion_pid(v_bw, p_bw)
             msg = (
                 "Motion PID %s (bandwidth).\n"
                 "Velocity bandwidth=%.1f Hz  Position bandwidth=%.1f Hz\n"
@@ -1957,28 +2076,9 @@ class TMC4671:
                 "Position  P=%.5f  I=%.5f\n"
                 "Velocity biquad LPF set to %d Hz\n"
                 "SAVE_CONFIG will write these values and restart."
-                % (self.name, v_bw, p_bw, p_v, i_v, p_p, i_p, vel_filter_freq)
+                % (self.name, v_bw, p_bw, p_v, i_v, p_p, i_p, round(v_bw))
             )
 
-        vel_filter = BiquadFilter(
-            type='lpf', freq=vel_filter_freq,
-            slope=self.biquad_filters['velocity'].slope)
-        self.biquad_filters['velocity'] = vel_filter
-        self._setup_filter(BIQUAD_FILTER_TARGETS['velocity'], vel_filter)
-        self.fields.PID_VELOCITY_P.write(self.pid_helpers["VELOCITY_P"].to_f(p_v))
-        self.fields.PID_VELOCITY_I.write(self.pid_helpers["VELOCITY_I"].to_f(i_v))
-        self.fields.PID_POSITION_P.write(self.pid_helpers["POSITION_P"].to_f(p_p))
-        self.fields.PID_POSITION_I.write(self.pid_helpers["POSITION_I"].to_f(i_p))
-        cfgname = "tmc4671 %s" % (self.name,)
-        configfile = self.printer.lookup_object('configfile')
-        configfile.set(cfgname, 'foc_PID_VELOCITY_P', "%.3f" % (p_v,))
-        configfile.set(cfgname, 'foc_PID_VELOCITY_I', "%.3f" % (i_v,))
-        configfile.set(cfgname, 'foc_PID_POSITION_P', "%.3f" % (p_p,))
-        configfile.set(cfgname, 'foc_PID_POSITION_I', "%.3f" % (i_p,))
-        bf = self.biquad_filters['velocity']
-        configfile.set(cfgname, 'biquad_velocity_filter', bf.type)
-        configfile.set(cfgname, 'biquad_velocity_frequency', "%.6g" % (bf.freq,))
-        configfile.set(cfgname, 'biquad_velocity_slope', "%.6g" % (bf.slope,))
         gcmd.respond_info(msg)
 
     cmd_TMC_TUNE_PID_help = "Tune the current and torque PID coefficients"
@@ -1986,57 +2086,39 @@ class TMC4671:
         test_existing = gcmd.get_int('CHECK', 0)
         derate = gcmd.get_float('DERATE', 1.6)
         simc_flag = gcmd.get_int('SIMC', 0)
-        current_bandwidth = gcmd.get_float('CURRENT_BANDWIDTH', 1200.0)
-        flux_bandwidth = gcmd.get_float('FLUX_BANDWIDTH', current_bandwidth)
-        torque_bandwidth = gcmd.get_float('TORQUE_BANDWIDTH', current_bandwidth)
+        current_bandwidth = gcmd.get_float('CURRENT_BANDWIDTH',
+                                            self.current_bandwidth)
+        flux_bandwidth = gcmd.get_float('FLUX_BANDWIDTH', self.flux_bandwidth)
+        torque_bandwidth = gcmd.get_float('TORQUE_BANDWIDTH',
+                                           self.torque_bandwidth)
         logging.info("TMC_TUNE_PID %s (SIMC=%d, flux_bw=%.1f, torque_bw=%.1f)",
                      self.name, simc_flag, flux_bandwidth, torque_bandwidth)
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         with self.mutex:
             if simc_flag:
-                P_flux, I_flux = self._tune_flux_pid(test_existing, derate, print_time)
-                P_torque, I_torque = self._tune_torque_pid(test_existing, derate, print_time)
+                P_flux, I_flux = self._tune_flux_pid(test_existing, derate,
+                                                     print_time)
+                P_torque, I_torque = self._tune_torque_pid(test_existing,
+                                                           derate, print_time)
+                self.fields.PID_FLUX_P.write(
+                    self.pid_helpers["FLUX_P"].to_f(P_flux))
+                self.fields.PID_FLUX_I.write(
+                    self.pid_helpers["FLUX_I"].to_f(I_flux))
+                self.fields.PID_TORQUE_P.write(
+                    self.pid_helpers["TORQUE_P"].to_f(P_torque))
+                self.fields.PID_TORQUE_I.write(
+                    self.pid_helpers["TORQUE_I"].to_f(I_torque))
+                cfgname = "tmc4671 %s" % (self.name,)
+                configfile = self.printer.lookup_object('configfile')
+                configfile.set(cfgname, 'foc_PID_FLUX_P', "%.3f" % (P_flux,))
+                configfile.set(cfgname, 'foc_PID_FLUX_I', "%.3f" % (I_flux,))
+                configfile.set(cfgname, 'foc_PID_TORQUE_P',
+                               "%.3f" % (P_torque,))
+                configfile.set(cfgname, 'foc_PID_TORQUE_I',
+                               "%.3f" % (I_torque,))
             else:
-                flux_l = self.motor_ld if self.motor_ld != 0.0 else self.motor_l
-                torque_l = self.motor_lq if self.motor_lq != 0.0 else self.motor_l
-                if flux_l == 0.0 or torque_l == 0.0:
-                    raise gcmd.error(
-                        "Motor inductance not measured. Run "
-                        "FIRMWARE_RESTART to trigger startup calibration first.")
-                P_flux, I_flux = self._tune_current_pid(flux_bandwidth, motor_l=flux_l)
-                P_torque, I_torque = self._tune_current_pid(torque_bandwidth, motor_l=torque_l)
-                flux_filter = BiquadFilter(
-                    type='lpf', freq=round(flux_bandwidth),
-                    slope=self.biquad_filters['flux'].slope)
-                self.biquad_filters['flux'] = flux_filter
-                self._setup_filter(BIQUAD_FILTER_TARGETS['flux'], flux_filter)
-                torque_filter = BiquadFilter(
-                    type='lpf', freq=round(torque_bandwidth),
-                    slope=self.biquad_filters['torque'].slope)
-                self.biquad_filters['torque'] = torque_filter
-                self._setup_filter(BIQUAD_FILTER_TARGETS['torque'], torque_filter)
-
-            self.fields.PID_FLUX_P.write(self.pid_helpers["FLUX_P"].to_f(P_flux))
-            self.fields.PID_FLUX_I.write(self.pid_helpers["FLUX_I"].to_f(I_flux))
-            self.fields.PID_TORQUE_P.write(self.pid_helpers["TORQUE_P"].to_f(P_torque))
-            self.fields.PID_TORQUE_I.write(self.pid_helpers["TORQUE_I"].to_f(I_torque))
-
-            # Store results for SAVE_CONFIG
-            cfgname = "tmc4671 %s" % (self.name,)
-            configfile = self.printer.lookup_object('configfile')
-            configfile.set(cfgname, 'foc_PID_FLUX_P', "%.3f" % (P_flux,))
-            configfile.set(cfgname, 'foc_PID_FLUX_I', "%.3f" % (I_flux,))
-            configfile.set(cfgname, 'foc_PID_TORQUE_P', "%.3f" % (P_torque,))
-            configfile.set(cfgname, 'foc_PID_TORQUE_I', "%.3f" % (I_torque,))
-            if not simc_flag:
-                for target in ('flux', 'torque'):
-                    bf = self.biquad_filters[target]
-                    configfile.set(cfgname, 'biquad_%s_filter' % (target,),
-                                   bf.type)
-                    configfile.set(cfgname, 'biquad_%s_frequency' % (target,),
-                                   "%.6g" % (bf.freq,))
-                    configfile.set(cfgname, 'biquad_%s_slope' % (target,),
-                                   "%.6g" % (bf.slope,))
+                P_flux, I_flux, P_torque, I_torque = \
+                    self._apply_current_pid(flux_bandwidth, torque_bandwidth)
 
         biquad_msg = ""
         if not simc_flag:
