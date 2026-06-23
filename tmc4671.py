@@ -398,7 +398,7 @@ class FieldProxy:
 class PIDHelper:
     def __init__(self, config, mcu_tmc, var, def_v, nvar, def_n):
         self.mcu_tmc = mcu_tmc
-        self.fields = mcu_tmc.get_fields()
+        self.fields = FieldProxy(mcu_tmc.get_fields(), mcu_tmc)
         fvar = "PID_" + var
         logging.info("TMC: %s", ','.join((str(i) for i in [var, def_v, nvar, fvar])))
         set_config_field = self.fields.set_config_field
@@ -415,7 +415,7 @@ class PIDHelper:
 class FFHelper:
     def __init__(self, config, mcu_tmc, var, def_v):
         self.mcu_tmc = mcu_tmc
-        self.fields = mcu_tmc.get_fields()
+        self.fields = FieldProxy(mcu_tmc.get_fields(), mcu_tmc)
         logging.info("TMC: %s", ','.join((str(i) for i in [var, def_v])))
         set_config_field = self.fields.set_config_field
         self.to_f = to_q2_30
@@ -435,7 +435,7 @@ class CurrentHelper:
         self.printer = config.get_printer()
         self.name = config.get_name().split()[-1]
         self.mcu_tmc = mcu_tmc
-        self.fields = mcu_tmc.get_fields()
+        self.fields = FieldProxy(mcu_tmc.get_fields(), mcu_tmc)
         self.run_current = config.getfloat('run_current',
                                       above=0., maxval=MAX_CURRENT)
         self.homing_current = config.getfloat('homing_current', above=0.,
@@ -484,17 +484,9 @@ class CurrentHelper:
         self._write_field("PID_FLUX_OFFSET", self.flux_limit)
         return self.flux_limit
     def _read_field(self, field):
-        reg_name = self.fields.lookup_register(field)
-        reg_value = self.mcu_tmc.get_register(reg_name)
-        return self.fields.get_field(field, reg_value=reg_value,
-                                     reg_name=reg_name)
+        return getattr(self.fields, field).read()
     def _write_field(self, field, val):
-        reg_name = self.fields.lookup_register(field)
-        reg_value = self.mcu_tmc.get_register(reg_name)
-        self.mcu_tmc.set_register(reg_name,
-                                  self.fields.set_field(field, val,
-                                                        reg_value=reg_value,
-                                                        reg_name=reg_name))
+        getattr(self.fields, field).write(val)
 
 
 ######################################################################
@@ -503,7 +495,7 @@ class CurrentHelper:
 
 
 def StepHelper(config, mcu_tmc):
-    fields = mcu_tmc.get_fields()
+    fields = FieldProxy(mcu_tmc.get_fields(), mcu_tmc)
     stepper_name = " ".join(config.get_name().split()[1:])
     if not config.has_section(stepper_name):
         raise config.error(
@@ -532,7 +524,7 @@ class TMCErrorCheck:
         name_parts = config.get_name().split()
         self.stepper_name = ' '.join(name_parts[1:])
         self.mcu_tmc = mcu_tmc
-        self.fields = mcu_tmc.get_fields()
+        self.fields = FieldProxy(mcu_tmc.get_fields(), mcu_tmc)
         self.current_helper = current_helper
         self.check_timer = None
         self.is_enabled = False
@@ -600,7 +592,7 @@ class TMCErrorCheck:
         if self.adc_temp_reg is None:
             return
         try:
-            self.adc_temp = self.mcu_tmc.read_field(self.adc_temp_reg)
+            self.adc_temp = getattr(self.fields, self.adc_temp_reg).read()
             temp = self._convert_temp(self.adc_temp)
             if temp is not None:
                 self.last_temp = temp
@@ -678,7 +670,7 @@ class TMCVirtualPinHelper:
     def __init__(self, config, mcu_tmc, current_helper):
         self.printer = config.get_printer()
         self.mcu_tmc = mcu_tmc
-        self.fields = mcu_tmc.get_fields()
+        self.fields = FieldProxy(mcu_tmc.get_fields(), mcu_tmc)
         self.current_helper = current_helper
         self.diag_pin = config.get('diag_pin', None)
         self.mcu_endstop = None
@@ -733,7 +725,7 @@ class TMCVirtualPinHelper:
         # Homing current change is only applied when this is the active (virtual) endstop.
         self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         self.printer.lookup_object('toolhead').dwell(0.005)
-        self.mcu_tmc.write_field("STATUS_MASK", self.status_mask)
+        self.fields.STATUS_MASK.write(self.status_mask)
         self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         status = self.mcu_tmc.get_register("STATUS_FLAGS")
         fmt = self.fields.pretty_format("STATUS_FLAGS", status)
@@ -741,7 +733,7 @@ class TMCVirtualPinHelper:
         if self.mcu_endstop not in hmove.get_mcu_endstops():
             return
         self._saved_velocity_limit = self.mcu_tmc.get_register("PID_VELOCITY_LIMIT")
-        self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", 0x7fffffff)
+        self.fields.PID_VELOCITY_LIMIT.write(0x7fffffff)
         self.current_helper.apply_current_limit(self.current_helper.get_homing_current())
     def handle_homing_move_end(self, hmove):
         status = self.mcu_tmc.get_register("STATUS_FLAGS")
@@ -749,11 +741,11 @@ class TMCVirtualPinHelper:
         logging.info("TMC 4671 '%s' status at homing end %s", self.name, fmt)
         # Always: clear STATUS_MASK after any homing move on this axis.
         self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
-        self.mcu_tmc.write_field("STATUS_MASK", 0)
+        self.fields.STATUS_MASK.write(0)
         self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
         if self.mcu_endstop not in hmove.get_mcu_endstops():
             return
-        self.mcu_tmc.write_field("PID_VELOCITY_LIMIT", self._saved_velocity_limit)
+        self.fields.PID_VELOCITY_LIMIT.write(self._saved_velocity_limit)
         self.current_helper.apply_current_limit(self.current_helper.get_run_current())
 
 
