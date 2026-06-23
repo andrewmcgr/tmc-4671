@@ -950,13 +950,21 @@ class TMC4671:
         self.jload  = config.getfloat('jload',  5e-5,    above=0.)
         # If load_mass is provided, compute the reflected inertia of a linear
         # load driven by a lead-screw or belt.  rotation_distance (mm/rev) is
-        # read from the stepper section and converted to m/rev; for a linear
-        # axis:  J_load = m * (pitch_m / 2π)²   [kg·m²]
+        # read from the stepper section and converted to m/rev; gear_ratio
+        # (same format as the Kalico stepper config: "N:D" pairs) reduces the
+        # effective pitch so the formula becomes:
+        #   J_load = m * (pitch_m / 2π)²   where pitch_m = rotation_distance_m / gear_ratio
         load_mass = config.getfloat('load_mass', None, minval=0.)
         if load_mass is not None:
             sconfig = config.getsection(self.stepper_name)
             rotation_distance_m = sconfig.getfloat('rotation_distance') / 1000.0
-            self.jload = load_mass * (rotation_distance_m / (2.0 * math.pi)) ** 2
+            gr_pairs = sconfig.getlists('gear_ratio', (), seps=(':', ','),
+                                        count=2, parser=float)
+            gear_ratio = 1.0
+            for n, d in gr_pairs:
+                gear_ratio *= n / d
+            effective_pitch_m = rotation_distance_m / gear_ratio
+            self.jload = load_mass * (effective_pitch_m / (2.0 * math.pi)) ** 2
         self.motor_kt = config.getfloat('motor_kt', 0.0156, above=0.)
         # If holding_current and holding_torque are both provided, derive
         # motor_kt (Kt = torque / current, N·m/A).  Both must be specified
