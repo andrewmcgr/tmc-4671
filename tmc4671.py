@@ -535,6 +535,7 @@ class TMCErrorCheck:
         self.fields = mcu_tmc.get_fields()
         self.current_helper = current_helper
         self.check_timer = None
+        self.is_enabled = False
         self.status_warn_mask = self._make_mask(["PID_IQ_TARGET_LIMIT",
                                                  "PID_ID_TARGET_LIMIT",
                                                  "PID_V_OUTPUT_LIMIT",
@@ -554,19 +555,28 @@ class TMCErrorCheck:
                              }
         self.monitor_data.update({'current_ux': 0., 'current_v': 0.,
                                   'current_wy': 0.})
-        # Setup for temperature query
-        # Per the OpenFFBoard firmware source
-        #[thermistor ffboard]
-        #temperature1: 25
-        #resistance1: 10000
-        #beta: 4300
+        # Setup for temperature query via AGPI_A or AGPI_B
         self.adc_temp = None
         self.adc_temp_reg = config.getchoice("adc_temp_reg",
                                              ADC_GPIO_FIELDS,
                                              default=None)
+        self._thermistor = None
+        self.temp_callback = None
+        self.last_temp = 0.
+        self.temp_minmax = (0., 999.)
         if self.adc_temp_reg is not None:
-            pheaters = self.printer.load_object(config, 'heaters')
-            pheaters.register_monitor(config)
+            pullup = config.getfloat("adc_temp_pullup_resistor", 1500.,
+                                     above=0.)
+            t1 = config.getfloat("adc_temp_t1", 25.)
+            r1 = config.getfloat("adc_temp_r1", 10000., above=0.)
+            beta = config.getfloat("adc_temp_beta", 4300., above=0.)
+            self._thermistor = thermistor.Thermistor(pullup, 0.)
+            self._thermistor.setup_coefficients_beta(t1, r1, beta)
+            # Register this object by name so tmc4671_temperature_sensor
+            # sections can look it up at connect time, regardless of section
+            # ordering in the config file.
+            obj_name = "tmc4671_agpi %s" % (self.stepper_name,)
+            self.printer.add_object(obj_name, self)
     def _make_mask(self, entries):
         mask = 0
         for f in entries:
@@ -586,66 +596,76 @@ class TMCErrorCheck:
             fmt = self.fields.pretty_format("STATUS_FLAGS", status)
             raise self.printer.command_error("TMC 4671 '%s' reports error: %s"
                                              % (self.stepper_name, fmt))
-    def _query_temperature(self):
-        try:
-            if self.adc_temp_reg is not None:
-                self.adc_temp = self.mcu_tmc.read_field(self.adc_temp_reg)
-                # TODO: remove this, just temp logging
-                self._convert_temp(self.adc_temp)
-        except self.printer.command_error as e:
-            # Ignore comms error for temperature
-            self.adc_temp = None
+    def _query_temperature(self, eventtime):
+        if self.adc_temp_reg is None:
             return
+        try:
+            self.adc_temp = self.mcu_tmc.read_field(self.adc_temp_reg)
+            temp = self._convert_temp(self.adc_temp)
+            if temp is not None:
+                self.last_temp = temp
+                if self.temp_callback is not None:
+                    self.temp_callback(eventtime, temp)
+        except self.printer.command_error:
+            self.adc_temp = None
     def _do_periodic_check(self, eventtime):
         try:
-            self._query_status()
-            ch = self.current_helper
-            self.monitor_data['current_ux'] = ch.convert_adc_current(
-                ch._read_field("ADC_IUX"))
-            self.monitor_data['current_v'] = ch.convert_adc_current(
-                ch._read_field("ADC_IV"))
-            self.monitor_data['current_wy'] = ch.convert_adc_current(
-                ch._read_field("ADC_IWY"))
+            if self.is_enabled:
+                self._query_status()
+            self._query_temperature(eventtime)
+            if self.is_enabled:
+                ch = self.current_helper
+                self.monitor_data['current_ux'] = ch.convert_adc_current(
+                    ch._read_field("ADC_IUX"))
+                self.monitor_data['current_v'] = ch.convert_adc_current(
+                    ch._read_field("ADC_IV"))
+                self.monitor_data['current_wy'] = ch.convert_adc_current(
+                    ch._read_field("ADC_IWY"))
         except self.printer.command_error as e:
             self.printer.invoke_shutdown(str(e))
             return self.printer.get_reactor().NEVER
         return eventtime + 1.
     def stop_checks(self):
-        if self.check_timer is None:
-            return
-        self.printer.get_reactor().unregister_timer(self.check_timer)
-        self.check_timer = None
-    def start_checks(self):
+        # Disable full status/current monitoring when motor is disabled.
+        # The timer itself keeps running so temperature is always polled.
+        self.is_enabled = False
+    def start_monitoring(self):
         if self.check_timer is not None:
-            self.stop_checks()
+            return
         reactor = self.printer.get_reactor()
         curtime = reactor.monotonic()
         self.check_timer = reactor.register_timer(self._do_periodic_check,
                                                   curtime + 1.)
+    def start_checks(self):
+        self.is_enabled = True
+        self.start_monitoring()
         return True
-    def _convert_temp(self, adc):
-        v = adc - 0x7fff
-        if v < 0:
-            temp = 0.0
-        else:
-            #temp = 1500.0 * 43252.0 / float(v)
-            #temp = 64878000.0 / float(v)
-            temp = 129756000.0 / float(v)
-            #temp = (1.0/298.15) + math.log(temp / 10000.0) / 4300.0
-            temp = (0.003354016) + math.log(temp / 10000.0) / 4300.0
-            temp = 1.0 / temp
-            temp -= 273.15
-        logging.info("TMC %s temp: %g", self.stepper_name, temp)
+    def _convert_temp(self, adc_raw):
+        # ADC u16: midscale 0x8000 = 0 V, full range ±2.5 V (single-ended,
+        # INN tied to GNDA). adc_fraction = V_AGPI / 2.5 V.
+        # Circuit: thermistor on high side, pullup on low side → flip fraction.
+        v = adc_raw - 32768
+        if v <= 0:
+            logging.debug("TMC %s AGPI raw=%d (v=%d ≤ 0, no positive voltage)",
+                          self.stepper_name, adc_raw, v)
+            return None
+        adc_fraction = v / 32767.0
+        return self._thermistor.calc_temp(1.0 - adc_fraction)
+    def setup_minmax(self, min_temp, max_temp):
+        self.temp_minmax = (min_temp, max_temp)
+    def setup_callback(self, temperature_callback):
+        self.temp_callback = temperature_callback
+    def get_report_time_delta(self):
+        return 1.
     def get_status(self, eventtime=None):
         res = {'drv_status': None, 'temperature': None}
-        res.update(self.monitor_data)
+        if self.is_enabled:
+            res.update(self.monitor_data)
         if self.check_timer is None:
             return res
-        temp = None
-        if self.adc_temp is not None:
-            # Convert it to temp here
-            temp = self._convert_temp(self.adc_temp)
-        res['temperature'] = temp
+        if self.adc_temp_reg is not None:
+            res['temperature'] = self.last_temp
+            res['adc_temp_raw'] = self.adc_temp
         return res
 
 
@@ -1222,6 +1242,7 @@ class TMC4671:
             self.fields.PID_POSITION_TARGET.write(0)
             self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
             self.init_done = True
+        self.error_helper.start_monitoring()
         enable_line.register_state_callback(self._handle_stepper_enable)
 
     def _handle_disconnect(self):

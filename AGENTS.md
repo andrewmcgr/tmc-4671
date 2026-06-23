@@ -8,12 +8,13 @@
 ## STRUCTURE
 ```text
 tmc-4671/
-├── __init__.py         # Plugin entry point for Kalico
-├── tmc4671_regs.py     # SPI registers
-├── tmc4671_biquad.py   # Biquad filter design utilities (BiquadFilter, design functions, TMC normalisation)
-├── tmc4671.py          # Core driver implementation (PID tuning, calibration, SPI, G-code commands)
-├── pyproject.toml      # Project configuration defining the "kalico.plugins" entry-point
-└── README.md           # Hardware setup, wiring, moonraker configuration, and PID tuning instructions
+├── __init__.py                      # Plugin entry point for Kalico
+├── tmc4671_regs.py                  # SPI registers
+├── tmc4671_biquad.py                # Biquad filter design utilities (BiquadFilter, design functions, TMC normalisation)
+├── tmc4671.py                       # Core driver implementation (PID tuning, calibration, SPI, G-code commands)
+├── tmc4671_temperature_sensor.py    # [tmc4671_temperature_sensor] config section — wires AGPI thermistor into Kalico sensor infrastructure
+├── pyproject.toml                   # Project configuration defining the "kalico.plugins" entry-point
+└── README.md                        # Hardware setup, wiring, moonraker configuration, and PID tuning instructions
 ```
 
 ## WHERE TO LOOK

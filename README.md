@@ -39,6 +39,7 @@ Klipper driver features:
 * Optional TMC6100 output driver initialisation support (requred for the eval board, not used for OpenFFBoard or Ouroboros)
 * Virtual steps-per-revolution and microsteps. Klipper treats the TMC 4671 as if it were a conventional stepper driver, all servo activity takes place in hardware. Thus the steps and microsteps in the configuration have no particular relation to the motor, and instead are translated to position angle targets within the TMC 4671.
 * Phase current monitoring via ADC (current_ux, current_v, current_wy) — updated every 1 s in the periodic timer callback alongside STATUS_FLAGS, visible in Klipper's `get_status`
+* AGPI thermistor temperature monitoring — reads a thermistor connected to `AGPI_A` or `AGPI_B` and exposes it as a Kalico `[tmc4671_temperature_sensor]`
 
 ## Klipper Installation
 
@@ -99,6 +100,10 @@ spi_bus: spi1
 spi_speed: 1000000
 current_scale_ma_lsb: 1.155
 adc_temp_reg: AGPI_B
+# adc_temp_pullup_resistor: 1500   # defaults match OpenFFBoard hardware
+# adc_temp_t1: 25
+# adc_temp_r1: 10000
+# adc_temp_beta: 4300
 #diag_pin: ^tmcx:PE8       # sensorless homing: OpenFFBoard STATUS output pin
 #homing_current: 0.5       # sensorless homing: start here, increase if false triggers (see Sensorless homing section)
 run_current: 3.54
@@ -230,6 +235,29 @@ homing_mask: PID_IQ_OUTPUT_LIMIT, PID_ID_OUTPUT_LIMIT, PID_X_ERRSUM_LIMIT,
 ```
 
 `PID_IQ_TARGET_LIMIT` is the primary fast-acting stall flag. `REF_SW_R` and `REF_SW_L` allow physical limit switches to be wired to the driver board's reference switch inputs and used as endstops without an additional MCU GPIO. Most users should not need to change this.
+
+## AGPI temperature monitoring
+
+The TMC 4671 has two analog GPIO inputs (`AGPI_A`, `AGPI_B`) which can be read as a temperature sensor. On the OpenFFBoard, `AGPI_B` is connected to a 10 kΩ NTC thermistor (β = 4300) via a unity-gain buffer, with a 1.5 kΩ pulldown resistor to ground and a 2.5 V reference on the thermistor's high side.
+
+To expose it as a temperature sensor, add `adc_temp_reg` to the `[tmc4671]` section and add a matching `[tmc4671_temperature_sensor]` section:
+
+```ini
+[tmc4671 stepper_x]
+# ... other config ...
+adc_temp_reg: AGPI_B
+# Thermistor parameters — defaults match OpenFFBoard hardware:
+# adc_temp_pullup_resistor: 1500
+# adc_temp_t1: 25
+# adc_temp_r1: 10000
+# adc_temp_beta: 4300
+
+[tmc4671_temperature_sensor stepper_x]
+min_temp: 0
+max_temp: 100
+```
+
+The section name after `tmc4671_temperature_sensor` must match the stepper name (the part after `tmc4671` in the driver section header). Temperature is sampled every 1 s alongside the STATUS_FLAGS check. If different thermistor hardware is used, set the pullup resistor value and beta-form coefficients explicitly.
 
 ## G-code command reference
 
