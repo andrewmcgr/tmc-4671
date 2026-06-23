@@ -1444,8 +1444,7 @@ class TMC4671:
         return velocity_p, velocity_i
 
     def _calc_position_pid(self, position_bandwidth):
-        position_p = (2.0 * math.pi * position_bandwidth
-                      * self.ppoles() / self.vpoles())
+        position_p = 2.0 * math.pi * position_bandwidth / self.vpoles()
         return position_p
 
     def _prepare_for_alignment(self):
