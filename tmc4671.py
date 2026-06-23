@@ -1388,9 +1388,23 @@ class TMC4671:
         I = motor_r / (motor_l * self.pwmfreq)
         return P, I
 
+    def vpoles(self):
+        """Return the velocity pole-pair scale factor.
+
+        VELOCITY_SELECTION values 9-12 select a mechanical angle source
+        (phi_m_abn, phi_m_abn_2, phi_m_aenc, phi_m_hal), meaning velocity
+        registers are in mechanical RPM and no pole-pair conversion is needed,
+        so this returns 1.  Values 0-8 select an electrical angle source
+        (phi_e_*), meaning velocity registers are in electrical RPM, so this
+        returns N_POLE_PAIRS.
+        """
+        if self.fields.VELOCITY_SELECTION.read() >= 9:
+            return 1
+        return self.fields.N_POLE_PAIRS.read()
+
     def _tune_motion_pid(self, Kt, l_v, l_p):
         Kadc = self.current_helper.current_scale * 1e-3
-        NPP = self.fields.N_POLE_PAIRS.read()
+        NPP = self.vpoles()
         t_d = 1.
 
         k_v = Kadc / (Kt * math.pi)
@@ -1407,7 +1421,7 @@ class TMC4671:
 
     def _calc_velocity_pid(self, bandwidth):
         omega_bw = 2.0 * math.pi * bandwidth
-        npoles = self.fields.N_POLE_PAIRS.read()
+        npoles = self.vpoles()
         j_total = self.jmotor + self.jload
         velocity_p = omega_bw * (2.0 * math.pi * j_total) / (60.0 * npoles * self.motor_kt)
         nsmpl = self.fields.MODE_PID_SMPL.read()
@@ -1416,7 +1430,7 @@ class TMC4671:
         return velocity_p, velocity_i
 
     def _calc_position_pid(self, position_bandwidth):
-        npoles = self.fields.N_POLE_PAIRS.read()
+        npoles = self.vpoles()
         position_p = 2.0 * math.pi * position_bandwidth / npoles
         return position_p
 
