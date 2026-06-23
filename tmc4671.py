@@ -505,11 +505,21 @@ def StepHelper(config, mcu_tmc):
     steps = {1<<i: 1<<i for i in range(0, 16)}
     res = sconfig.getchoice('full_steps_per_rotation', steps, default=8)
     mres = sconfig.getchoice('microsteps', steps, default=256)
-    if res * mres > 65536:
+    # STEP_WIDTH is added to PID_POSITION_TARGET (in position-source counts)
+    # on each STEP pulse.  65536 counts = 1 revolution of the position source.
+    # With phi_m (POSITION_SELECTION 9-12) that is one mechanical revolution, so
+    # step_width = 65536 / (res * mres) is correct.  With phi_e (values 0-8),
+    # 65536 counts = 1 electrical revolution = 1/N_POLE_PAIRS mechanical
+    # revolutions, so step_width must be scaled up by N_POLE_PAIRS to keep the
+    # same physical step size.
+    pos_sel = config.getint('position_selection', default=9)
+    npp = config.getint('n_pole_pairs', default=4)
+    ppoles = 1 if pos_sel >= 9 else npp
+    if res * mres > 65536 * ppoles:
         raise config.error(
-            "Product of res and mres must not be more than 65536 for [%s]"
-            % (stepper_name,))
-    step_width = 65536 // (res * mres)
+            "Product of res and mres must not be more than %d for [%s]"
+            % (65536 * ppoles, stepper_name,))
+    step_width = (65536 * ppoles) // (res * mres)
     fields.set_field("STEP_WIDTH", step_width)
 
 
@@ -1388,9 +1398,37 @@ class TMC4671:
         I = motor_r / (motor_l * self.pwmfreq)
         return P, I
 
+    def vpoles(self):
+        """Return the velocity pole-pair scale factor.
+
+        VELOCITY_SELECTION values 9-12 select a mechanical angle source
+        (phi_m_abn, phi_m_abn_2, phi_m_aenc, phi_m_hal), meaning velocity
+        registers are in mechanical RPM and no pole-pair conversion is needed,
+        so this returns 1.  Values 0-8 select an electrical angle source
+        (phi_e_*), meaning velocity registers are in electrical RPM, so this
+        returns N_POLE_PAIRS.
+        """
+        if self.fields.VELOCITY_SELECTION.read() >= 9:
+            return 1
+        return self.fields.N_POLE_PAIRS.read()
+
+    def ppoles(self):
+        """Return the position pole-pair scale factor.
+
+        POSITION_SELECTION values 9-12 select a mechanical angle source
+        (phi_m_abn, phi_m_abn_2, phi_m_aenc, phi_m_hal), meaning position
+        registers are in mechanical angle units and no pole-pair conversion
+        is needed, so this returns 1.  Values 0-8 select an electrical angle
+        source (phi_e_*), meaning position registers are in electrical angle
+        units, so this returns N_POLE_PAIRS.
+        """
+        if self.fields.POSITION_SELECTION.read() >= 9:
+            return 1
+        return self.fields.N_POLE_PAIRS.read()
+
     def _tune_motion_pid(self, Kt, l_v, l_p):
         Kadc = self.current_helper.current_scale * 1e-3
-        NPP = self.fields.N_POLE_PAIRS.read()
+        NPP = self.vpoles()
         t_d = 1.
 
         k_v = Kadc / (Kt * math.pi)
@@ -1407,7 +1445,7 @@ class TMC4671:
 
     def _calc_velocity_pid(self, bandwidth):
         omega_bw = 2.0 * math.pi * bandwidth
-        npoles = self.fields.N_POLE_PAIRS.read()
+        npoles = self.vpoles()
         j_total = self.jmotor + self.jload
         velocity_p = omega_bw * (2.0 * math.pi * j_total) / (60.0 * npoles * self.motor_kt)
         nsmpl = self.fields.MODE_PID_SMPL.read()
@@ -1416,8 +1454,19 @@ class TMC4671:
         return velocity_p, velocity_i
 
     def _calc_position_pid(self, position_bandwidth):
-        npoles = self.fields.N_POLE_PAIRS.read()
-        position_p = 2.0 * math.pi * position_bandwidth / npoles
+        # The position controller output is a velocity command (in RPM of whatever
+        # type VELOCITY_SELECTION uses).  ERROR_POSITION is in angle counts where
+        # 65536 counts = one revolution of the *selected position source*:
+        #   phi_m sources (POSITION_SELECTION 9-12): 65536 = one mechanical rev
+        #   phi_e sources (POSITION_SELECTION 0-8):  65536 = one electrical rev
+        #                                             = 1/N_POLE_PAIRS mech rev
+        #
+        # Switching from phi_m to phi_e multiplies ERROR_POSITION by N_POLE_PAIRS
+        # for the same physical error, so position_p must be divided by ppoles()
+        # to keep the same closed-loop bandwidth.  Similarly vpoles() accounts for
+        # whether the velocity controller uses mechanical or electrical RPM.
+        position_p = (2.0 * math.pi * position_bandwidth
+                      / (self.vpoles() * self.ppoles()))
         return position_p
 
     def _prepare_for_alignment(self):

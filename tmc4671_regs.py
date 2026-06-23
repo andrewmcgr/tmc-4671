@@ -185,7 +185,7 @@ Registers = {
     "CONFIG_SINGLE_PIN_IF_SCALE_OFFSET": (0x4D, 61),
 
     "CONFIG_ADVANCED_PI_REPRESENT": (0x4D, 62),
-    "VELOCITY_SELECTION": (0x50, None), # RW,Init
+    "VELOCITY_SELECTION_METER_SELECTION": (0x50, None), # RW,Init
     "POSITION_SELECTION": (0x51, None), # RW,Init
     "PHI_E_SELECTION": (0x52, None), # RW,Init
     "PHI_E": (0x53, None), # R,Monitor
@@ -521,7 +521,7 @@ Fields["CONFIG_ADVANCED_PI_REPRESENT"] = {
     "POSITION_P_n": 1 << 5,
 }
 
-Fields["VELOCITY_SELECTION"] = {
+Fields["VELOCITY_SELECTION_METER_SELECTION"] = {
     "VELOCITY_SELECTION": 0xff,
     "VELOCITY_METER_SELECTION": 0xff << 8,
 }
