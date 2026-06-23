@@ -535,6 +535,7 @@ class TMCErrorCheck:
         self.fields = mcu_tmc.get_fields()
         self.current_helper = current_helper
         self.check_timer = None
+        self.is_enabled = False
         self.status_warn_mask = self._make_mask(["PID_IQ_TARGET_LIMIT",
                                                  "PID_ID_TARGET_LIMIT",
                                                  "PID_V_OUTPUT_LIMIT",
@@ -609,31 +610,35 @@ class TMCErrorCheck:
             self.adc_temp = None
     def _do_periodic_check(self, eventtime):
         try:
-            self._query_status()
+            if self.is_enabled:
+                self._query_status()
             self._query_temperature(eventtime)
-            ch = self.current_helper
-            self.monitor_data['current_ux'] = ch.convert_adc_current(
-                ch._read_field("ADC_IUX"))
-            self.monitor_data['current_v'] = ch.convert_adc_current(
-                ch._read_field("ADC_IV"))
-            self.monitor_data['current_wy'] = ch.convert_adc_current(
-                ch._read_field("ADC_IWY"))
+            if self.is_enabled:
+                ch = self.current_helper
+                self.monitor_data['current_ux'] = ch.convert_adc_current(
+                    ch._read_field("ADC_IUX"))
+                self.monitor_data['current_v'] = ch.convert_adc_current(
+                    ch._read_field("ADC_IV"))
+                self.monitor_data['current_wy'] = ch.convert_adc_current(
+                    ch._read_field("ADC_IWY"))
         except self.printer.command_error as e:
             self.printer.invoke_shutdown(str(e))
             return self.printer.get_reactor().NEVER
         return eventtime + 1.
     def stop_checks(self):
-        if self.check_timer is None:
-            return
-        self.printer.get_reactor().unregister_timer(self.check_timer)
-        self.check_timer = None
-    def start_checks(self):
+        # Disable full status/current monitoring when motor is disabled.
+        # The timer itself keeps running so temperature is always polled.
+        self.is_enabled = False
+    def start_monitoring(self):
         if self.check_timer is not None:
-            self.stop_checks()
+            return
         reactor = self.printer.get_reactor()
         curtime = reactor.monotonic()
         self.check_timer = reactor.register_timer(self._do_periodic_check,
                                                   curtime + 1.)
+    def start_checks(self):
+        self.is_enabled = True
+        self.start_monitoring()
         return True
     def _convert_temp(self, adc_raw):
         # ADC u16: midscale 0x8000 = 0 V, full range ±2.5 V (single-ended,
@@ -654,7 +659,8 @@ class TMCErrorCheck:
         return 1.
     def get_status(self, eventtime=None):
         res = {'drv_status': None, 'temperature': None}
-        res.update(self.monitor_data)
+        if self.is_enabled:
+            res.update(self.monitor_data)
         if self.check_timer is None:
             return res
         if self.adc_temp_reg is not None:
@@ -1236,6 +1242,7 @@ class TMC4671:
             self.fields.PID_POSITION_TARGET.write(0)
             self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
             self.init_done = True
+        self.error_helper.start_monitoring()
         enable_line.register_state_callback(self._handle_stepper_enable)
 
     def _handle_disconnect(self):
