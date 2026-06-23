@@ -151,24 +151,39 @@ class FocProfile:
 # ---------------------------------------------------------------------------
 
 BUILTIN_MOTORS = {
-    # Populated as motors are characterised and contributed.
+    'LDO_2504b-EN1000': {
+        'motor_type':       2,
+        'n_pole_pairs':     50,
+        'motor_kt':         0.022,   # holding_torque 0.055 Nm / holding_current 2.5 A
+        'jmotor':           8.45e-6,
+        'abn_decoder_ppr':  4000,
+    },
 }
 
 BUILTIN_BOARDS = {
     'OpenFFBoard': {
-        # Voltage and current scaling
         'voltage_scale_ratio':      40.875,
-        'current_scale_ma_lsb':     1.272,
-        # ADC current channel assignment
+        'current_scale_ma_lsb':     1.155,
         'adc_i_ux_select':          0,
         'adc_i_v_select':           2,
         'adc_i_wy_select':          1,
-        # AGPI_B thermistor: 10 kΩ NTC, β = 4300, via 2.5 V ref and 1.5 kΩ
-        # pull-down, unity-gain buffer into AGPI_B.
+        'pwm_bbm_l':                9,
+        'pwm_bbm_h':                9,
+        'pidout_uq_ud_limits':      31440,
         'adc_temp_reg':             'AGPI_B',
         'adc_temp_pullup_resistor': 1500.0,
         'adc_temp_t1':              25.0,
         'adc_temp_r1':              10000.0,
         'adc_temp_beta':            4300.0,
+    },
+    'Ouroboros': {
+        'voltage_scale_ratio':  40.875,
+        'current_scale_ma_lsb': 1.272,
+        'adc_i_ux_select':      0,
+        'adc_i_v_select':       2,
+        'adc_i_wy_select':      1,
+        'pwm_bbm_l':            10,
+        'pwm_bbm_h':            10,
+        'pidout_uq_ud_limits':  31440,
     },
 }
