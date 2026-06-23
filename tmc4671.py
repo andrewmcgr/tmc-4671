@@ -1228,7 +1228,8 @@ class TMC4671:
                 default="lpf",
             )
             freq_kwargs = {}
-            if (self.tune_current_pid and target in ('flux', 'torque')) or \
+            if target == 'position' or \
+               (self.tune_current_pid and target in ('flux', 'torque')) or \
                (self.tune_motion_pid and target == 'velocity'):
                 freq_kwargs['default'] = 0.0
             freq = config.getfloat(
