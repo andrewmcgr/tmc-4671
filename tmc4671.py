@@ -505,11 +505,21 @@ def StepHelper(config, mcu_tmc):
     steps = {1<<i: 1<<i for i in range(0, 16)}
     res = sconfig.getchoice('full_steps_per_rotation', steps, default=8)
     mres = sconfig.getchoice('microsteps', steps, default=256)
-    if res * mres > 65536:
+    # STEP_WIDTH is added to PID_POSITION_TARGET (in position-source counts)
+    # on each STEP pulse.  65536 counts = 1 revolution of the position source.
+    # With phi_m (POSITION_SELECTION 9-12) that is one mechanical revolution, so
+    # step_width = 65536 / (res * mres) is correct.  With phi_e (values 0-8),
+    # 65536 counts = 1 electrical revolution = 1/N_POLE_PAIRS mechanical
+    # revolutions, so step_width must be scaled up by N_POLE_PAIRS to keep the
+    # same physical step size.
+    pos_sel = config.getint('position_selection', default=9)
+    npp = config.getint('n_pole_pairs', default=4)
+    ppoles = 1 if pos_sel >= 9 else npp
+    if res * mres > 65536 * ppoles:
         raise config.error(
-            "Product of res and mres must not be more than 65536 for [%s]"
-            % (stepper_name,))
-    step_width = 65536 // (res * mres)
+            "Product of res and mres must not be more than %d for [%s]"
+            % (65536 * ppoles, stepper_name,))
+    step_width = (65536 * ppoles) // (res * mres)
     fields.set_field("STEP_WIDTH", step_width)
 
 
