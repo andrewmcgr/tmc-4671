@@ -182,8 +182,8 @@ BUILTIN_BOARDS = {
         'adc_i_ux_select':      0,
         'adc_i_v_select':       2,
         'adc_i_wy_select':      1,
-        'pwm_bbm_l':            10,
-        'pwm_bbm_h':            10,
+        'pwm_bbm_l':            9,
+        'pwm_bbm_h':            9,
         'pidout_uq_ud_limits':  31440,
     },
 }
