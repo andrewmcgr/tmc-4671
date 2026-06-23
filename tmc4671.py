@@ -1559,7 +1559,11 @@ class TMC4671:
         omega_bw = 2.0 * math.pi * bandwidth
         npoles = self.vpoles()
         j_total = self.jmotor + self.jload
-        velocity_p = omega_bw * (2.0 * math.pi * j_total) / (60.0 * npoles * self.motor_kt)
+        # velocity_p units: the TMC4671 applies PID_VELOCITY_P directly to the
+        # ERPM error value with no implicit unit conversion.  omega_bw already
+        # converts the bandwidth spec to rad/s; introducing a further 2π/60
+        # RPM→rad/s factor here would make the gain ~10× too small.
+        velocity_p = omega_bw * j_total / (npoles * self.motor_kt)
         nsmpl = self.fields.MODE_PID_SMPL.read()
         f_loop = self.pwmfreq / (nsmpl + 1)
         velocity_i = (1.0 - self.velocity_alpha) * omega_bw / (4.0 * f_loop)

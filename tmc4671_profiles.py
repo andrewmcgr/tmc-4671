@@ -154,7 +154,7 @@ BUILTIN_MOTORS = {
     'LDO_2504b-EN1000': {
         'motor_type':       2,
         'n_pole_pairs':     50,
-        'motor_kt':         0.022,   # holding_torque 0.055 Nm / holding_current 2.5 A
+        'motor_kt':         0.216,   # holding_torque 0.54 Nm / holding_current 2.5 A
         'jmotor':           8.45e-6,
         'abn_decoder_ppr':  4000,
     },
