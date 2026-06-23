@@ -26,6 +26,9 @@ from .tmc4671_biquad import (
     biquad_lpf_tmc, biquad_lpf, biquad_notch, biquad_apf,
     biquad_Z_tmc, biquad_tmc
 )
+from .tmc4671_profiles import (
+    ConfigWithDefaults, BUILTIN_MOTORS, BUILTIN_BOARDS
+)
 
 # The 4671 has a 25 MHz external clock
 TMC_FREQUENCY=25000000.
@@ -904,6 +907,37 @@ class MCU_TMC_SPI:
             "(last read %x)" % (self.name, reg, v))
 
 ######################################################################
+# Profile resolution helper
+######################################################################
+
+
+def _resolve_profile(printer, config, key, builtin_db, section_prefix):
+    """Look up a named motor or board profile and return its values dict.
+
+    Resolution order:
+      1. A ``[<section_prefix> <name>]`` config section present in printer.cfg
+         (registered as a printer object by foc_motor.py / tmc4671_board.py).
+      2. An entry in *builtin_db* (e.g. ``BUILTIN_BOARDS['OpenFFBoard']``).
+
+    Returns an empty dict when *key* is not present in the instance config.
+    """
+    name = config.get(key, None)
+    if name is None:
+        return {}
+    section_name = "%s %s" % (section_prefix, name)
+    obj = printer.lookup_object(section_name, None)
+    if obj is not None:
+        return obj.get_values()
+    if name in builtin_db:
+        return builtin_db[name]
+    raise config.error(
+        "Profile '%s' not found for [%s]. "
+        "Available built-in profiles: %s"
+        % (name, config.get_name(),
+           ', '.join(builtin_db.keys()) or '(none)'))
+
+
+######################################################################
 # Main driver class
 ######################################################################
 
@@ -913,6 +947,19 @@ class TMC4671:
         self.printer = config.get_printer()
         self.stepper_name = ' '.join(config.get_name().split()[1:])
         self.name = config.get_name().split()[-1]
+        # Resolve motor and board profiles before any other config reads so
+        # that ConfigWithDefaults can inject profile defaults transparently.
+        motor_values = _resolve_profile(
+            self.printer, config, 'motor_profile', BUILTIN_MOTORS, 'foc_motor')
+        board_values = _resolve_profile(
+            self.printer, config, 'board_profile', BUILTIN_BOARDS, 'tmc4671_board')
+        overlap = set(motor_values) & set(board_values)
+        if overlap:
+            raise config.error(
+                "Motor and board profiles both define: %s in [%s]"
+                % (', '.join(sorted(overlap)), config.get_name()))
+        if motor_values or board_values:
+            config = ConfigWithDefaults(config, motor_values, board_values)
         self.mutex = self.printer.get_reactor().mutex()
         self.init_done = False
         self.alignment_done = False
@@ -1100,7 +1147,7 @@ class TMC4671:
         set_config_field(config, "PWM_BBM_H", 10)
         set_config_field(config, "PWM_CHOP", 7)
         set_config_field(config, "PWM_SV", 1)
-        set_config_field(config, "MOTOR_TYPE", 3)
+        set_config_field(config, "MOTOR_TYPE", 2)
         set_config_field(config, "N_POLE_PAIRS", 4)
         set_config_field(config, "ADC_I_UX_SELECT", 0)
         set_config_field(config, "ADC_I_V_SELECT", 2)
@@ -1181,7 +1228,8 @@ class TMC4671:
                 default="lpf",
             )
             freq_kwargs = {}
-            if (self.tune_current_pid and target in ('flux', 'torque')) or \
+            if target == 'position' or \
+               (self.tune_current_pid and target in ('flux', 'torque')) or \
                (self.tune_motion_pid and target == 'velocity'):
                 freq_kwargs['default'] = 0.0
             freq = config.getfloat(
