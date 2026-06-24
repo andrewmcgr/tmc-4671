@@ -44,6 +44,7 @@ class FocMotor(FocProfile):
         ('motor_kt',            'float'),  # N·m / A (direct)
         ('holding_current',     'float'),  # A  ─┐ alternative: derive Kt
         ('holding_torque',      'float'),  # N·m ─┘
+        ('rated_current',       'float'),  # A RMS; driver converts to peak (× √2) for run_current default
 
         # Rotor inertia
         ('jmotor',              'float'),  # kg·m²
