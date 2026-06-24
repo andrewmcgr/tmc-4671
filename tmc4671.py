@@ -13,18 +13,18 @@ import math
 import time
 from time import monotonic_ns
 from enum import IntEnum
-from statistics import median_low, mean, fmean
-from extras import bus, tmc, thermistor
+from statistics import mean, fmean
+from extras import bus, thermistor
 from .tmc4671_regs import (
-    Registers6100, Fields6100, Registers, ReadOnlyRegisters,
+    Registers6100, Fields6100, Registers,
     ADC_GPIO_FIELDS, Fields, FloatFields, SignedFields,
     FieldFormatters, to_q4_12, from_q4_12, to_q8_8, from_q8_8,
     to_q2_30, from_q2_30
 )
 from .tmc4671_biquad import (
     BiquadFilter, BIQUAD_FILTER_TYPES, BIQUAD_FILTER_TARGETS,
-    biquad_lpf_tmc, biquad_lpf, biquad_notch, biquad_apf,
-    biquad_Z_tmc, biquad_tmc
+    biquad_lpf, biquad_notch, biquad_apf,
+    biquad_tmc
 )
 from .tmc4671_profiles import (
     ConfigWithDefaults, BUILTIN_MOTORS, BUILTIN_BOARDS
