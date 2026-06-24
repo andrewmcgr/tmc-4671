@@ -439,8 +439,15 @@ class CurrentHelper:
         self.name = config.get_name().split()[-1]
         self.mcu_tmc = mcu_tmc
         self.fields = FieldProxy(mcu_tmc.get_fields(), mcu_tmc)
-        self.run_current = config.getfloat('run_current',
-                                      above=0., maxval=MAX_CURRENT)
+        rated_current = config.getfloat('rated_current', None, above=0.,
+                                        maxval=MAX_CURRENT)
+        if rated_current is not None:
+            default_run = rated_current * math.sqrt(2)
+            self.run_current = config.getfloat('run_current', default_run,
+                                               above=0., maxval=MAX_CURRENT)
+        else:
+            self.run_current = config.getfloat('run_current',
+                                               above=0., maxval=MAX_CURRENT)
         self.homing_current = config.getfloat('homing_current', above=0.,
                                               maxval=MAX_CURRENT,
                                               default=self.run_current)

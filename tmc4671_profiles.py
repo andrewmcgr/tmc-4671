@@ -157,6 +157,16 @@ BUILTIN_MOTORS = {
         'motor_kt':         0.216,   # holding_torque 0.54 Nm / holding_current 2.5 A
         'jmotor':           8.45e-6,
         'abn_decoder_ppr':  4000,
+        'rated_current':    2.5,     # A RMS
+    },
+    'Ouroboros_Stepper': {
+        'motor_type':       2,
+        'n_pole_pairs':     50,
+        'motor_kt':         0.22,    # holding_torque 0.55 Nm / holding_current 2.5 A
+        'jmotor':           8.2e-6,
+        'abn_decoder_ppr':  4000,
+        'abn_direction':    True,
+        'rated_current':    2.5,     # A RMS
     },
 }
 
