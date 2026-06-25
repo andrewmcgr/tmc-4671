@@ -2131,10 +2131,10 @@ class TMC4671:
 
         # Convert to m/s² via effective pitch
         if self.stepper is None:
-            return accel_rad  # Can't compute pitch without stepper
+            return None  # Cannot convert without stepper data
         sd = getattr(self.stepper, 'rotation_distance', 0.0)
         if sd <= 0:
-            return accel_rad
+            return None
 
         gr_pairs = self.printer.lookup_object('configfile').getsection(
             self.stepper_name).getlists(
@@ -2904,6 +2904,11 @@ class TMC4671:
         accel_rad = self.get_available_acceleration()
         accel_lin = self.get_available_acceleration(True)
         
+
+        if accel_lin is not None:
+            accel_lin_str = f"{accel_lin * 1000.0:.1f} mm/s²"
+        else:
+            accel_lin_str = "N/A (stepper pitch unknown)"
         if torq > 0:
             lines.append(
                 f"  Max available torque: {torq:.4f} N·m "
@@ -2912,7 +2917,7 @@ class TMC4671:
                 f"Kt={self.motor_kt:.4f})"
             )
             lines.append(
-                f"  Max sustainable acceleration: {accel_rad:.1f} rad/s² / {accel_lin * 1000.0:.1f} mm/s² "
+                f"  Max sustainable acceleration: {accel_rad:.1f} rad/s² / {accel_lin_str} "
                 f"(J_motor={self.jmotor:.2e}, J_load={self.jload:.2e})"
             )
         else:
