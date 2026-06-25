@@ -2919,6 +2919,47 @@ class TMC4671:
             tau_v = 1.0 / (2.0 * math.pi * self.velocity_bandwidth)
             lines.append(f"  SCV bandwidth limit: ~calculated with BW_v={self.velocity_bandwidth:.1f} Hz, τ_v={tau_v*1000:.1f}ms")
 
+
+        # --- Kinematics & Motion Limits ---
+        lines.append("")
+        lines.append("--- Kinematics & Motion Limits ---")
+
+        # Calculate and report available torque
+        torq = self.get_available_torque()
+        if torq > 0:
+            accel_rad = self.get_available_acceleration()
+            accel_lin = self.get_available_acceleration(True)
+            lines.append(
+                f"  Max available torque: {torq:.4f} N·m "
+                f"(run_current={self.current_helper.get_run_current():.2f}A, Kt={self.motor_kt:.4f})"
+            )
+            lines.append(
+                f"  Max sustainable acceleration: {accel_rad:.1f} rad/s² / {accel_lin * 1000.0:.1f} mm/s² "
+                f"(J_motor={self.jmotor:.2e}, J_load={self.jload:.2e})"
+            )
+        else:
+            lines.append("  Kinematics data unavailable (motor not calibrated or current zero)")
+
+        # Calculate and report SCV limits
+        try:
+            th = self.printer.lookup_object('toolhead')
+            jd = getattr(th, 'junction_deviation', 0.0)
+            scv_cfg = getattr(th, 'square_corner_velocity', 5.0)
+            
+            if hasattr(self, 'max_accel_to_decel') and self.max_accel_to_decel > 0:
+                # Kinematic limit from junction deviation
+                scv_kin_lim = math.sqrt(jd * self.max_accel_to_decel / (math.sqrt(2.0) - 1.0))
+                lines.append(f"  SCV kinematic limit (jd={jd:.3f}): {scv_kin_lim:.3f} mm/s")
+                
+                # Bandwidth-based limit (approximate)
+                if self.velocity_bandwidth > 0 and torq > 0:
+                    tau_v = 1.0 / (2.0 * math.pi * self.velocity_bandwidth)
+                    lines.append(f"  SCV bandwidth limit: ~calculated with BW_v={self.velocity_bandwidth:.1f} Hz, τ_v={tau_v*1000:.1f}ms")
+                else:
+                    lines.append("  SCV bandwidth limit: not available (BW=0 or torque=0)")
+        except Exception as e:
+            lines.append(f"  SCV limits: could not retrieve toolhead state ({e})")
+
         gcmd.respond_info("\n".join(lines))
 
     def _calculate_ac_injection_voltage(self, target_current=None):
