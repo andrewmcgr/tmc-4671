@@ -2129,43 +2129,39 @@ class TMC4671:
         if not linear:
             return accel_rad
 
-        # Convert to m/s² via effective pitch using Klipper's rotation distance API
+        # Convert angular acceleration (rad/s²) to linear (mm/s²)
+        # Klipper/Kalico steppers expose get_rotation_distance() -> (rotation_dist_mm_per_rev, steps_per_rev)
         if self.stepper is None:
             return None  # Cannot convert without stepper data
         
-        # Klipper/Kalico steppers expose get_rotation_distance() -> (mm_per_rev, gear_ratio)
-        sd = 0.0
-        local_gear_ratio = 1.0
+        rotation_dist = 0.0
         if hasattr(self.stepper, 'get_rotation_distance'):
             try:
-                sd, gr = self.stepper.get_rotation_distance()
-                # If Klipper already includes the mechanical gear ratio in `gr`,
-                # we use it directly instead of parsing configfile.gear_ratio.
-                local_gear_ratio = gr if gr else 1.0
+                rotation_dist, _steps_per_rev = self.stepper.get_rotation_distance()
             except Exception:
                 pass
         
-        # Fallback to configfile gear_ratio only if Klipper method didn't provide one
-        if sd <= 0 and hasattr(self, 'stepper_name'):
+        # Fallback to configfile gear_ratio and rotation_distance if stepper API didn't provide one
+        if rotation_dist <= 0 and hasattr(self, 'stepper_name'):
             try:
                 gr_pairs = self.printer.lookup_object('configfile').getsection(
                     self.stepper_name).getlists(
                     'gear_ratio', (), seps=(':', ','), count=2, parser=float)
+                effective_gear_ratio = 1.0
                 for n, d in gr_pairs:
-                    local_gear_ratio *= n / d
+                    effective_gear_ratio *= n / d
                 
-                # rotation_distance from config is stored in mm per motor revolution
-                sd = self.printer.lookup_object('configfile').getsection(
-                    self.stepper_name).getfloat('rotation_distance', 0.0)
+                rotation_dist = self.printer.lookup_object('configfile').getsection(
+                    self.stepper_name).getfloat('rotation_distance', 0.0) / effective_gear_ratio
             except Exception:
                 pass
 
-        if sd <= 0:
+        if rotation_dist <= 0:
             return None
 
-        # Use the klipper-exposed local_gear_ratio (or fallback to 1.0)
-        pitch_m = sd / (1000.0 * local_gear_ratio)
-        return accel_rad * pitch_m / (2.0 * math.pi)
+        # Linear acceleration (mm/s²) = angular_acceleration(rad/s²) * (linear_dist_per_rad)
+        # linear_dist_per_rad = rotation_distance_mm / 2pi
+        return accel_rad * rotation_dist / (2.0 * math.pi)
 
     def get_scv_limits(self, entry_speed: float = 0.0,
                        junction_deviation: float = 0.0) -> dict:
@@ -2926,10 +2922,6 @@ class TMC4671:
         accel_lin = self.get_available_acceleration(True)
         
 
-        if accel_lin is not None:
-            accel_lin_str = f"{accel_lin * 1000.0:.1f} mm/s²"
-        else:
-            accel_lin_str = "N/A (stepper pitch unknown)"
         if torq > 0:
             lines.append(
                 f"  Max available torque: {torq:.4f} N·m "
@@ -2937,10 +2929,15 @@ class TMC4671:
                 f"I_RMS={self.current_helper.get_run_current()/math.sqrt(2):.2f}A, "
                 f"Kt={self.motor_kt:.4f})"
             )
-            lines.append(
-                f"  Max sustainable acceleration: {accel_rad:.1f} rad/s² / {accel_lin_str} "
-                f"(J_motor={self.jmotor:.2e}, J_load={self.jload:.2e})"
-            )
+            
+            if accel_lin is not None:
+                # accel_lin is already in mm/s²; report it with a note that this is the ideal torque limit
+                lines.append(
+                    f"  Max sustainable acceleration (ideal): {accel_lin:.1f} mm/s² "
+                    f"(J_motor={self.jmotor:.2e}, J_load={self.jload:.2e})"
+                )
+            else:
+                lines.append("  Max sustainable acceleration: N/A (stepper pitch unknown)")
         else:
             lines.append("  Kinematics data unavailable (motor not calibrated or current zero)")
 
