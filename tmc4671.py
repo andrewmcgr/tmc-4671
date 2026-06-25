@@ -2085,6 +2085,138 @@ class TMC4671:
             register = BIQUAD_FILTER_TARGETS[target]
             self._setup_filter(register, biquad_filter)
 
+    # ------------------------------------------------------------------
+    # Kinematics helpers: torque, acceleration, and SCV limits
+    # ------------------------------------------------------------------
+
+    def get_available_torque(self) -> float:
+        """Return the maximum available steady-state torque (N·m).
+
+        Uses the configured ``run_current`` from :class:`CurrentHelper` and
+        the resolved ``motor_kt``.  This is the torque that can be *sustained*
+        by the PI controller stack without clipping at ``PID_TORQUE_FLUX_LIMITS``.
+
+        :returns: torque in newton-metres (N·m)
+        """
+        run_i = self.current_helper.get_run_current()
+        if run_i <= 0 or self.motor_kt <= 0:
+            return 0.0
+        return run_i * self.motor_kt
+
+    def get_available_acceleration(self, linear: bool = False) -> float:
+        """Return the maximum sustainable acceleration (rad/s² or m/s²).
+
+        Computes ``available_torque / total_inertia`` using the same
+        ``run_current`` basis as :meth:`get_available_torque`.
+
+        If *linear* is ``True``, converts angular acceleration to linear
+        acceleration via the effective pitch.  The effective pitch is derived
+        from ``rotation_distance`` divided by any gear ratio, matching how
+        ``jload`` is computed in :meth:`~TMC4671.__init__`.
+
+        :param linear: if True, return m/s²; otherwise rad/s².
+        :returns: acceleration value
+        """
+        torque = self.get_available_torque()
+        if torque <= 0 or self.jmotor + self.jload <= 0:
+            return 0.0
+
+        accel_rad = torque / (self.jmotor + self.jload)
+
+        if not linear:
+            return accel_rad
+
+        # Convert to m/s² via effective pitch
+        if self.stepper is None:
+            return accel_rad  # Can't compute pitch without stepper
+        sd = getattr(self.stepper, 'rotation_distance', 0.0)
+        if sd <= 0:
+            return accel_rad
+
+        gr_pairs = self.printer.lookup_object('configfile').getsection(
+            self.stepper_name).getlists(
+            'gear_ratio', (), seps=(':', ','), count=2, parser=float)
+        gear_ratio = 1.0
+        for n, d in gr_pairs:
+            gear_ratio *= n / d
+
+        pitch_m = sd / (1000.0 * gear_ratio)
+        return accel_rad * pitch_m / (2.0 * math.pi)
+
+    def get_scv_limits(self, entry_speed: float = 0.0,
+                       junction_deviation: float = 0.0) -> dict:
+        """Return Square Corner Velocity limits (kinematic and bandwidth-aware).
+
+        Two limits are returned:
+
+        * **kinematic** — the SCV ceiling imposed by ``junction_deviation``
+          (the same value Kalico's toolhead uses to compute virtual radius at
+          corners).  If ``junction_deviation`` is zero or not provided, returns
+          ``None`` for this key.
+
+        * **bandwidth** — the SCV ceiling imposed by the velocity PI loop's
+          ability to track cornering force.  Based on the time constant
+          :math:`\\tau = 1/(2\\pi·BW_v)` and available torque.
+
+        Both limits are in m/s (linear) for a corner at *entry_speed*.
+
+        :param entry_speed: target speed through the corner (m/s).
+        :param junction_deviation: virtual radius deviation; uses toolhead's
+            current value if zero.
+        :returns: dict with keys ``kinematic`` and ``bandwidth`` (both in m/s).
+        """
+        # --- Kinematic limit ---
+        if junction_deviation <= 0 or self.max_accel_to_decel <= 0:
+            kinematic = None
+        else:
+            # SCV² = jd × accel / (√2 − 1)
+            scv_sq = junction_deviation * self.max_accel_to_decel / (
+                math.sqrt(2.0) - 1.0)
+            kinematic = math.sqrt(max(scv_sq, 0.0))
+
+        # --- Bandwidth limit ---
+        if self.velocity_bandwidth <= 0 or self.jmotor + self.jload <= 0:
+            bandwidth = None
+        else:
+            tau_v = 1.0 / (2.0 * math.pi * self.velocity_bandwidth)
+            torque = self.get_available_torque()
+            if torque <= 0:
+                bandwidth = None
+            else:
+                accel_rad = torque / (self.jmotor + self.jload)
+
+                # Effective pitch for linear conversion
+                if self.stepper is not None:
+                    sd = getattr(self.stepper, 'rotation_distance', 0.0)
+                    if sd > 0:
+                        gr_pairs = self.printer.lookup_object(
+                            'configfile').getsection(
+                            self.stepper_name).getlists(
+                            'gear_ratio', (), seps=(':', ','), count=2,
+                            parser=float)
+                        gear_ratio = 1.0
+                        for n, d in gr_pairs:
+                            gear_ratio *= n / d
+                        pitch_m = sd / (1000.0 * gear_ratio)
+                    else:
+                        pitch_m = 0.0
+                else:
+                    pitch_m = 0.0
+
+                accel_linear = accel_rad * pitch_m / (2.0 * math.pi) \
+                    if pitch_m > 0 else accel_rad
+
+                # SCV_bandwidth ≈ entry_speed × (1 − e^(−Δt/τ_v))
+                # Δt is the time spent traversing the corner arc
+                scv_bw = entry_speed * (1.0 - math.exp(
+                    -min(entry_speed, 2.0) / (accel_linear * tau_v + 1e-9)))
+                bandwidth = max(scv_bw, 0.0)
+
+        return {
+            'kinematic': kinematic,
+            'bandwidth': bandwidth,
+        }
+
     def get_status(self, eventtime=None):
         if not self.init_done:
             return {}
