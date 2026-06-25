@@ -2101,7 +2101,10 @@ class TMC4671:
         run_i = self.current_helper.get_run_current()
         if run_i <= 0 or self.motor_kt <= 0:
             return 0.0
-        return run_i * self.motor_kt
+        # TMC4671 run_current is peak phase current; Kt in profiles is typically
+        # defined relative to RMS current. Scale by 1/sqrt(2) for physical torque.
+        i_rms = run_i / math.sqrt(2.0)
+        return i_rms * self.motor_kt
 
     def get_available_acceleration(self, linear: bool = False) -> float:
         """Return the maximum sustainable acceleration (rad/s² or m/s²).
@@ -2896,42 +2899,17 @@ class TMC4671:
         # --- Kinematics & Motion Limits ---
         lines.append("")
         lines.append("--- Kinematics & Motion Limits ---")
-        
+
         torq = self.get_available_torque()
         accel_rad = self.get_available_acceleration()
         accel_lin = self.get_available_acceleration(True)
         
-        lines.append(
-            f"  Max available torque: {torq:.4f} N·m "
-            f"(run_current={self.current_helper.get_run_current():.2f}A, Kt={self.motor_kt:.4f})"
-        )
-        lines.append(
-            f"  Max sustainable acceleration: {accel_rad:.1f} rad/s² / {accel_lin * 1000.0:.1f} mm/s² "
-            f"(J_motor={self.jmotor:.2e}, J_load={self.jload:.2e})"
-        )
-        
-        jd = getattr(self.printer.lookup_object('toolhead'), 'junction_deviation', 0.0)
-        if jd > 0 and hasattr(self, 'max_accel_to_decel') and self.max_accel_to_decel > 0:
-            scv_lim = math.sqrt(jd * self.max_accel_to_decel / (math.sqrt(2.0) - 1.0))
-            lines.append(f"  SCV kinematic limit (jd={jd:.3f}): {scv_lim:.3f} mm/s")
-        
-        if self.velocity_bandwidth > 0 and torq > 0:
-            tau_v = 1.0 / (2.0 * math.pi * self.velocity_bandwidth)
-            lines.append(f"  SCV bandwidth limit: ~calculated with BW_v={self.velocity_bandwidth:.1f} Hz, τ_v={tau_v*1000:.1f}ms")
-
-
-        # --- Kinematics & Motion Limits ---
-        lines.append("")
-        lines.append("--- Kinematics & Motion Limits ---")
-
-        # Calculate and report available torque
-        torq = self.get_available_torque()
         if torq > 0:
-            accel_rad = self.get_available_acceleration()
-            accel_lin = self.get_available_acceleration(True)
             lines.append(
                 f"  Max available torque: {torq:.4f} N·m "
-                f"(run_current={self.current_helper.get_run_current():.2f}A, Kt={self.motor_kt:.4f})"
+                f"(I_peak={self.current_helper.get_run_current():.2f}A, "
+                f"I_RMS={self.current_helper.get_run_current()/math.sqrt(2):.2f}A, "
+                f"Kt={self.motor_kt:.4f})"
             )
             lines.append(
                 f"  Max sustainable acceleration: {accel_rad:.1f} rad/s² / {accel_lin * 1000.0:.1f} mm/s² "
@@ -2940,25 +2918,49 @@ class TMC4671:
         else:
             lines.append("  Kinematics data unavailable (motor not calibrated or current zero)")
 
-        # Calculate and report SCV limits
+        # Calculate and report SCV limits from toolhead state
         try:
             th = self.printer.lookup_object('toolhead')
             jd = getattr(th, 'junction_deviation', 0.0)
             scv_cfg = getattr(th, 'square_corner_velocity', 5.0)
-            
-            if hasattr(self, 'max_accel_to_decel') and self.max_accel_to_decel > 0:
-                # Kinematic limit from junction deviation
+
+            if hasattr(self, 'max_accel_to_decel') and self.max_accel_to_decel > 0 and jd > 0:
+                # Kinematic limit from junction deviation: SCV² = jd × accel / (√2 − 1)
                 scv_kin_lim = math.sqrt(jd * self.max_accel_to_decel / (math.sqrt(2.0) - 1.0))
-                lines.append(f"  SCV kinematic limit (jd={jd:.3f}): {scv_kin_lim:.3f} mm/s")
-                
-                # Bandwidth-based limit (approximate)
-                if self.velocity_bandwidth > 0 and torq > 0:
-                    tau_v = 1.0 / (2.0 * math.pi * self.velocity_bandwidth)
-                    lines.append(f"  SCV bandwidth limit: ~calculated with BW_v={self.velocity_bandwidth:.1f} Hz, τ_v={tau_v*1000:.1f}ms")
+                lines.append(f"  SCV kinematic limit: {scv_kin_lim:.3f} mm/s (from jd={jd:.3f})")
+
+            if self.velocity_bandwidth > 0 and torq > 0:
+                tau_v = 1.0 / (2.0 * math.pi * self.velocity_bandwidth)
+
+                # Get effective pitch for linear conversion
+                pitch_m = 0.0
+                if hasattr(self, 'stepper') and self.stepper is not None:
+                    sd = getattr(self.stepper, 'rotation_distance', 0.0)
+                    if sd > 0:
+                        gr_pairs = self.printer.lookup_object('configfile').getsection(
+                            self.stepper_name).getlists(
+                            'gear_ratio', (), seps=(':', ','), count=2, parser=float)
+                        gear_ratio = 1.0
+                        for n, d in gr_pairs:
+                            gear_ratio *= n / d
+                        pitch_m = sd / (1000.0 * gear_ratio)
+
+                if pitch_m > 0:
+                    accel_lin_scv = torq / (self.jmotor + self.jload) * pitch_m / (2.0 * math.pi)
                 else:
-                    lines.append("  SCV bandwidth limit: not available (BW=0 or torque=0)")
+                    accel_lin_scv = torq / (self.jmotor + self.jload)
+
+                # Bandwidth-limited SCV: motor can only reach a fraction of config limit in the time available
+                # Using exponential response model: Δv = V_max × (1 − e^(−t/τ))
+                t_corner = 2.0 * scv_cfg / (accel_lin_scv + 1e-9)  # estimated cornering time
+                fraction_reached = 1.0 - math.exp(-t_corner / tau_v)
+                scv_bw_lim = min(scv_cfg, scv_cfg * fraction_reached)
+                lines.append(f"  SCV bandwidth limit: {scv_bw_lim:.3f} mm/s (BW_v={self.velocity_bandwidth:.1f} Hz, τ_v={tau_v*1000:.1f}ms)")
+            else:
+                lines.append("  SCV bandwidth limit: unavailable (velocity_bw=0 or torque=0)")
+
         except Exception as e:
-            lines.append(f"  SCV limits: could not retrieve toolhead state ({e})")
+            lines.append(f"  SCV limits: toolhead state unavailable ({e})")
 
         gcmd.respond_info("\n".join(lines))
 
