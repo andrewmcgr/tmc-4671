@@ -2129,21 +2129,42 @@ class TMC4671:
         if not linear:
             return accel_rad
 
-        # Convert to m/s² via effective pitch
+        # Convert to m/s² via effective pitch using Klipper's rotation distance API
         if self.stepper is None:
             return None  # Cannot convert without stepper data
-        sd = getattr(self.stepper, 'rotation_distance', 0.0)
+        
+        # Klipper/Kalico steppers expose get_rotation_distance() -> (mm_per_rev, gear_ratio)
+        sd = 0.0
+        local_gear_ratio = 1.0
+        if hasattr(self.stepper, 'get_rotation_distance'):
+            try:
+                sd, gr = self.stepper.get_rotation_distance()
+                # If Klipper already includes the mechanical gear ratio in `gr`,
+                # we use it directly instead of parsing configfile.gear_ratio.
+                local_gear_ratio = gr if gr else 1.0
+            except Exception:
+                pass
+        
+        # Fallback to configfile gear_ratio only if Klipper method didn't provide one
+        if sd <= 0 and hasattr(self, 'stepper_name'):
+            try:
+                gr_pairs = self.printer.lookup_object('configfile').getsection(
+                    self.stepper_name).getlists(
+                    'gear_ratio', (), seps=(':', ','), count=2, parser=float)
+                for n, d in gr_pairs:
+                    local_gear_ratio *= n / d
+                
+                # rotation_distance from config is stored in mm per motor revolution
+                sd = self.printer.lookup_object('configfile').getsection(
+                    self.stepper_name).getfloat('rotation_distance', 0.0)
+            except Exception:
+                pass
+
         if sd <= 0:
             return None
 
-        gr_pairs = self.printer.lookup_object('configfile').getsection(
-            self.stepper_name).getlists(
-            'gear_ratio', (), seps=(':', ','), count=2, parser=float)
-        gear_ratio = 1.0
-        for n, d in gr_pairs:
-            gear_ratio *= n / d
-
-        pitch_m = sd / (1000.0 * gear_ratio)
+        # Use the klipper-exposed local_gear_ratio (or fallback to 1.0)
+        pitch_m = sd / (1000.0 * local_gear_ratio)
         return accel_rad * pitch_m / (2.0 * math.pi)
 
     def get_scv_limits(self, entry_speed: float = 0.0,
