@@ -1002,6 +1002,7 @@ class TMC4671:
         self.motor_saliency = 1.0
         self.dead_time_v = 0.0
         self.jmotor = config.getfloat('jmotor', 8.45e-6, above=0.)
+        self.n_pole_pairs = config.getint('n_pole_pairs', default=4)
         self.jload  = config.getfloat('jload',  5e-5,    above=0.)
         # If load_mass is provided, compute the reflected inertia of a linear
         # load driven by a lead-screw or belt.  rotation_distance (mm/rev) is
@@ -2256,8 +2257,7 @@ class TMC4671:
             if vm <= 0:
                 return None
 
-            # pole_pairs from motor profile
-            pp = getattr(self, 'pole_pairs', 0)
+            pp = getattr(self, 'n_pole_pairs', 0)
             if pp <= 0:
                 return None
 
