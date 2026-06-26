@@ -1792,10 +1792,10 @@ class TMC4671:
         if v_max_phase is None:
             v_max_phase = vm
 
-        if V_req > V_max_phase:
+        if V_req > v_max_phase:
             ac_U = 32767
         else:
-            ac_U = int(32767.0 * (V_req / V_max_phase))
+            ac_U = int(32767.0 * (V_req / v_max_phase))
         ac_U = max(ac_U, 500)
 
         # Apply the exact same voltage for both tests to calibrate out dead-time
