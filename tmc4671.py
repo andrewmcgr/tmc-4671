@@ -8,6 +8,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 from typing import Optional
+import dataclasses
 import logging, collections
 import math
 import time
