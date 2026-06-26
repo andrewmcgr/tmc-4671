@@ -1002,7 +1002,6 @@ class TMC4671:
         self.motor_saliency = 1.0
         self.dead_time_v = 0.0
         self.jmotor = config.getfloat('jmotor', 8.45e-6, above=0.)
-        self.n_pole_pairs = config.getint('n_pole_pairs', default=4)
         self.jload  = config.getfloat('jload',  5e-5,    above=0.)
         # If load_mass is provided, compute the reflected inertia of a linear
         # load driven by a lead-screw or belt.  rotation_distance (mm/rev) is
@@ -2241,10 +2240,11 @@ class TMC4671:
             \\omega_{max} \\approx \\frac{\\sqrt{\\frac{V_{bus}^2}{3} -
             (R_s I_q)^2} - \\alpha L_q I_q}{K_e}
 
-        Converts electrical rad/s to linear mm/s via pole pairs and
-        :meth:`_get_rotation_distance_mm`.
+        Motor ``K_t`` (Nm/A) equals ``K_e`` (V·s/mech-radian) in SI, so
+        ``V / K_t`` already yields **mechanical** rad/s — no pole-pairs
+        conversion is needed.
 
-        :param target_accel: electrical acceleration rad/s² (default 0 = steady state).
+        :param target_accel: mechanical acceleration rad/s² (default 0 = steady state).
         :returns: limiting velocity in mm/s, or ``None`` if insufficient data.
         """
         try:
@@ -2257,12 +2257,9 @@ class TMC4671:
             if vm <= 0:
                 return None
 
-            pp = getattr(self, 'n_pole_pairs', 0)
-            if pp <= 0:
-                return None
-
             # Simplified steady-state formula (steady-state: alpha=0)
-            # omega_max_elec ≈ √(V_bus²/3 - (R_s·I_q)²) / K_e
+            # V_bus²/3 is the per-phase voltage budget in the d-q frame.
+            # Kt ≈ Ke in SI (Nm/A ≡ V·s/mech-rad), so V/K_t = ω_mech.
             v_sq_over_3 = vm * vm / 3.0
             r_i = self.motor_r * run_i
             v_backemf_sq = v_sq_over_3 - r_i * r_i
@@ -2271,21 +2268,18 @@ class TMC4671:
                 # Bus voltage too low to overcome resistive drop
                 return 0.0
 
-            # Electrical angular velocity (rad/s electric)
-            # Kt ≈ Ke in SI units (Nm/A ≡ V·s/rad)
-            omega_e = math.sqrt(v_backemf_sq) / self.motor_kt
+            # ω_mech = √(V_backemf²) / K_t  (V/K_t → mech rad/s, NOT elec)
+            omega_m = math.sqrt(v_backemf_sq) / self.motor_kt
 
             # Apply acceleration term if non-zero target
             if target_accel > 0 and hasattr(self, 'motor_lq'):
                 accel_term = target_accel * self.motor_lq * run_i
-                omega_e = (math.sqrt(v_backemf_sq) - accel_term) / self.motor_kt
-                if omega_e <= 0:
+                omega_m = (math.sqrt(v_backemf_sq) - accel_term) / self.motor_kt
+                if omega_m <= 0:
                     return 0.0
 
-            # Convert to mechanical: ω_mech = ω_elec / pp
-            omega_m = omega_e / pp
-
-            # Convert to linear mm/s: v = ω_mech × (rotation_distance / 2π)
+            # Convert mechanical rad/s to linear mm/s:
+            # v = ω_mech × (rotation_distance / 2π)
             rot_dist = self._get_rotation_distance_mm()
             if rot_dist <= 0:
                 return None
