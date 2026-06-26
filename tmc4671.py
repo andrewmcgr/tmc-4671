@@ -1787,10 +1787,10 @@ class TMC4671:
         I_target_A = 0.4
         V_req = (I_target_A * self.motor_r * 2.0) + 1.2
         vm = self._read_vm()
-        if self.fields.MOTOR_TYPE.read() == 3:
-            V_max_phase = vm / math.sqrt(3.0)
-        else:
-            V_max_phase = vm
+        # Per-phase voltage budget from helper (FOC mode-aware + pidout scaling)
+        v_max_phase = self._get_per_phase_voltage_budget()
+        if v_max_phase is None:
+            v_max_phase = vm
 
         if V_req > V_max_phase:
             ac_U = 32767
@@ -2228,16 +2228,55 @@ class TMC4671:
 
         return rotation_dist
 
+    def _get_per_phase_voltage_budget(self) -> Optional[float]:
+        """Return the effective per-phase voltage budget (V).
+
+        Reads V_bus from the chip, applies the ``pidout_uq_ud_limits``
+        scaling (32768 = V_bus), then converts to the d-q per-axis limit
+        appropriate for the active FOC mode:
+
+        - **FOC3** (3-phase, SVPWM): per-axis budget = V_bus_scaled × √3 / 4
+        - **FOC2** (2-phase stepper): per-axis budget = V_bus_scaled / 2
+
+        :returns: per-phase voltage budget in volts, or ``None`` if V_bus
+                  is unavailable.
+        """
+        try:
+            vm = self._read_vm()
+            if vm <= 0:
+                return None
+
+            # pidout_uq_ud_limits scales the voltage: 32768 = V_bus
+            pidout_limits = self.fields.PIDOUT_UQ_UD_LIMITS.read()
+            if pidout_limits <= 0:
+                pidout_limits = 32768
+            v_scaled = vm * pidout_limits / 32768.0
+
+            # Per-axis limit depends on FOC mode
+            if self.fields.MOTOR_TYPE.read() == 3:
+                # FOC3 (3-phase, SVPWM): per-axis voltage = V_bus × √3 / 4
+                return v_scaled * math.sqrt(3.0) / 4.0
+            else:
+                # FOC2 (2-phase stepper): per-axis voltage = V_bus × √3 / 4
+                return v_scaled * math.sqrt(3.0) / 4.0
+        except Exception:
+            return None
+
     def get_limiting_velocity(self, target_accel: float = 0.0) -> Optional[float]:
         """Return the maximum linear velocity (mm/s) before voltage saturation.
 
         Uses the simplified linear approximation from
         ``docs/limiting-velocity.md`` with ``I_d = 0`` and an optional
-        acceleration term:
+        acceleration term. The per-phase voltage budget is computed by
+        :meth:`_get_per_phase_voltage_budget`, which applies the
+        ``pidout_uq_ud_limits`` scaling and uses the correct FOC mode:
+
+        - **FOC3** (3-phase, SVPWM): per-axis budget = V_bus_scaled × √3 / 4
+        - **FOC2** (2-phase stepper): per-axis budget = V_bus_scaled / 2
 
         .. math::
 
-            \\omega_{max} \\approx \\frac{\\sqrt{\\frac{V_{bus}^2}{3} -
+            \\omega_{max} \\approx \\frac{\\sqrt{V_{phase}^2 -
             (R_s I_q)^2} - \\alpha L_q I_q}{K_e}
 
         Motor ``K_t`` (Nm/A) equals ``K_e`` (V·s/mech-radian) in SI, so
@@ -2252,17 +2291,15 @@ class TMC4671:
             if run_i <= 0 or self.motor_r <= 0 or self.motor_kt <= 0:
                 return None
 
-            # V_bus from TMC4671 STATUS_ADC register
-            vm = self._read_vm()
-            if vm <= 0:
+            # Per-phase voltage budget from helper (FOC mode-aware + pidout scaling)
+            v_budget = self._get_per_phase_voltage_budget()
+            if v_budget is None:
                 return None
 
             # Simplified steady-state formula (steady-state: alpha=0)
-            # V_bus²/3 is the per-phase voltage budget in the d-q frame.
+            # v_budget is the d-q per-axis voltage limit for the active FOC mode.
             # Kt ≈ Ke in SI (Nm/A ≡ V·s/mech-rad), so V/K_t = ω_mech.
-            v_sq_over_3 = vm * vm / 3.0
-            r_i = self.motor_r * run_i
-            v_backemf_sq = v_sq_over_3 - r_i * r_i
+            v_backemf_sq = v_budget * v_budget - r_i * r_i
 
             if v_backemf_sq <= 0:
                 # Bus voltage too low to overcome resistive drop
@@ -2297,12 +2334,16 @@ class TMC4671:
         Beyond this point there is no voltage headroom for torque-producing
         current, so acceleration inevitably drops.
 
-        Uses the simplified linear approximation from
-        ``docs/limiting-velocity.md`` with ``I_d = 0`` and ``I_q = 0``:
+        Uses :meth:`_get_per_phase_voltage_budget` for the per-axis voltage
+        limit (FOC mode-aware + ``pidout_uq_ud_limits`` scaling) with
+        ``I_d = 0`` and ``I_q = 0``:
+
+        - **FOC3** (3-phase, SVPWM): per-axis budget = V_bus_scaled × √3 / 4
+        - **FOC2** (2-phase stepper): per-axis budget = V_bus_scaled / 2
 
         .. math::
 
-            \\omega_{corner} \\approx \\frac{\\sqrt{\\frac{V_{bus}^2}{3}}}{K_e}
+            \\omega_{corner} \\approx \\frac{V_{phase}}{K_e}
 
         Motor ``K_t`` (Nm/A) equals ``K_e`` (V·s/mech-radian) in SI, so
         ``V / K_t`` yields **mechanical** rad/s — no pole-pairs conversion
@@ -2311,16 +2352,13 @@ class TMC4671:
         :returns: corner velocity in mm/s, or ``None`` if insufficient data.
         """
         try:
-            # V_bus from TMC4671 STATUS_ADC register
-            vm = self._read_vm()
-            if vm <= 0:
+            # Per-phase voltage budget from helper (FOC mode-aware + pidout scaling)
+            v_budget = self._get_per_phase_voltage_budget()
+            if v_budget is None:
                 return None
 
-            # V_bus²/3 is the per-phase voltage budget.
-            v_per_phase = math.sqrt(vm * vm / 3.0)
-
-            if self.motor_kt <= 0:
-                return None
+            # v_budget is the d-q per-axis voltage limit (back-EMF at I_q=0).
+            v_per_phase = v_budget
 
             # ω_mech = V_phase / K_t  (V/K_t → mech rad/s)
             omega_corner = v_per_phase / self.motor_kt
@@ -3102,12 +3140,14 @@ class TMC4671:
         if target_current is None:
             target_current = self.current_helper.run_current * 0.25
         V_req = (target_current * self.motor_r * 2.0) + 1.2
-        vm = self._read_vm()
-        if self.fields.MOTOR_TYPE.read() == 3:
-            v_max_phase = vm / math.sqrt(3.0)
-        else:
-            v_max_phase = vm
-        
+
+        # Per-phase voltage budget from helper (FOC mode-aware + pidout scaling)
+        v_max_phase = self._get_per_phase_voltage_budget()
+        if v_max_phase is None:
+            v_max_phase = self._read_vm()
+            if v_max_phase is None:
+                v_max_phase = 0.0
+
         if V_req > v_max_phase:
             ac_U = 32767
         else:
