@@ -7,6 +7,7 @@
 # Copyright (C) 2018-2020  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
+from typing import Optional
 import dataclasses
 import logging, collections
 import math
@@ -1786,15 +1787,15 @@ class TMC4671:
         I_target_A = 0.4
         V_req = (I_target_A * self.motor_r * 2.0) + 1.2
         vm = self._read_vm()
-        if self.fields.MOTOR_TYPE.read() == 3:
-            V_max_phase = vm / math.sqrt(3.0)
-        else:
-            V_max_phase = vm
+        # Per-phase voltage budget from helper (FOC mode-aware + pidout scaling)
+        v_max_phase = self._get_per_phase_voltage_budget()
+        if v_max_phase is None:
+            v_max_phase = vm
 
-        if V_req > V_max_phase:
+        if V_req > v_max_phase:
             ac_U = 32767
         else:
-            ac_U = int(32767.0 * (V_req / V_max_phase))
+            ac_U = int(32767.0 * (V_req / v_max_phase))
         ac_U = max(ac_U, 500)
 
         # Apply the exact same voltage for both tests to calibrate out dead-time
@@ -2084,6 +2085,293 @@ class TMC4671:
         for target, biquad_filter in self.biquad_filters.items():
             register = BIQUAD_FILTER_TARGETS[target]
             self._setup_filter(register, biquad_filter)
+
+    # ------------------------------------------------------------------
+    # Kinematics helpers: torque, acceleration, and SCV limits
+    # ------------------------------------------------------------------
+
+    def get_available_torque(self) -> float:
+        """Return the maximum available steady-state torque (N·m).
+
+        Uses the configured ``run_current`` from :class:`CurrentHelper` and
+        the resolved ``motor_kt``.  This is the torque that can be *sustained*
+        by the PI controller stack without clipping at ``PID_TORQUE_FLUX_LIMITS``.
+
+        :returns: torque in newton-metres (N·m)
+        """
+        run_i = self.current_helper.get_run_current()
+        if run_i <= 0 or self.motor_kt <= 0:
+            return 0.0
+        # TMC4671 run_current is peak phase current; Kt in profiles is typically
+        # defined relative to RMS current. Scale by 1/sqrt(2) for physical torque.
+        i_rms = run_i / math.sqrt(2.0)
+        return i_rms * self.motor_kt
+
+    def get_available_acceleration(self, linear: bool = False) -> float:
+        """Return the maximum sustainable acceleration (rad/s² or m/s²).
+
+        Computes ``available_torque / total_inertia`` using the same
+        ``run_current`` basis as :meth:`get_available_torque`.
+
+        If *linear* is ``True``, converts angular acceleration to linear
+        acceleration via the effective pitch.  The effective pitch is derived
+        from ``rotation_distance`` divided by any gear ratio, matching how
+        ``jload`` is computed in :meth:`~TMC4671.__init__`.
+
+        :param linear: if True, return m/s²; otherwise rad/s².
+        :returns: acceleration value
+        """
+        torque = self.get_available_torque()
+        if torque <= 0 or self.jmotor + self.jload <= 0:
+            return 0.0
+
+        accel_rad = torque / (self.jmotor + self.jload)
+
+        if not linear:
+            return accel_rad
+
+        # Convert angular acceleration (rad/s²) to linear (mm/s²)
+        rot_dist = self._get_rotation_distance_mm()
+        if rot_dist <= 0:
+            return None
+        return accel_rad * rot_dist / (2.0 * math.pi)
+
+    def get_scv_limits(self, entry_speed: float = 0.0,
+                       junction_deviation: float = 0.0) -> dict:
+        """Return Square Corner Velocity limits (kinematic and bandwidth-aware).
+
+        Two limits are returned:
+
+        * **kinematic** — the SCV ceiling imposed by ``junction_deviation``
+          (the same value Kalico's toolhead uses to compute virtual radius at
+          corners).  If ``junction_deviation`` is zero or not provided, returns
+          ``None`` for this key.
+
+        * **bandwidth** — the SCV ceiling imposed by the velocity PI loop's
+          ability to track cornering force.  Based on the time constant
+          :math:`\\tau = 1/(2\\pi·BW_v)` and available torque.
+
+        Both limits are in m/s (linear) for a corner at *entry_speed*.
+
+        :param entry_speed: target speed through the corner (m/s).
+        :param junction_deviation: virtual radius deviation; uses toolhead's
+            current value if zero.
+        :returns: dict with keys ``kinematic`` and ``bandwidth`` (both in m/s).
+        """
+        # --- Kinematic limit ---
+        if junction_deviation <= 0 or self.max_accel_to_decel <= 0:
+            kinematic = None
+        else:
+            # SCV² = jd × accel / (√2 − 1)
+            scv_sq = junction_deviation * self.max_accel_to_decel / (
+                math.sqrt(2.0) - 1.0)
+            kinematic = math.sqrt(max(scv_sq, 0.0))
+
+        # --- Bandwidth limit ---
+        if self.velocity_bandwidth <= 0 or self.jmotor + self.jload <= 0:
+            bandwidth = None
+        else:
+            tau_v = 1.0 / (2.0 * math.pi * self.velocity_bandwidth)
+            torque = self.get_available_torque()
+            if torque <= 0:
+                bandwidth = None
+            else:
+                accel_rad = torque / (self.jmotor + self.jload)
+
+                # Effective pitch for linear conversion
+                rot_dist = self._get_rotation_distance_mm()
+                pitch_m = rot_dist / (1000.0) if rot_dist > 0 else 0.0
+
+                accel_linear = accel_rad * pitch_m / (2.0 * math.pi) \
+                    if pitch_m > 0 else accel_rad
+
+                # SCV_bandwidth ≈ entry_speed × (1 − e^(−Δt/τ_v))
+                # Δt is the time spent traversing the corner arc
+                scv_bw = entry_speed * (1.0 - math.exp(
+                    -min(entry_speed, 2.0) / (accel_linear * tau_v + 1e-9)))
+                bandwidth = max(scv_bw, 0.0)
+
+        return {
+            'kinematic': kinematic,
+            'bandwidth': bandwidth,
+        }
+
+    def _get_rotation_distance_mm(self) -> float:
+        """Return effective rotation distance in mm (with gear ratio applied).
+
+        Tries :meth:`Stepper.get_rotation_distance` first, then falls back
+        to ``rotation_distance / gear_ratio`` from the configfile.
+        """
+        rotation_dist = 0.0
+
+        # Try the stepper method first (standard Kalico/Klipper API)
+        if self.stepper is not None:
+            try:
+                rotation_dist, _steps_per_rev = self.stepper.get_rotation_distance()
+            except Exception:
+                pass
+
+        # Fallback to configfile gear_ratio and rotation_distance
+        if rotation_dist <= 0 and hasattr(self, 'stepper_name'):
+            try:
+                gr_pairs = self.printer.lookup_object('configfile').getsection(
+                    self.stepper_name).getlists(
+                    'gear_ratio', (), seps=(':', ','), count=2, parser=float)
+                effective_gear_ratio = 1.0
+                for n, d in gr_pairs:
+                    effective_gear_ratio *= n / d
+
+                rotation_dist = self.printer.lookup_object('configfile').getsection(
+                    self.stepper_name).getfloat('rotation_distance', 0.0) / effective_gear_ratio
+            except Exception:
+                pass
+
+        return rotation_dist
+
+    def _get_per_phase_voltage_budget(self) -> Optional[float]:
+        """Return the effective per-phase voltage budget (V).
+
+        Reads V_bus from the chip, applies the ``pidout_uq_ud_limits``
+        scaling (32768 = V_bus), then converts to the d-q per-axis limit
+        appropriate for the active FOC mode:
+
+        - **FOC3** (3-phase, SVPWM): per-axis budget = V_bus_scaled × √3 / 4
+        - **FOC2** (2-phase stepper): per-axis budget = V_bus_scaled / 2
+
+        :returns: per-phase voltage budget in volts, or ``None`` if V_bus
+                  is unavailable.
+        """
+        try:
+            vm = self._read_vm()
+            if vm <= 0:
+                return None
+
+            # pidout_uq_ud_limits scales the voltage: 32768 = V_bus
+            pidout_limits = self.fields.PIDOUT_UQ_UD_LIMITS.read()
+            if pidout_limits <= 0:
+                pidout_limits = 32768
+            v_scaled = vm * pidout_limits / 32768.0
+
+            # Per-axis limit depends on FOC mode
+            if self.fields.MOTOR_TYPE.read() == 3:
+                # FOC3 (3-phase, SVPWM): per-axis voltage = V_bus × √3 / 4
+                return v_scaled * math.sqrt(3.0) / 4.0
+            else:
+                # FOC2 (2-phase stepper): per-axis voltage = V_bus × √3 / 4
+                return v_scaled * math.sqrt(3.0) / 4.0
+        except Exception:
+            return None
+
+    def get_limiting_velocity(self, target_accel: float = 0.0) -> Optional[float]:
+        """Return the maximum linear velocity (mm/s) before voltage saturation.
+
+        Uses the simplified linear approximation from
+        ``docs/limiting-velocity.md`` with ``I_d = 0`` and an optional
+        acceleration term. The per-phase voltage budget is computed by
+        :meth:`_get_per_phase_voltage_budget`, which applies the
+        ``pidout_uq_ud_limits`` scaling and uses the correct FOC mode:
+
+        - **FOC3** (3-phase, SVPWM): per-axis budget = V_bus_scaled × √3 / 4
+        - **FOC2** (2-phase stepper): per-axis budget = V_bus_scaled / 2
+
+        .. math::
+
+            \\omega_{max} \\approx \\frac{\\sqrt{V_{phase}^2 -
+            (R_s I_q)^2} - \\alpha L_q I_q}{K_e}
+
+        Motor ``K_t`` (Nm/A) equals ``K_e`` (V·s/mech-radian) in SI, so
+        ``V / K_t`` already yields **mechanical** rad/s — no pole-pairs
+        conversion is needed.
+
+        :param target_accel: mechanical acceleration rad/s² (default 0 = steady state).
+        :returns: limiting velocity in mm/s, or ``None`` if insufficient data.
+        """
+        try:
+            run_i = self.current_helper.get_run_current()
+            if run_i <= 0 or self.motor_r <= 0 or self.motor_kt <= 0:
+                return None
+
+            # Per-phase voltage budget from helper (FOC mode-aware + pidout scaling)
+            v_budget = self._get_per_phase_voltage_budget()
+            if v_budget is None:
+                return None
+
+            # Simplified steady-state formula (steady-state: alpha=0)
+            # v_budget is the d-q per-axis voltage limit for the active FOC mode.
+            # Kt ≈ Ke in SI (Nm/A ≡ V·s/mech-rad), so V/K_t = ω_mech.
+            v_backemf_sq = v_budget * v_budget - self.motor_r * self.motor_r
+
+            if v_backemf_sq <= 0:
+                # Bus voltage too low to overcome resistive drop
+                return 0.0
+
+            # ω_mech = √(V_backemf²) / K_t  (V/K_t → mech rad/s, NOT elec)
+            omega_m = math.sqrt(v_backemf_sq) / self.motor_kt
+
+            # Apply acceleration term if non-zero target
+            if target_accel > 0 and hasattr(self, 'motor_lq'):
+                accel_term = target_accel * self.motor_lq * run_i
+                omega_m = (math.sqrt(v_backemf_sq) - accel_term) / self.motor_kt
+                if omega_m <= 0:
+                    return 0.0
+
+            # Convert mechanical rad/s to linear mm/s:
+            # v = ω_mech × (rotation_distance / 2π)
+            rot_dist = self._get_rotation_distance_mm()
+            if rot_dist <= 0:
+                return None
+
+            return omega_m * rot_dist / (2.0 * math.pi)
+
+        except Exception:
+            return None
+    def get_corner_velocity(self) -> Optional[float]:
+        """Return the corner velocity — the transition speed where acceleration
+        starts to degrade due to back-EMF.
+
+        This is the steady-state velocity at which the back-EMF (with the motor
+        at zero current) alone consumes the full per-phase voltage budget.
+        Beyond this point there is no voltage headroom for torque-producing
+        current, so acceleration inevitably drops.
+
+        Uses :meth:`_get_per_phase_voltage_budget` for the per-axis voltage
+        limit (FOC mode-aware + ``pidout_uq_ud_limits`` scaling) with
+        ``I_d = 0`` and ``I_q = 0``:
+
+        - **FOC3** (3-phase, SVPWM): per-axis budget = V_bus_scaled × √3 / 4
+        - **FOC2** (2-phase stepper): per-axis budget = V_bus_scaled / 2
+
+        .. math::
+
+            \\omega_{corner} \\approx \\frac{V_{phase}}{K_e}
+
+        Motor ``K_t`` (Nm/A) equals ``K_e`` (V·s/mech-radian) in SI, so
+        ``V / K_t`` yields **mechanical** rad/s — no pole-pairs conversion
+        is needed.
+
+        :returns: corner velocity in mm/s, or ``None`` if insufficient data.
+        """
+        try:
+            # Per-phase voltage budget from helper (FOC mode-aware + pidout scaling)
+            v_budget = self._get_per_phase_voltage_budget()
+            if v_budget is None:
+                return None
+
+            # v_budget is the d-q per-axis voltage limit (back-EMF at I_q=0).
+            v_per_phase = v_budget
+
+            # ω_mech = V_phase / K_t  (V/K_t → mech rad/s)
+            omega_corner = v_per_phase / self.motor_kt
+
+            # Convert mechanical rad/s to linear mm/s
+            rot_dist = self._get_rotation_distance_mm()
+            if rot_dist <= 0:
+                return None
+
+            return omega_corner * rot_dist / (2.0 * math.pi)
+
+        except Exception:
+            return None
 
     def get_status(self, eventtime=None):
         if not self.init_done:
@@ -2760,18 +3048,106 @@ class TMC4671:
             "             Position  P=%.5f  I=%.5f" % (p_p_cur, i_p_cur)
         )
 
+
+        # --- Kinematics & Motion Limits ---
+        lines.append("")
+        lines.append("--- Kinematics & Motion Limits ---")
+
+        torq = self.get_available_torque()
+        accel_rad = self.get_available_acceleration()
+        accel_lin = self.get_available_acceleration(True)
+        
+
+        if torq > 0:
+            lines.append(
+                f"  Max available torque: {torq:.4f} N·m "
+                f"(I_peak={self.current_helper.get_run_current():.2f}A, "
+                f"I_RMS={self.current_helper.get_run_current()/math.sqrt(2):.2f}A, "
+                f"Kt={self.motor_kt:.4f})"
+            )
+            
+            if accel_lin is not None:
+                # accel_lin is already in mm/s²; report it with a note that this is the ideal torque limit
+                lines.append(
+                    f"  Max sustainable acceleration (ideal): {accel_lin:.1f} mm/s² "
+                    f"(J_motor={self.jmotor:.2e}, J_load={self.jload:.2e})"
+                )
+            else:
+                lines.append("  Max sustainable acceleration: N/A (stepper pitch unknown)")
+
+            # Voltage-limited maximum velocity (steady-state, alpha=0)
+            lv = self.get_limiting_velocity()
+            if lv is not None:
+                lines.append(
+                    f"  Voltage-limited max velocity (steady-state): {lv:.1f} mm/s"
+                )
+            else:
+                lines.append(
+                    "  Voltage-limited max velocity: N/A (insufficient data)"
+                )
+
+            # Corner velocity — where back-EMF alone starts consuming the voltage budget
+            cv = self.get_corner_velocity()
+            if cv is not None:
+                lines.append(
+                    f"  Corner velocity (back-EMF limit): {cv:.1f} mm/s"
+                )
+            else:
+                lines.append(
+                    "  Corner velocity: N/A (insufficient data)"
+                )
+        else:
+            lines.append("  Kinematics data unavailable (motor not calibrated or current zero)")
+
+        # Calculate and report SCV limits from toolhead state
+        try:
+            th = self.printer.lookup_object('toolhead')
+            jd = getattr(th, 'junction_deviation', 0.0)
+            scv_cfg = getattr(th, 'square_corner_velocity', 5.0)
+
+            if hasattr(self, 'max_accel_to_decel') and self.max_accel_to_decel > 0 and jd > 0:
+                # Kinematic limit from junction deviation: SCV² = jd × accel / (√2 − 1)
+                scv_kin_lim = math.sqrt(jd * self.max_accel_to_decel / (math.sqrt(2.0) - 1.0))
+                lines.append(f"  SCV kinematic limit: {scv_kin_lim:.3f} mm/s (from jd={jd:.3f})")
+
+            if self.velocity_bandwidth > 0 and torq > 0:
+                tau_v = 1.0 / (2.0 * math.pi * self.velocity_bandwidth)
+
+                # Get effective pitch for linear conversion (de-duplicated via helper)
+                rot_dist = self._get_rotation_distance_mm()
+                pitch_m = rot_dist / (1000.0) if rot_dist > 0 else 0.0
+
+                if pitch_m > 0:
+                    accel_lin_scv = torq / (self.jmotor + self.jload) * pitch_m / (2.0 * math.pi)
+                else:
+                    accel_lin_scv = torq / (self.jmotor + self.jload)
+
+                # Bandwidth-limited SCV: motor can only reach a fraction of config limit in the time available
+                # Using exponential response model: Δv = V_max × (1 − e^(−t/τ))
+                t_corner = 2.0 * scv_cfg / (accel_lin_scv + 1e-9)  # estimated cornering time
+                fraction_reached = 1.0 - math.exp(-t_corner / tau_v)
+                scv_bw_lim = min(scv_cfg, scv_cfg * fraction_reached)
+                lines.append(f"  SCV bandwidth limit: {scv_bw_lim:.3f} mm/s (BW_v={self.velocity_bandwidth:.1f} Hz, τ_v={tau_v*1000:.1f}ms)")
+            else:
+                lines.append("  SCV bandwidth limit: unavailable (velocity_bw=0 or torque=0)")
+
+        except Exception as e:
+            lines.append(f"  SCV limits: toolhead state unavailable ({e})")
+
         gcmd.respond_info("\n".join(lines))
 
     def _calculate_ac_injection_voltage(self, target_current=None):
         if target_current is None:
             target_current = self.current_helper.run_current * 0.25
         V_req = (target_current * self.motor_r * 2.0) + 1.2
-        vm = self._read_vm()
-        if self.fields.MOTOR_TYPE.read() == 3:
-            v_max_phase = vm / math.sqrt(3.0)
-        else:
-            v_max_phase = vm
-        
+
+        # Per-phase voltage budget from helper (FOC mode-aware + pidout scaling)
+        v_max_phase = self._get_per_phase_voltage_budget()
+        if v_max_phase is None:
+            v_max_phase = self._read_vm()
+            if v_max_phase is None:
+                v_max_phase = 0.0
+
         if V_req > v_max_phase:
             ac_U = 32767
         else:
