@@ -2130,38 +2130,10 @@ class TMC4671:
             return accel_rad
 
         # Convert angular acceleration (rad/s²) to linear (mm/s²)
-        # Klipper/Kalico steppers expose get_rotation_distance() -> (rotation_dist_mm_per_rev, steps_per_rev)
-        if self.stepper is None:
-            return None  # Cannot convert without stepper data
-        
-        rotation_dist = 0.0
-        if hasattr(self.stepper, 'get_rotation_distance'):
-            try:
-                rotation_dist, _steps_per_rev = self.stepper.get_rotation_distance()
-            except Exception:
-                pass
-        
-        # Fallback to configfile gear_ratio and rotation_distance if stepper API didn't provide one
-        if rotation_dist <= 0 and hasattr(self, 'stepper_name'):
-            try:
-                gr_pairs = self.printer.lookup_object('configfile').getsection(
-                    self.stepper_name).getlists(
-                    'gear_ratio', (), seps=(':', ','), count=2, parser=float)
-                effective_gear_ratio = 1.0
-                for n, d in gr_pairs:
-                    effective_gear_ratio *= n / d
-                
-                rotation_dist = self.printer.lookup_object('configfile').getsection(
-                    self.stepper_name).getfloat('rotation_distance', 0.0) / effective_gear_ratio
-            except Exception:
-                pass
-
-        if rotation_dist <= 0:
+        rot_dist = self._get_rotation_distance_mm()
+        if rot_dist <= 0:
             return None
-
-        # Linear acceleration (mm/s²) = angular_acceleration(rad/s²) * (linear_dist_per_rad)
-        # linear_dist_per_rad = rotation_distance_mm / 2pi
-        return accel_rad * rotation_dist / (2.0 * math.pi)
+        return accel_rad * rot_dist / (2.0 * math.pi)
 
     def get_scv_limits(self, entry_speed: float = 0.0,
                        junction_deviation: float = 0.0) -> dict:
@@ -2206,22 +2178,8 @@ class TMC4671:
                 accel_rad = torque / (self.jmotor + self.jload)
 
                 # Effective pitch for linear conversion
-                if self.stepper is not None:
-                    sd = getattr(self.stepper, 'rotation_distance', 0.0)
-                    if sd > 0:
-                        gr_pairs = self.printer.lookup_object(
-                            'configfile').getsection(
-                            self.stepper_name).getlists(
-                            'gear_ratio', (), seps=(':', ','), count=2,
-                            parser=float)
-                        gear_ratio = 1.0
-                        for n, d in gr_pairs:
-                            gear_ratio *= n / d
-                        pitch_m = sd / (1000.0 * gear_ratio)
-                    else:
-                        pitch_m = 0.0
-                else:
-                    pitch_m = 0.0
+                rot_dist = self._get_rotation_distance_mm()
+                pitch_m = rot_dist / (1000.0) if rot_dist > 0 else 0.0
 
                 accel_linear = accel_rad * pitch_m / (2.0 * math.pi) \
                     if pitch_m > 0 else accel_rad
@@ -2236,6 +2194,105 @@ class TMC4671:
             'kinematic': kinematic,
             'bandwidth': bandwidth,
         }
+
+    def _get_rotation_distance_mm(self) -> float:
+        """Return effective rotation distance in mm (with gear ratio applied).
+
+        Tries :meth:`Stepper.get_rotation_distance` first, then falls back
+        to ``rotation_distance / gear_ratio`` from the configfile.
+        """
+        rotation_dist = 0.0
+
+        # Try the stepper method first (standard Kalico/Klipper API)
+        if self.stepper is not None:
+            try:
+                rotation_dist, _steps_per_rev = self.stepper.get_rotation_distance()
+            except Exception:
+                pass
+
+        # Fallback to configfile gear_ratio and rotation_distance
+        if rotation_dist <= 0 and hasattr(self, 'stepper_name'):
+            try:
+                gr_pairs = self.printer.lookup_object('configfile').getsection(
+                    self.stepper_name).getlists(
+                    'gear_ratio', (), seps=(':', ','), count=2, parser=float)
+                effective_gear_ratio = 1.0
+                for n, d in gr_pairs:
+                    effective_gear_ratio *= n / d
+
+                rotation_dist = self.printer.lookup_object('configfile').getsection(
+                    self.stepper_name).getfloat('rotation_distance', 0.0) / effective_gear_ratio
+            except Exception:
+                pass
+
+        return rotation_dist
+
+    def get_limiting_velocity(self, target_accel: float = 0.0) -> float | None:
+        """Return the maximum linear velocity (mm/s) before voltage saturation.
+
+        Uses the simplified linear approximation from
+        ``docs/limiting-velocity.md`` with ``I_d = 0`` and an optional
+        acceleration term:
+
+        .. math::
+
+            \\omega_{max} \\approx \\frac{\\sqrt{\\frac{V_{bus}^2}{3} -
+            (R_s I_q)^2} - \\alpha L_q I_q}{K_e}
+
+        Converts electrical rad/s to linear mm/s via pole pairs and
+        :meth:`_get_rotation_distance_mm`.
+
+        :param target_accel: electrical acceleration rad/s² (default 0 = steady state).
+        :returns: limiting velocity in mm/s, or ``None`` if insufficient data.
+        """
+        try:
+            run_i = self.current_helper.get_run_current()
+            if run_i <= 0 or self.motor_r <= 0 or self.motor_kt <= 0:
+                return None
+
+            # V_bus from TMC4671 STATUS_ADC register
+            vm = self._read_vm()
+            if vm <= 0:
+                return None
+
+            # pole_pairs from motor profile
+            pp = getattr(self, 'pole_pairs', 0)
+            if pp <= 0:
+                return None
+
+            # Simplified steady-state formula (steady-state: alpha=0)
+            # omega_max_elec ≈ √(V_bus²/3 - (R_s·I_q)²) / K_e
+            v_sq_over_3 = vm * vm / 3.0
+            r_i = self.motor_r * run_i
+            v_backemf_sq = v_sq_over_3 - r_i * r_i
+
+            if v_backemf_sq <= 0:
+                # Bus voltage too low to overcome resistive drop
+                return 0.0
+
+            # Electrical angular velocity (rad/s electric)
+            # Kt ≈ Ke in SI units (Nm/A ≡ V·s/rad)
+            omega_e = math.sqrt(v_backemf_sq) / self.motor_kt
+
+            # Apply acceleration term if non-zero target
+            if target_accel > 0 and hasattr(self, 'motor_lq'):
+                accel_term = target_accel * self.motor_lq * run_i
+                omega_e = (math.sqrt(v_backemf_sq) - accel_term) / self.motor_kt
+                if omega_e <= 0:
+                    return 0.0
+
+            # Convert to mechanical: ω_mech = ω_elec / pp
+            omega_m = omega_e / pp
+
+            # Convert to linear mm/s: v = ω_mech × (rotation_distance / 2π)
+            rot_dist = self._get_rotation_distance_mm()
+            if rot_dist <= 0:
+                return None
+
+            return omega_m * rot_dist / (2.0 * math.pi)
+
+        except Exception:
+            return None
 
     def get_status(self, eventtime=None):
         if not self.init_done:
@@ -2938,6 +2995,17 @@ class TMC4671:
                 )
             else:
                 lines.append("  Max sustainable acceleration: N/A (stepper pitch unknown)")
+
+            # Voltage-limited maximum velocity (steady-state, alpha=0)
+            lv = self.get_limiting_velocity()
+            if lv is not None:
+                lines.append(
+                    f"  Voltage-limited max velocity (steady-state): {lv:.1f} mm/s"
+                )
+            else:
+                lines.append(
+                    "  Voltage-limited max velocity: N/A (insufficient data)"
+                )
         else:
             lines.append("  Kinematics data unavailable (motor not calibrated or current zero)")
 
@@ -2955,18 +3023,9 @@ class TMC4671:
             if self.velocity_bandwidth > 0 and torq > 0:
                 tau_v = 1.0 / (2.0 * math.pi * self.velocity_bandwidth)
 
-                # Get effective pitch for linear conversion
-                pitch_m = 0.0
-                if hasattr(self, 'stepper') and self.stepper is not None:
-                    sd = getattr(self.stepper, 'rotation_distance', 0.0)
-                    if sd > 0:
-                        gr_pairs = self.printer.lookup_object('configfile').getsection(
-                            self.stepper_name).getlists(
-                            'gear_ratio', (), seps=(':', ','), count=2, parser=float)
-                        gear_ratio = 1.0
-                        for n, d in gr_pairs:
-                            gear_ratio *= n / d
-                        pitch_m = sd / (1000.0 * gear_ratio)
+                # Get effective pitch for linear conversion (de-duplicated via helper)
+                rot_dist = self._get_rotation_distance_mm()
+                pitch_m = rot_dist / (1000.0) if rot_dist > 0 else 0.0
 
                 if pitch_m > 0:
                     accel_lin_scv = torq / (self.jmotor + self.jload) * pitch_m / (2.0 * math.pi)
