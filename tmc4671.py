@@ -7,7 +7,7 @@
 # Copyright (C) 2018-2020  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import dataclasses
+from typing import Optional
 import logging, collections
 import math
 import time
@@ -2227,7 +2227,7 @@ class TMC4671:
 
         return rotation_dist
 
-    def get_limiting_velocity(self, target_accel: float = 0.0) -> float | None:
+    def get_limiting_velocity(self, target_accel: float = 0.0) -> Optional[float]:
         """Return the maximum linear velocity (mm/s) before voltage saturation.
 
         Uses the simplified linear approximation from
