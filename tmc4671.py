@@ -2288,6 +2288,52 @@ class TMC4671:
 
         except Exception:
             return None
+    def get_corner_velocity(self) -> Optional[float]:
+        """Return the corner velocity — the transition speed where acceleration
+        starts to degrade due to back-EMF.
+
+        This is the steady-state velocity at which the back-EMF (with the motor
+        at zero current) alone consumes the full per-phase voltage budget.
+        Beyond this point there is no voltage headroom for torque-producing
+        current, so acceleration inevitably drops.
+
+        Uses the simplified linear approximation from
+        ``docs/limiting-velocity.md`` with ``I_d = 0`` and ``I_q = 0``:
+
+        .. math::
+
+            \\omega_{corner} \\approx \\frac{\\sqrt{\\frac{V_{bus}^2}{3}}}{K_e}
+
+        Motor ``K_t`` (Nm/A) equals ``K_e`` (V·s/mech-radian) in SI, so
+        ``V / K_t`` yields **mechanical** rad/s — no pole-pairs conversion
+        is needed.
+
+        :returns: corner velocity in mm/s, or ``None`` if insufficient data.
+        """
+        try:
+            # V_bus from TMC4671 STATUS_ADC register
+            vm = self._read_vm()
+            if vm <= 0:
+                return None
+
+            # V_bus²/3 is the per-phase voltage budget.
+            v_per_phase = math.sqrt(vm * vm / 3.0)
+
+            if self.motor_kt <= 0:
+                return None
+
+            # ω_mech = V_phase / K_t  (V/K_t → mech rad/s)
+            omega_corner = v_per_phase / self.motor_kt
+
+            # Convert mechanical rad/s to linear mm/s
+            rot_dist = self._get_rotation_distance_mm()
+            if rot_dist <= 0:
+                return None
+
+            return omega_corner * rot_dist / (2.0 * math.pi)
+
+        except Exception:
+            return None
 
     def get_status(self, eventtime=None):
         if not self.init_done:
@@ -3000,6 +3046,17 @@ class TMC4671:
             else:
                 lines.append(
                     "  Voltage-limited max velocity: N/A (insufficient data)"
+                )
+
+            # Corner velocity — where back-EMF alone starts consuming the voltage budget
+            cv = self.get_corner_velocity()
+            if cv is not None:
+                lines.append(
+                    f"  Corner velocity (back-EMF limit): {cv:.1f} mm/s"
+                )
+            else:
+                lines.append(
+                    "  Corner velocity: N/A (insufficient data)"
                 )
         else:
             lines.append("  Kinematics data unavailable (motor not calibrated or current zero)")
