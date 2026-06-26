@@ -2299,7 +2299,7 @@ class TMC4671:
             # Simplified steady-state formula (steady-state: alpha=0)
             # v_budget is the d-q per-axis voltage limit for the active FOC mode.
             # Kt ≈ Ke in SI (Nm/A ≡ V·s/mech-rad), so V/K_t = ω_mech.
-            v_backemf_sq = v_budget * v_budget - r_i * r_i
+            v_backemf_sq = v_budget * v_budget - self.motor_r * self.motor_r
 
             if v_backemf_sq <= 0:
                 # Bus voltage too low to overcome resistive drop
