@@ -2235,8 +2235,8 @@ class TMC4671:
         scaling (32768 = V_bus), then converts to the d-q per-axis limit
         appropriate for the active FOC mode:
 
-        - **FOC3** (3-phase, SVPWM): per-axis budget = V_bus_scaled × √3 / 4
-        - **FOC2** (2-phase stepper): per-axis budget = V_bus_scaled / 2
+        - **FOC3** (3-phase, SVPWM): per-axis budget = V_bus_scaled × √3 / 2
+        - **FOC2** (2-phase stepper): per-axis budget = V_bus_scaled
 
         :returns: per-phase voltage budget in volts, or ``None`` if V_bus
                   is unavailable.
@@ -2254,11 +2254,11 @@ class TMC4671:
 
             # Per-axis limit depends on FOC mode
             if self.fields.MOTOR_TYPE.read() == 3:
-                # FOC3 (3-phase, SVPWM): per-axis voltage = V_bus × √3 / 4
-                return v_scaled * math.sqrt(3.0) / 4.0
+                # FOC3 (3-phase, SVPWM): per-axis voltage = V_bus × √3 / 2
+                return v_scaled * math.sqrt(3.0) / 2.0
             else:
-                # FOC2 (2-phase stepper): per-axis voltage = V_bus × √3 / 4
-                return v_scaled * math.sqrt(3.0) / 4.0
+                # FOC2 (2-phase stepper): per-axis voltage = V_bus
+                return v_scaled
         except Exception:
             return None
 
@@ -2325,6 +2325,7 @@ class TMC4671:
 
         except Exception:
             return None
+
     def get_corner_velocity(self) -> Optional[float]:
         """Return the corner velocity — the transition speed where acceleration
         starts to degrade due to back-EMF.
@@ -2336,10 +2337,7 @@ class TMC4671:
 
         Uses :meth:`_get_per_phase_voltage_budget` for the per-axis voltage
         limit (FOC mode-aware + ``pidout_uq_ud_limits`` scaling) with
-        ``I_d = 0`` and ``I_q = 0``:
-
-        - **FOC3** (3-phase, SVPWM): per-axis budget = V_bus_scaled × √3 / 4
-        - **FOC2** (2-phase stepper): per-axis budget = V_bus_scaled / 2
+        ``I_d = 0`` and ``I_q = 0``.
 
         .. math::
 
@@ -3085,6 +3083,13 @@ class TMC4671:
                 lines.append(
                     "  Voltage-limited max velocity: N/A (insufficient data)"
                 )
+            for r in [0.1, 0.2, 0.3, 0.4, 0.5]:
+                lvp = self.get_limiting_velocity(target_accel=r*accel_rad)
+                accel_linp = r*accel_lin
+                if lvp is not None and lvp > 0.0:
+                    lines.append(
+                        f"  Voltage-limited max velocity ({accel_linp:.1f} mm/s²): {lvp:.1f} mm/s"
+                    )
 
             # Corner velocity — where back-EMF alone starts consuming the voltage budget
             cv = self.get_corner_velocity()
