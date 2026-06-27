@@ -1426,7 +1426,7 @@ class TMC4671:
         vml, vmh = self._sample_vm()
         vmr = abs(vmh - vml)
         logging.info("TMC 4671 %s VM samples low=%d high=%d", self.name, vml, vmh)
-        high = math.ceil(0.05*self.voltage_scale) + vmr//2 + vmh
+        high = math.ceil(0.05 * vmr) + vmr // 2 + vmh
         if high < 65536:
             self.fields.ADC_VM_LIMIT_HIGH.write(high)
             self.fields.ADC_VM_LIMIT_LOW.write(vmr//2 + vmh)
