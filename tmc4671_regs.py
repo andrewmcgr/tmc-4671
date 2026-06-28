@@ -696,7 +696,8 @@ def to_q4_12(val: float) -> int:
     """Convert a float to a Q4.12 fixed-point integer."""
     return round(val * 2**12) & 0xffff
 
-def from_q4_12(val):
+def from_q4_12(val: int) -> float:
+    """Convert a Q4.12 fixed-point integer to a float."""
     return val * 2**-12
 
 def format_q0_15(val):
