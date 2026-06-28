@@ -2792,6 +2792,13 @@ class TMC4671:
         ud_ext = ud_ext_raw if ud_ext_raw < 32768 else ud_ext_raw - 65536
         uq_ext = uq_ext_raw if uq_ext_raw < 32768 else uq_ext_raw - 65536
 
+        # Read brake chopper limits
+        reg_lim_val = self.fields.ADC_VM_LIMITS.read()
+        low_raw = reg_lim_val & 0xFFFF
+        high_raw = (reg_lim_val >> 16) & 0xFFFF
+        low_v = self._convert_vm(low_raw)
+        high_v = self._convert_vm(high_raw)
+
         # Convert to Volts
         # 32768 in raw units corresponds to full VM supply voltage
         vm_ref = max(vm, 0.001)  # Avoid division by zero
@@ -2807,7 +2814,8 @@ class TMC4671:
             f"  Supply Voltage (VM): {vm:.3f} V\n"
             f"  FOC Target:          Ud={ud:6d} ({vd:.3f} V) | Uq={uq:6d} ({vq:.3f} V)\n"
             f"  FOC Limited:         Ud={ud_lim:6d} ({vd_lim:.3f} V) | Uq={uq_lim:6d} ({vq_lim:.3f} V)\n"
-            f"  External Target:     Ud={ud_ext:6d} ({vd_ext:.3f} V) | Uq={uq_ext:6d} ({vq_ext:.3f} V)"
+            f"  External Target:     Ud={ud_ext:6d} ({vd_ext:.3f} V) | Uq={uq_ext:6d} ({vq_ext:.3f} V)\n"
+            f"  Brake Chopper:       Low={low_v:.3f} V | High={high_v:.3f} V"
         )
 
     cmd_TMC_DEBUG_CURRENT_help = "Measure and report FOC and phase currents"
