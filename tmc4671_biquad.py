@@ -26,7 +26,8 @@ BIQUAD_FILTER_TARGETS = {
 }
 
 # Filter design formula from 4671 datasheet
-def biquad_lpf_tmc(fs, f, D):
+def biquad_lpf_tmc(fs: float, f: float, D: float) -> tuple[float, float, float, float, float, float]:
+    """Design a TMC-specific biquad low-pass filter."""
     w0 = 2.0 * math.pi * f / fs
     b2 = b1 = 0.0
     b0 = 1.0
