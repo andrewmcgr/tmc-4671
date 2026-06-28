@@ -700,7 +700,8 @@ def from_q4_12(val: int) -> float:
     """Convert a Q4.12 fixed-point integer to a float."""
     return val * 2**-12
 
-def format_q0_15(val):
+def format_q0_15(val: int) -> str:
+    """Format a Q0.15 fixed-point value as a string."""
     return "%.7f" % (val * 2**-15)
 
 def from_q8_8(val):
