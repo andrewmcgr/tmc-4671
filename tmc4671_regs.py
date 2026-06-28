@@ -716,7 +716,8 @@ def to_q8_8(val: float) -> int:
     """Convert a float to a Q8.8 fixed-point integer."""
     return round(val * 2**8) & 0xffff
 
-def format_q3_29(val):
+def format_q3_29(val: int) -> str:
+    """Format a Q3.29 fixed-point value as a string."""
     return "%.9f" % (int.from_bytes(val.to_bytes(length=4,
                                                  byteorder='big',
                                                  signed=False),
