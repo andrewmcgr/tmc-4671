@@ -7,7 +7,7 @@
 # Copyright (C) 2018-2020  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-from typing import Optional
+from typing import Optional, Any, Callable
 import dataclasses
 import logging, collections
 import math
@@ -162,8 +162,8 @@ class FieldHelper:
         if field_name in Registers:
             return field_name
         return self.field_to_register.get(field_name, default)
-    def get_field(self, field_name, reg_value=None, reg_name=None):
-        # Returns value of the register field
+    def get_field(self, field_name: str, reg_value: Optional[int] = None, reg_name: Optional[str] = None) -> int:
+        """Returns the value of the register field."""
         if reg_name is None:
             reg_name = self.lookup_register(field_name)
         if reg_value is None:
@@ -176,8 +176,8 @@ class FieldHelper:
         if field_name in self.signed_fields and ((reg_value & mask)<<1) > mask:
             field_value -= (1 << field_value.bit_length())
         return field_value
-    def set_field(self, field_name, field_value, reg_value=None, reg_name=None):
-        # Returns register value with field bits filled with supplied value
+    def set_field(self, field_name: str, field_value: int, reg_value: Optional[int] = None, reg_name: Optional[str] = None) -> int:
+        """Returns register value with field bits filled with supplied value."""
         if reg_name is None:
             reg_name = self.lookup_register(field_name)
         if reg_value is None:
@@ -189,8 +189,8 @@ class FieldHelper:
         new_value = (reg_value & ~mask) | ((field_value << ffs(mask)) & mask)
         self.registers[reg_name] = new_value
         return new_value
-    def set_config_field(self, config, field_name, default, convert=lambda x: x):
-        # Allow a field to be set from the config file
+    def set_config_field(self, config: Any, field_name: str, default: Any, convert: Callable[[Any], Any] = lambda x: x) -> int:
+        """Allow a field to be set from the config file."""
         config_name = self.prefix + field_name
         reg_name = self.lookup_register(field_name)
         if reg_name == field_name:
@@ -209,8 +209,8 @@ class FieldHelper:
             val = config.getint(config_name, default, minval=0, maxval=maxval)
         self.field_setters[field_name] = convert
         return self.set_field(field_name, convert(val), reg_name=reg_name)
-    def pretty_format(self, reg_name, reg_value):
-        # Provide a string description of a register
+    def pretty_format(self, reg_name: str, reg_value: int) -> str:
+        """Provide a string description of a register."""
         reg_fields = self.all_fields.get(reg_name, {reg_name: 0xffffffff})
         reg_fields = sorted([(mask, name) for name, mask in reg_fields.items()])
         fields = []
@@ -220,8 +220,8 @@ class FieldHelper:
             if sval and sval != "0":
                 fields.append(" %s=%s" % (field_name.lower(), sval))
         return "%-11s %08x%s" % (reg_name + ":", reg_value, "".join(fields))
-    def get_reg_fields(self, reg_name, reg_value):
-        # Provide fields found in a register
+    def get_reg_fields(self, reg_name: str, reg_value: int) -> dict[str, int]:
+        """Provide fields found in a register."""
         reg_fields = self.all_fields.get(reg_name, {reg_name: 0})
         return {field_name: self.get_field(field_name, reg_value, reg_name)
                 for field_name, mask in reg_fields.items()}
@@ -240,7 +240,7 @@ class FieldDesc:
     shift: int        # ffs(mask) — precomputed
 
 
-def _build_field_descs(helper, name_to_reg):
+def _build_field_descs(helper: 'FieldHelper', name_to_reg: dict[str, tuple[int, Any]]) -> dict[str, Any]:
     """Build {name: FieldDesc | list[(name, FieldDesc)]} from FieldHelper + name_to_reg.
 
     List values mean the key is a multi-field register exposed via MultiFieldAccessor.
@@ -270,11 +270,11 @@ def _build_field_descs(helper, name_to_reg):
 class SingleFieldAccessor:
     __slots__ = ('_proxy', '_desc')
 
-    def __init__(self, proxy, desc):
+    def __init__(self, proxy: 'FieldProxy', desc: 'FieldDesc'):
         object.__setattr__(self, '_proxy', proxy)
         object.__setattr__(self, '_desc', desc)
 
-    def read(self):
+    def read(self) -> int:
         d = object.__getattribute__(self, '_desc')
         p = object.__getattribute__(self, '_proxy')
         raw = p._spi_read(d.reg, d.addr)
@@ -285,7 +285,7 @@ class SingleFieldAccessor:
                 val -= 1 << bits
         return val
 
-    def write(self, val, *, verify=False):
+    def write(self, val: int, *, verify: bool = False) -> None:
         d = object.__getattribute__(self, '_desc')
         p = object.__getattribute__(self, '_proxy')
         if d.mask == 0xffffffff:
@@ -301,18 +301,28 @@ class SingleFieldAccessor:
 class MultiFieldAccessor:
     __slots__ = ('_proxy', '_reg_name', '_descs')
 
-    def __init__(self, proxy, reg_name, descs):
+    def __init__(self, proxy: 'FieldProxy', reg_name: str, descs: list[tuple[str, 'FieldDesc']]):
         object.__setattr__(self, '_proxy', proxy)
         object.__setattr__(self, '_reg_name', reg_name)
         object.__setattr__(self, '_descs', descs)
 
-    def read(self):
+    def read(self) -> tuple[int, ...]:
+        """Read all fields in the multi-field register.
+
+        Returns a tuple of the current values for each field.
+        """
         descs = object.__getattribute__(self, '_descs')
         p = object.__getattribute__(self, '_proxy')
         raw = p._spi_read(descs[0][1].reg, descs[0][1].addr)
         return tuple((raw & d.mask) >> d.shift for _, d in descs)
 
-    def write(self, *values, verify=False):
+    def write(self, *values: Any, verify: bool = False) -> None:
+        """Write values to all fields in the multi-field register.
+
+        Args:
+            *values: The values to write to each field.
+            verify: Whether to verify the write.
+        """
         descs = object.__getattribute__(self, '_descs')
         reg_name = object.__getattribute__(self, '_reg_name')
         p = object.__getattribute__(self, '_proxy')
@@ -330,7 +340,13 @@ class MultiFieldAccessor:
 
 class FieldProxy:
 
-    def __init__(self, helper, mcu_tmc):
+    def __init__(self, helper: 'FieldHelper', mcu_tmc: 'MCU_TMC_SPI'):
+        """Initialize the FieldProxy.
+
+        Args:
+            helper: The FieldHelper used to look up fields.
+            mcu_tmc: The TMC SPI interface.
+        """
         object.__setattr__(self, '_helper', helper)
         object.__setattr__(self, '_mcu_tmc', mcu_tmc)
         object.__setattr__(self, '_shadow', {})
@@ -342,44 +358,56 @@ class FieldProxy:
         object.__setattr__(self, '_signed', helper.signed_fields)
 
     @property
-    def all_fields(self):
+    def all_fields(self) -> dict:
+        """Return all fields available in the driver."""
         return object.__getattribute__(self, '_helper').all_fields
 
     @property
-    def signed_fields(self):
+    def signed_fields(self) -> dict[str, int]:
+        """Return the set of signed fields."""
         return object.__getattribute__(self, '_helper').signed_fields
 
     @property
-    def registers(self):
+    def registers(self) -> dict:
+        """Return the available registers."""
         return object.__getattribute__(self, '_helper').registers
 
     @property
-    def field_to_register(self):
+    def field_to_register(self) -> dict:
+        """Return the mapping from fields to registers."""
         return object.__getattribute__(self, '_helper').field_to_register
 
     @property
-    def field_setters(self):
+    def field_setters(self) -> dict:
+        """Return the field setters (converters)."""
         return object.__getattribute__(self, '_helper').field_setters
 
-    def lookup_register(self, *a, **kw):
-        return object.__getattribute__(self, '_helper').lookup_register(*a, **kw)
+    def lookup_register(self, field_name: str, default: Optional[str] = None) -> Optional[str]:
+        """Lookup a register name from a field name."""
+        return object.__getattribute__(self, '_helper').lookup_register(field_name, default)
 
-    def get_field(self, *a, **kw):
-        return object.__getattribute__(self, '_helper').get_field(*a, **kw)
+    def get_field(self, field_name: str, reg_value: Optional[int] = None, reg_name: Optional[str] = None) -> int:
+        """Returns the value of the register field."""
+        return object.__getattribute__(self, '_helper').get_field(field_name, reg_value, reg_name)
 
-    def set_field(self, *a, **kw):
-        return object.__getattribute__(self, '_helper').set_field(*a, **kw)
+    def set_field(self, field_name: str, field_value: int, reg_value: Optional[int] = None, reg_name: Optional[str] = None) -> int:
+        """Returns register value with field bits filled with supplied value."""
+        return object.__getattribute__(self, '_helper').set_field(field_name, field_value, reg_value, reg_name)
 
-    def set_config_field(self, *a, **kw):
-        return object.__getattribute__(self, '_helper').set_config_field(*a, **kw)
+    def set_config_field(self, config: Any, field_name: str, default: Any, convert: Callable[[Any], Any] = lambda x: x) -> int:
+        """Allow a field to be set from the config file."""
+        return object.__getattribute__(self, '_helper').set_config_field(config, field_name, default, convert)
 
-    def pretty_format(self, *a, **kw):
-        return object.__getattribute__(self, '_helper').pretty_format(*a, **kw)
+    def pretty_format(self, reg_name: str, reg_value: int) -> str:
+        """Provide a string description of a register."""
+        return object.__getattribute__(self, '_helper').pretty_format(reg_name, reg_value)
 
-    def get_reg_fields(self, *a, **kw):
-        return object.__getattribute__(self, '_helper').get_reg_fields(*a, **kw)
+    def get_reg_fields(self, reg_name: str, reg_value: int) -> dict[str, int]:
+        """Provide fields found in a register."""
+        return object.__getattribute__(self, '_helper').get_reg_fields(reg_name, reg_value)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
+        """Handle attribute access for fields and registers."""
         descs = object.__getattribute__(self, '_descs')
         entry = descs.get(name)
         if entry is None:
@@ -388,23 +416,37 @@ class FieldProxy:
             return MultiFieldAccessor(self, name, entry)
         return SingleFieldAccessor(self, entry)
 
-    def _name_for_desc(self, desc):
+    def _name_for_desc(self, desc: 'FieldDesc') -> str:
+        """Get the name of a FieldDesc."""
         return object.__getattribute__(self, '_desc_to_name').get(id(desc), "")
 
-    def _shadow_get(self, reg, addr):
+    def _shadow_get(self, reg: int, addr: Any) -> Optional[int]:
+        """Get a value from the shadow register."""
         return object.__getattribute__(self, '_shadow').get((reg, addr))
 
-    def _spi_read(self, reg, addr):
+    def _spi_read(self, reg: int, addr: Any) -> int:
+        """Perform a raw SPI read."""
         return object.__getattribute__(self, '_mcu_tmc')._read_raw(reg, addr)
 
-    def _spi_write(self, reg, addr, val, *, verify=False):
+    def _spi_write(self, reg: int, addr: Any, val: int, *, verify: bool = False) -> None:
+        """Perform a raw SPI write and update shadow register."""
         object.__getattribute__(self, '_mcu_tmc')._write_raw(
             reg, addr, val, verify=verify)
         object.__getattribute__(self, '_shadow')[(reg, addr)] = val
 
 
 class PIDHelper:
-    def __init__(self, config, mcu_tmc, var, def_v, nvar, def_n):
+    def __init__(self, config: Any, mcu_tmc: 'MCU_TMC_SPI', var: str, def_v: float, nvar: str, def_n: float):
+        """Initialize the PIDHelper.
+
+        Args:
+            config: The Kalico config object.
+            mcu_tmc: The TMC SPI interface.
+            var: The name of the primary PID parameter (e.g., 'TORQUE').
+            def_v: The default value for the primary parameter.
+            nvar: The name of the secondary (integral) PID parameter.
+            def_n: The default value for the secondary parameter.
+        """
         self.mcu_tmc = mcu_tmc
         self.fields = FieldProxy(mcu_tmc.get_fields(), mcu_tmc)
         fvar = "PID_" + var
@@ -421,7 +463,15 @@ class PIDHelper:
         set_config_field(config, fvar, def_v, convert=self.to_f)
 
 class FFHelper:
-    def __init__(self, config, mcu_tmc, var, def_v):
+    def __init__(self, config: Any, mcu_tmc: 'MCU_TMC_SPI', var: str, def_v: float):
+        """Initialize the FFHelper.
+
+        Args:
+            config: The Kalico config object.
+            mcu_tmc: The TMC SPI interface.
+            var: The name of the feed-forward parameter (e.g., 'VELOCITY').
+            def_v: The default value for the parameter.
+        """
         self.mcu_tmc = mcu_tmc
         self.fields = FieldProxy(mcu_tmc.get_fields(), mcu_tmc)
         logging.info("TMC: %s", ','.join((str(i) for i in [var, def_v])))
@@ -439,7 +489,13 @@ class FFHelper:
 MAX_CURRENT = 10.000
 
 class CurrentHelper:
-    def __init__(self, config, mcu_tmc):
+    def __init__(self, config: Any, mcu_tmc: 'MCU_TMC_SPI'):
+        """Initialize the CurrentHelper.
+
+        Args:
+            config: The Kalico config object.
+            mcu_tmc: The TMC SPI interface.
+        """
         self.printer = config.get_printer()
         self.name = config.get_name().split()[-1]
         self.mcu_tmc = mcu_tmc
@@ -454,53 +510,74 @@ class CurrentHelper:
             self.run_current = config.getfloat('run_current',
                                                above=0., maxval=MAX_CURRENT)
         self.homing_current = config.getfloat('homing_current', above=0.,
-                                              maxval=MAX_CURRENT,
-                                              default=self.run_current)
+                                               maxval=MAX_CURRENT,
+                                               default=self.run_current)
         self.flux_current = config.getfloat('flux_current',
-                                              maxval=MAX_CURRENT,
-                                              default=0.)
+                                               maxval=MAX_CURRENT,
+                                               default=0.)
         self.current_scale = config.getfloat('current_scale_ma_lsb', 1.272,
-                                       above=0., maxval=10)
+                                        above=0., maxval=10)
         self.flux_limit = self._calc_flux_limit(self.run_current)
         self.fields.set_field("PID_TORQUE_FLUX_LIMITS", self.flux_limit)
         self.flux_limit = self._calc_flux_limit(self.flux_current)
         self.fields.set_field("PID_FLUX_OFFSET", self.flux_limit)
-    def _calc_flux_limit(self, current):
+    def _calc_flux_limit(self, current: float) -> int:
+        """Calculate the flux limit for a given current."""
         flux_limit = round(current * 1e3 / self.current_scale)
         return flux_limit
-    def convert_adc_current(self, adc):
+
+    def convert_adc_current(self, adc: float) -> float:
+        """Convert a raw ADC value to current in Amperes."""
         return adc * self.current_scale * 1e-3
-    def get_run_current(self):
+
+    def get_run_current(self) -> float:
+        """Get the configured run current."""
         return self.run_current
-    def get_homing_current(self):
+
+    def get_homing_current(self) -> float:
+        """Get the configured homing current."""
         return self.homing_current
-    def get_current(self):
+
+    def get_current(self) -> tuple[float, float, float, float, float]:
+        """Get the current readings: (control_current, max_current, iux, iv, iwy)."""
         c = self.convert_adc_current(self._read_field("PID_TORQUE_FLUX_LIMITS"))
         iux = self.convert_adc_current(self._read_field("ADC_IUX"))
         iv = self.convert_adc_current(self._read_field("ADC_IV"))
         iwy = self.convert_adc_current(self._read_field("ADC_IWY"))
         return c, MAX_CURRENT, iux, iv, iwy
-    def get_qd_current(self):
+
+    def get_qd_current(self) -> tuple[float, float]:
+        """Get the current readings: (iq, id)."""
         id = self.convert_adc_current(self._read_field("PID_FLUX_ACTUAL"))
         iq = self.convert_adc_current(self._read_field("PID_TORQUE_ACTUAL"))
         return iq, id
-    def set_current(self, run_current):
+
+    def set_current(self, run_current: float) -> float:
+        """Set the run current."""
         self.run_current = run_current
         self.flux_limit = self._calc_flux_limit(self.run_current)
         self._write_field("PID_TORQUE_FLUX_LIMITS", self.flux_limit)
         return self.flux_limit
-    def apply_current_limit(self, current):
+
+    def apply_current_limit(self, current: float) -> float:
+        """Apply a current limit to the driver."""
         flux_limit = self._calc_flux_limit(current)
         self._write_field("PID_TORQUE_FLUX_LIMITS", flux_limit)
         return flux_limit
-    def set_flux_current(self, current):
+
+    def set_flux_current(self, current: float) -> float:
+        """Set the flux current."""
         self.flux_current = current
         self.flux_limit = self._calc_flux_limit(self.flux_current)
         self._write_field("PID_FLUX_OFFSET", self.flux_limit)
         return self.flux_limit
-    def _read_field(self, field):
-        return getattr(self.fields, field).read()
-    def _write_field(self, field, val):
+
+    def _read_field(self, field: str) -> float:
+        """Read a field value from the FieldProxy."""
+        return float(getattr(self.fields, field).read())
+
+    def _write_field(self, field: str, val: float) -> None:
+        """Write a field value to the FieldProxy."""
         getattr(self.fields, field).write(val)
 
 
@@ -544,7 +621,14 @@ def StepHelper(config, mcu_tmc):
 
 
 class TMCErrorCheck:
-    def __init__(self, config, mcu_tmc, current_helper):
+    def __init__(self, config: Any, mcu_tmc: Any, current_helper: 'CurrentHelper'):
+        """Initialize the TMCErrorCheck monitor.
+
+        Args:
+            config: The Klipper configuration object.
+            mcu_tmc: The TMC SPI communication handler.
+            current_helper: The helper for managing and querying currents.
+        """
         self.printer = config.get_printer()
         name_parts = config.get_name().split()
         self.stepper_name = ' '.join(name_parts[1:])
@@ -594,12 +678,25 @@ class TMCErrorCheck:
             # ordering in the config file.
             obj_name = "tmc4671_agpi %s" % (self.stepper_name,)
             self.printer.add_object(obj_name, self)
-    def _make_mask(self, entries):
+    def _make_mask(self, entries: list[str]) -> int:
+        """Create a bitmask from a list of field names.
+
+        Args:
+            entries: List of field names to include in the mask.
+
+        Returns:
+            The computed bitmask.
+        """
         mask = 0
         for f in entries:
             mask = self.fields.set_field(f, 1, mask, "STATUS_FLAGS")
         return mask
-    def _query_status(self):
+    def _query_status(self) -> None:
+        """Query the TMC 4671 status flags.
+
+        Checks for warning and error flags. If an error is detected,
+        raises a command error.
+        """
         status = self.mcu_tmc.get_register("STATUS_FLAGS")
         # fmt = self.fields.pretty_format("STATUS_FLAGS", status)
         # logging.info("TMC 4671 '%s' raw %s", self.stepper_name, fmt)
@@ -613,7 +710,11 @@ class TMCErrorCheck:
             fmt = self.fields.pretty_format("STATUS_FLAGS", status)
             raise self.printer.command_error("TMC 4671 '%s' reports error: %s"
                                              % (self.stepper_name, fmt))
-    def _query_temperature(self, eventtime):
+    def _query_temperature(self, eventtime: float) -> None:
+        """Query the AGPI temperature sensor.
+
+        Updates self.adc_temp and self.last_temp if successful.
+        """
         if self.adc_temp_reg is None:
             return
         try:
@@ -625,7 +726,15 @@ class TMCErrorCheck:
                     self.temp_callback(eventtime, temp)
         except self.printer.command_error:
             self.adc_temp = None
-    def _do_periodic_check(self, eventtime):
+    def _do_periodic_check(self, eventtime: float) -> float:
+        """Perform periodic monitoring of status, temperature, and currents.
+
+        Args:
+            eventtime: The current time from the reactor.
+
+        Returns:
+            The time at which the next check should be scheduled.
+        """
         try:
             if self.is_enabled:
                 self._query_status()
@@ -642,22 +751,41 @@ class TMCErrorCheck:
             self.printer.invoke_shutdown(str(e))
             return self.printer.get_reactor().NEVER
         return eventtime + 1.
-    def stop_checks(self):
-        # Disable full status/current monitoring when motor is disabled.
-        # The timer itself keeps running so temperature is always polled.
+    def stop_checks(self) -> None:
+        """Disable full status and current monitoring.
+
+        The temperature query timer continues to run.
+        """
         self.is_enabled = False
-    def start_monitoring(self):
+    def start_monitoring(self) -> None:
+        """Start the periodic monitoring timer.
+
+        The timer will call `_do_periodic_check` once per second.
+        """
         if self.check_timer is not None:
             return
         reactor = self.printer.get_reactor()
         curtime = reactor.monotonic()
         self.check_timer = reactor.register_timer(self._do_periodic_check,
                                                   curtime + 1.)
-    def start_checks(self):
+    def start_checks(self) -> bool:
+        """Enable monitoring and start the timer.
+
+        Returns:
+            True if successful.
+        """
         self.is_enabled = True
         self.start_monitoring()
         return True
-    def _convert_temp(self, adc_raw):
+    def _convert_temp(self, adc_raw: int) -> Optional[float]:
+        """Convert raw ADC value to temperature.
+
+        Args:
+            adc_raw: Raw ADC reading.
+
+        Returns:
+            The temperature in Celsius, or None if the reading is invalid.
+        """
         # ADC u16: midscale 0x8000 = 0 V, full range ±2.5 V (single-ended,
         # INN tied to GNDA). adc_fraction = V_AGPI / 2.5 V.
         # Circuit: thermistor on high side, pullup on low side → flip fraction.
@@ -668,13 +796,36 @@ class TMCErrorCheck:
             return None
         adc_fraction = v / 32767.0
         return self._thermistor.calc_temp(1.0 - adc_fraction)
-    def setup_minmax(self, min_temp, max_temp):
+    def setup_minmax(self, min_temp: float, max_temp: float) -> None:
+        """Set the temperature min/max bounds for reporting.
+
+        Args:
+            min_temp: The minimum temperature.
+            max_temp: The maximum temperature.
+        """
         self.temp_minmax = (min_temp, max_temp)
-    def setup_callback(self, temperature_callback):
+    def setup_callback(self, temperature_callback: Callable[[float, float], None]) -> None:
+        """Set the callback for temperature updates.
+
+        The callback is called with (eventtime, temperature).
+        """
         self.temp_callback = temperature_callback
-    def get_report_time_delta(self):
+    def get_report_time_delta(self) -> float:
+        """Return the period at which status/temperature are queried.
+
+        Returns:
+            The period in seconds.
+        """
         return 1.
-    def get_status(self, eventtime=None):
+    def get_status(self, eventtime: Optional[float] = None) -> dict[str, Any]:
+        """Return the current monitoring report.
+
+        Args:
+            eventtime: The time at which the report is requested.
+
+        Returns:
+            A dictionary containing the current status and monitor data.
+        """
         res = {'drv_status': None, 'temperature': None}
         if self.is_enabled:
             res.update(self.monitor_data)
@@ -692,7 +843,11 @@ class TMCErrorCheck:
 
 
 class TMCVirtualPinHelper:
-    def __init__(self, config, mcu_tmc, current_helper):
+    def __init__(self, config: Any, mcu_tmc: Any, current_helper: 'CurrentHelper'):
+        """Initialize the TMC virtual pin helper.
+
+        This helper handles the virtual endstop for sensorless homing.
+        """
         self.printer = config.get_printer()
         self.mcu_tmc = mcu_tmc
         self.fields = FieldProxy(mcu_tmc.get_fields(), mcu_tmc)
@@ -705,7 +860,7 @@ class TMCVirtualPinHelper:
         # (position PID immediately saturates on large position error, velocity
         # I-term winds up before the motor reaches the hard stop), causing false
         # triggers.  PID_IQ_TARGET_LIMIT is the reliable indicator: we set
-        # PID_VELOCITY_LIMIT to 0x7FFFFFFF during the homing move so the
+        # PID_VELOCITY_LIMIT to 0x7fffffff during the homing move so the
         # velocity PID output can grow until it exceeds PID_TORQUE_FLUX_LIMITS
         # (homing current limit), firing within ~1 PWM cycle at true stall.
         self.status_mask_entries = config.getlist("homing_mask",
@@ -735,7 +890,7 @@ class TMCVirtualPinHelper:
                                             self.handle_homing_move_begin)
         self.printer.register_event_handler("homing:homing_move_end",
                                             self.handle_homing_move_end)
-    def setup_pin(self, pin_type, pin_params):
+    def setup_pin(self, pin_type: str, pin_params: dict) -> Any:
         ppins = self.printer.lookup_object('pins')
         if pin_type != 'endstop' or pin_params['pin'] != 'virtual_endstop':
             raise ppins.error("tmc virtual endstop only useful as endstop")
@@ -745,7 +900,13 @@ class TMCVirtualPinHelper:
             raise ppins.error("tmc virtual endstop requires diag pin config")
         self.mcu_endstop = ppins.setup_pin('endstop', self.diag_pin)
         return self.mcu_endstop
-    def handle_homing_move_begin(self, hmove):
+    def handle_homing_move_begin(self, hmove: Any) -> None:
+        """Handle the beginning of a homing move.
+
+        Sets the STATUS_MASK and logs the status. It also increases the 
+        PID_VELOCITY_LIMIT to allow for larger position errors during 
+        homing and applies the homing current.
+        """
         # Always observe: set STATUS_MASK and log flags for any homing move on this axis.
         # Homing current change is only applied when this is the active (virtual) endstop.
         self.mcu_tmc.set_register_once("STATUS_FLAGS", 0)
@@ -760,7 +921,12 @@ class TMCVirtualPinHelper:
         self._saved_velocity_limit = self.mcu_tmc.get_register("PID_VELOCITY_LIMIT")
         self.fields.PID_VELOCITY_LIMIT.write(0x7fffffff)
         self.current_helper.apply_current_limit(self.current_helper.get_homing_current())
-    def handle_homing_move_end(self, hmove):
+    def handle_homing_move_end(self, hmove: Any) -> None:
+        """Handle the end of a homing move.
+
+        Clears the STATUS_MASK and restores the PID_VELOCITY_LIMIT 
+        and the run current.
+        """
         status = self.mcu_tmc.get_register("STATUS_FLAGS")
         fmt = self.fields.pretty_format("STATUS_FLAGS", status)
         logging.info("TMC 4671 '%s' status at homing end %s", self.name, fmt)
