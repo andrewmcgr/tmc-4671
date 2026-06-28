@@ -82,7 +82,8 @@ def biquad_apf(fs: float, f: float, Q: float) -> tuple[float, float, float, floa
     return b0, b1, b2, a0, a1, a2
 
 # Z-transform and normalise a biquad filter, according to TMC
-def biquad_Z_tmc(T, b0, b1, b2, a0, a1, a2):
+def biquad_Z_tmc(T: float, b0: float, b1: float, b2: float, a0: float, a1: float, a2: float) -> tuple[float, float, float, float, float, float]:
+    """Z-transform and normalise a biquad filter, according to TMC."""
     den = (T**2 - 2*a1 + 4*a2)
     b2z = (b0*(T**2) + 2*b1*T + 4*b2) / den
     b1z = (2*b0*(T**2) - 8*b2) / den
