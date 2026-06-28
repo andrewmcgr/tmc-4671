@@ -2179,7 +2179,7 @@ class TMC4671:
             if self.velocity_bandwidth <= 0:
                 error_limit = None
             else:
-                bw_p = self.velocity_bandwidth / 4.0
+                bw_p = self.position_bandwidth
                 wp = 2.0 * math.pi * bw_p  # Position loop stiffness in rad/s
                 
                 # SCV = (Error * wp) / √2
@@ -3106,14 +3106,12 @@ class TMC4671:
         else:
             lines.append("  Kinematics data unavailable (motor not calibrated or current zero)")
 
-        # Calculate and report SCV limits from toolhead state
-        # def get_scv_limits(self, junction_deviation_mm: float = 0.001,
-        #           max_tracking_error_mm: float = 0.05) -> dict:
-        # 'torque': torque_limit,
-        # 'tracking_error': error_limit,
-        scv_limits = self.get_scv_limits(junction_deviation_mm=0.001, max_tracking_error_mm=0.05)
-        lines.append(f"  SCV torque limit: {scv-limits['torque']:.3f} mm/s")
-        lines.append(f"  SCV tracking error limit: {scv-limits['tracking_error']:.3f} mm/s (BW_v={self.velocity_bandwidth:.1f} Hz)")
+        # Calculate and report SCV limits
+        junction_deviation_mm=0.002
+        max_tracking_error_mm=0.025
+        scv_limits = self.get_scv_limits(junction_deviation_mm, max_tracking_error_mm)
+        lines.append(f"  SCV torque limit: {1000*scv_limits['torque']:.3f} mm/s (junction deviation {junction_deviation_mm:.3f} mm)")
+        lines.append(f"  SCV tracking error limit: {1000*scv_limits['tracking_error']:.3f} mm/s (BW_p={self.position_bandwidth:.1f} Hz, max tracking error {max_tracking_error_mm:.3f} mm)")
 
         gcmd.respond_info("\n".join(lines))
 
