@@ -692,7 +692,8 @@ def format_q4_12(val: int) -> str:
     """Format a Q4.12 fixed-point value as a string."""
     return "%.4f" % (val * 2**-12)
 
-def to_q4_12(val):
+def to_q4_12(val: float) -> int:
+    """Convert a float to a Q4.12 fixed-point integer."""
     return round(val * 2**12) & 0xffff
 
 def from_q4_12(val):
