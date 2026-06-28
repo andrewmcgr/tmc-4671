@@ -1,3 +1,5 @@
+from typing import Any
+
 # TMC4671 AGPI temperature sensor integration for Kalico/Klipper
 #
 # Copyright (C) 2024       Andrew McGregor <andrewmcgr@gmail.com>
@@ -11,7 +13,12 @@ KELVIN_TO_CELSIUS = -273.15
 
 
 class TMC4671TemperatureSensor:
-    def __init__(self, config):
+    def __init__(self, config: Any):
+        """Initialize the TMC4671 temperature sensor.
+
+        Registers the sensor with the heater manager and sets up
+        the minimum/maximum temperature bounds.
+        """
         self.printer = config.get_printer()
         self.name = config.get_name().split()[-1]
         self.min_temp = config.getfloat(
@@ -29,7 +36,12 @@ class TMC4671TemperatureSensor:
             "klippy:connect", self._handle_connect
         )
 
-    def _handle_connect(self):
+    def _handle_connect(self) -> None:
+        """Handle the Klippy connection event.
+
+        Locates the matching sensor object and sets up its 
+        min/max bounds and temperature callback.
+        """
         obj_name = "tmc4671_agpi %s" % (self.name,)
         sensor = self.printer.lookup_object(obj_name, None)
         if sensor is None:
@@ -40,19 +52,38 @@ class TMC4671TemperatureSensor:
         sensor.setup_minmax(self.min_temp, self.max_temp)
         sensor.setup_callback(self._temperature_callback)
 
-    def _temperature_callback(self, read_time, temp):
+    def _temperature_callback(self, read_time: float, temp: float) -> None:
+        """Handle temperature readings from the ADC.
+
+        Updates the measured minimum and maximum temperatures.
+        """
         self.last_temp = temp
         if temp:
             self.measured_min = min(self.measured_min, temp)
             self.measured_max = max(self.measured_max, temp)
 
-    def get_temp(self, eventtime):
+    def get_temp(self, eventtime: float) -> tuple[float, float]:
+        """Return the current temperature for the sensor event.
+
+        Returns:
+            A tuple of (temperature, error_offset).
+        """
         return self.last_temp, 0.0
 
-    def stats(self, eventtime):
+    def stats(self, eventtime: float) -> tuple[bool, str]:
+        """Return status statistics for the sensor.
+
+        Returns:
+            A tuple of (is_valid, status_string).
+        """
         return False, "%s: temp=%.1f" % (self.name, self.last_temp)
 
-    def get_status(self, eventtime):
+    def get_status(self, eventtime: float) -> dict[str, float]:
+        """Return the current sensor status.
+
+        Returns:
+            A dictionary containing current, min, and max temperatures.
+        """
         return {
             "temperature": round(self.last_temp, 2),
             "measured_min_temp": round(self.measured_min, 2),
@@ -60,5 +91,13 @@ class TMC4671TemperatureSensor:
         }
 
 
-def load_config_prefix(config):
+def load_config_prefix(config: Any) -> TMC4671TemperatureSensor:
+    """Helper to load the temperature sensor profile from a config section.
+
+    Args:
+        config: The Klipper/Kalico configuration object.
+
+    Returns:
+        A new TMC4671TemperatureSensor instance.
+    """
     return TMC4671TemperatureSensor(config)

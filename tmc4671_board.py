@@ -30,6 +30,7 @@
 #   board_profile: OpenFFBoard
 #   ...
 
+from typing import Any
 from .tmc4671_profiles import FocProfile
 
 
@@ -75,5 +76,13 @@ class FocBoard(FocProfile):
     ]
 
 
-def load_config_prefix(config):
+def load_config_prefix(config: Any) -> 'FocBoard':
+    """Helper to load a FocBoard profile from a config section.
+
+    Args:
+        config: The Klipper/Kalico configuration object.
+
+    Returns:
+        A new FocBoard instance.
+    """
     return FocBoard(config)

@@ -26,7 +26,8 @@ BIQUAD_FILTER_TARGETS = {
 }
 
 # Filter design formula from 4671 datasheet
-def biquad_lpf_tmc(fs, f, D):
+def biquad_lpf_tmc(fs: float, f: float, D: float) -> tuple[float, float, float, float, float, float]:
+    """Design a TMC-specific biquad low-pass filter."""
     w0 = 2.0 * math.pi * f / fs
     b2 = b1 = 0.0
     b0 = 1.0
@@ -38,7 +39,8 @@ def biquad_lpf_tmc(fs, f, D):
 # Filter design formulae from https://www.w3.org/TR/audio-eq-cookbook/
 
 # Design a biquad low pass filter in canonical form
-def biquad_lpf(fs, f, Q):
+def biquad_lpf(fs: float, f: float, Q: float) -> tuple[float, float, float, float, float, float]:
+    """Design a biquad low pass filter in canonical form."""
     w0 = 2.0 * math.pi * f / fs
     cw0 = math.cos(w0)
     sw0 = math.sin(w0)
@@ -51,7 +53,8 @@ def biquad_lpf(fs, f, Q):
     return b0, b1, b2, a0, a1, a2
 
 # Design a biquad notch filter in canonical form
-def biquad_notch(fs, f, Q):
+def biquad_notch(fs: float, f: float, Q: float) -> tuple[float, float, float, float, float, float]:
+    """Design a biquad notch filter in canonical form."""
     w0 = 2.0 * math.pi * f / fs
     cw0 = math.cos(w0)
     sw0 = math.sin(w0)
@@ -64,7 +67,8 @@ def biquad_notch(fs, f, Q):
     return b0, b1, b2, a0, a1, a2
 
 # Design a biquad allpass filter in canonical form
-def biquad_apf(fs, f, Q):
+def biquad_apf(fs: float, f: float, Q: float) -> tuple[float, float, float, float, float, float]:
+    """Design a biquad allpass filter in canonical form."""
     w0 = 2.0 * math.pi * f / fs
     cw0 = math.cos(w0)
     sw0 = math.sin(w0)
@@ -78,7 +82,8 @@ def biquad_apf(fs, f, Q):
     return b0, b1, b2, a0, a1, a2
 
 # Z-transform and normalise a biquad filter, according to TMC
-def biquad_Z_tmc(T, b0, b1, b2, a0, a1, a2):
+def biquad_Z_tmc(T: float, b0: float, b1: float, b2: float, a0: float, a1: float, a2: float) -> tuple[float, float, float, float, float, float]:
+    """Z-transform and normalise a biquad filter, according to TMC."""
     den = (T**2 - 2*a1 + 4*a2)
     b2z = (b0*(T**2) + 2*b1*T + 4*b2) / den
     b1z = (2*b0*(T**2) - 8*b2) / den
@@ -95,7 +100,8 @@ def biquad_Z_tmc(T, b0, b1, b2, a0, a1, a2):
     return a1, a2, 0, b0, b1, b2
 
 # Normalise a biquad filter, according to TMC
-def biquad_tmc(b0, b1, b2, a0, a1, a2):
+def biquad_tmc(b0: float, b1: float, b2: float, a0: float, a1: float, a2: float) -> tuple[int, int, int, int, int, int]:
+    """Normalise a biquad filter, according to TMC."""
     e29 = 2**29
     b0 = round(b0/(a0) * e29)
     b1 = round(b1/(a0) * e29)

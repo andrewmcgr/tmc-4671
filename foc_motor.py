@@ -21,6 +21,7 @@
 #   motor_profile: nema17_1
 #   ...
 
+from typing import Any
 from .tmc4671_profiles import FocProfile
 
 
@@ -75,7 +76,14 @@ class FocMotor(FocProfile):
         ('phi_e_selection',     'int'),    # 3 = ABN, 5 = Hall
     ]
 
-    def _validate(self, config):
+    def _validate(self, config: Any) -> None:
+        """Validate motor profile consistency.
+
+        Ensures that 'holding_current' and 'holding_torque' are provided together,
+        and that 'motor_kt' is not also specified. If the holding pair is 
+        provided, 'motor_kt' is derived and the raw pair is removed from 
+        the profile values.
+        """
         hc = self._values.get('holding_current')
         ht = self._values.get('holding_torque')
         # Both or neither must be given.
@@ -96,5 +104,13 @@ class FocMotor(FocProfile):
             del self._values['holding_torque']
 
 
-def load_config_prefix(config):
+def load_config_prefix(config: Any) -> FocMotor:
+    """Helper to load a FocMotor profile from a config section.
+
+    Args:
+        config: The Klipper/Kalico configuration object.
+
+    Returns:
+        A new FocMotor instance.
+    """
     return FocMotor(config)

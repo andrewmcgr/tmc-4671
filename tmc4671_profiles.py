@@ -1,3 +1,5 @@
+from typing import Any
+
 # TMC4671 motor and board profile infrastructure
 #
 # Copyright (C) 2024  Andrew McGregor <andrewmcgr@gmail.com>
@@ -34,7 +36,7 @@ class ConfigWithDefaults:
       used by the TMC6100 FieldHelper.
     """
 
-    def __init__(self, config, *profile_dicts):
+    def __init__(self, config: Any, *profile_dicts: dict):
         self._config = config
         # Earlier dicts (motor) take priority; merge in reverse so higher
         # priority wins.
@@ -45,7 +47,7 @@ class ConfigWithDefaults:
     # ------------------------------------------------------------------
     # Internal helpers
 
-    def _lookup(self, name):
+    def _lookup(self, name: str) -> Any:
         name_lower = name.lower()
         if name_lower in self._defaults:
             return self._defaults[name_lower]
@@ -56,7 +58,7 @@ class ConfigWithDefaults:
                     return self._defaults[stripped]
         return _MISSING
 
-    def _inject(self, name, args, kwargs):
+    def _inject(self, name: str, args: tuple, kwargs: dict) -> tuple[tuple, dict]:
         """Replace the caller's default with the profile value if present."""
         val = self._lookup(name)
         if val is _MISSING:
@@ -71,23 +73,23 @@ class ConfigWithDefaults:
     # ------------------------------------------------------------------
     # Intercepted config getters
 
-    def getfloat(self, name, *args, **kwargs):
+    def getfloat(self, name: str, *args, **kwargs) -> float:
         args, kwargs = self._inject(name, args, kwargs)
         return self._config.getfloat(name, *args, **kwargs)
 
-    def getint(self, name, *args, **kwargs):
+    def getint(self, name: str, *args, **kwargs) -> int:
         args, kwargs = self._inject(name, args, kwargs)
         return self._config.getint(name, *args, **kwargs)
 
-    def getboolean(self, name, *args, **kwargs):
+    def getboolean(self, name: str, *args, **kwargs) -> bool:
         args, kwargs = self._inject(name, args, kwargs)
         return self._config.getboolean(name, *args, **kwargs)
 
-    def getchoice(self, name, *args, **kwargs):
+    def getchoice(self, name: str, *args, **kwargs) -> str:
         args, kwargs = self._inject(name, args, kwargs)
         return self._config.getchoice(name, *args, **kwargs)
 
-    def get(self, name, *args, **kwargs):
+    def get(self, name: str, *args, **kwargs) -> Any:
         args, kwargs = self._inject(name, args, kwargs)
         return self._config.get(name, *args, **kwargs)
 
@@ -97,7 +99,7 @@ class ConfigWithDefaults:
     # getlists(), getsection(), get_name(), get_printer(), error(), and
     # anything else Klipper may call on the config object.
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self._config, name)
 
 
@@ -115,7 +117,7 @@ class FocProfile:
 
     ALLOWED = []  # subclasses define this
 
-    def __init__(self, config):
+    def __init__(self, config: Any):
         self._name = config.get_name()
         self._config = config
         self._values = {}
@@ -125,7 +127,7 @@ class FocProfile:
                 self._values[key] = val
         self._validate(config)
 
-    def _read_one(self, config, key, type_str):
+    def _read_one(self, config: Any, key: str, type_str: str) -> Any:
         if type_str == 'float':
             val = config.getfloat(key, None)
         elif type_str == 'int':
@@ -138,10 +140,10 @@ class FocProfile:
             return _MISSING
         return _MISSING if val is None else val
 
-    def _validate(self, config):
+    def _validate(self, config: Any) -> None:
         pass  # override in subclasses
 
-    def get_values(self):
+    def get_values(self) -> dict:
         """Return a copy of the resolved profile dict."""
         return dict(self._values)
 

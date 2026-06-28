@@ -681,47 +681,59 @@ SignedFields = {"ADC_I1_SCALE", "ADC_I0_SCALE", "AENC_0_SCALE", "AENC_1_SCALE",
                 "INTERIM_SINGLE_PIN_IF_POSITION_TARGET",
                 }
 
-def format_phi(val):
+def format_phi(val: float) -> str:
+    """Format a raw phi value as a string in degrees."""
     phi = (val * 360.0 / 65536.0)
     if phi < 0.0:
         phi += 360
     return "%.3f" % (phi)
 
-def format_q4_12(val):
+def format_q4_12(val: int) -> str:
+    """Format a Q4.12 fixed-point value as a string."""
     return "%.4f" % (val * 2**-12)
 
-def to_q4_12(val):
+def to_q4_12(val: float) -> int:
+    """Convert a float to a Q4.12 fixed-point integer."""
     return round(val * 2**12) & 0xffff
 
-def from_q4_12(val):
+def from_q4_12(val: int) -> float:
+    """Convert a Q4.12 fixed-point integer to a float."""
     return val * 2**-12
 
-def format_q0_15(val):
+def format_q0_15(val: int) -> str:
+    """Format a Q0.15 fixed-point value as a string."""
     return "%.7f" % (val * 2**-15)
 
-def from_q8_8(val):
+def from_q8_8(val: int) -> float:
+    """Convert a Q8.8 fixed-point integer to a float."""
     return val * 2**-8
 
-def format_q8_8(val):
+def format_q8_8(val: int) -> str:
+    """Format a Q8.8 fixed-point value as a string."""
     return "%.3f" % (from_q8_8(val))
 
-def to_q8_8(val):
+def to_q8_8(val: float) -> int:
+    """Convert a float to a Q8.8 fixed-point integer."""
     return round(val * 2**8) & 0xffff
 
-def format_q3_29(val):
+def format_q3_29(val: int) -> str:
+    """Format a Q3.29 fixed-point value as a string."""
     return "%.9f" % (int.from_bytes(val.to_bytes(length=4,
                                                  byteorder='big',
                                                  signed=False),
                                     byteorder='big',
                                     signed=True) * 2**-29)
 
-def to_q2_30(val):
+def to_q2_30(val: float) -> int:
+    """Convert a float to a Q2.30 fixed-point integer."""
     return round(val * 2**30) & 0xffffffff
 
-def from_q2_30(val):
+def from_q2_30(val: int) -> float:
+    """Convert a Q2.30 fixed-point integer to a float."""
     return val * 2**-30
 
-def format_q2_30(val):
+def format_q2_30(val: int) -> str:
+    """Format a Q2.30 fixed-point value as a string."""
     return "%.9f" % (val * 2**-30)
 
 FieldFormatters = {
