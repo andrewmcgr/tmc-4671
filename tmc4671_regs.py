@@ -704,7 +704,8 @@ def format_q0_15(val: int) -> str:
     """Format a Q0.15 fixed-point value as a string."""
     return "%.7f" % (val * 2**-15)
 
-def from_q8_8(val):
+def from_q8_8(val: int) -> float:
+    """Convert a Q8.8 fixed-point integer to a float."""
     return val * 2**-8
 
 def format_q8_8(val):
