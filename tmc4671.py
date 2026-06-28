@@ -2793,9 +2793,8 @@ class TMC4671:
         uq_ext = uq_ext_raw if uq_ext_raw < 32768 else uq_ext_raw - 65536
 
         # Read brake chopper limits
-        reg_lim_val = self.fields.ADC_VM_LIMITS.read()
-        low_raw = reg_lim_val & 0xFFFF
-        high_raw = (reg_lim_val >> 16) & 0xFFFF
+        low_raw = self.fields.ADC_VM_LIMIT_LOW.read()
+        high_raw = self.fields.ADC_VM_LIMIT_HIGH.read()
         low_v = self._convert_vm(low_raw)
         high_v = self._convert_vm(high_raw)
 
