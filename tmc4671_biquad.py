@@ -39,7 +39,8 @@ def biquad_lpf_tmc(fs: float, f: float, D: float) -> tuple[float, float, float, 
 # Filter design formulae from https://www.w3.org/TR/audio-eq-cookbook/
 
 # Design a biquad low pass filter in canonical form
-def biquad_lpf(fs, f, Q):
+def biquad_lpf(fs: float, f: float, Q: float) -> tuple[float, float, float, float, float, float]:
+    """Design a biquad low pass filter in canonical form."""
     w0 = 2.0 * math.pi * f / fs
     cw0 = math.cos(w0)
     sw0 = math.sin(w0)
