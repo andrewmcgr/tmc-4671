@@ -732,7 +732,8 @@ def from_q2_30(val: int) -> float:
     """Convert a Q2.30 fixed-point integer to a float."""
     return val * 2**-30
 
-def format_q2_30(val):
+def format_q2_30(val: int) -> str:
+    """Format a Q2.30 fixed-point value as a string."""
     return "%.9f" % (val * 2**-30)
 
 FieldFormatters = {
