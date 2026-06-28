@@ -22,10 +22,16 @@ tmc-4671/
 
 ## WHERE TO LOOK
 - **Chip Datasheet**: [TMC 4671 LA Datasheet version 2.08](datasheet/TMC4671-LA_datasheet_rev2.08.noimages.md).
-- **Register Map**: Located in [tmc4671_regs.py](tmc4671_regs.py). This file defines register addresses, sub-registers.
+- **Register Map**: Located in [tmc4671_regs.py](tmc4671_regs.py). Register addresses, sub-registers.
 - **Biquad filter design**: Located in [tmc4671_biquad.py](tmc4671_biquad.py). Contains `BiquadFilter`, filter type/target constants, and all `biquad_*` design/normalisation functions.
 - **Everything else**: Implemented in [tmc4671.py](tmc4671.py).
 
+## REGISTER SETTING API
+
+- `self.fields.FIELD.write(val)` (DEFAULT): Bitfield update (Read-Modify-Write).
+- `self.mcu_tmc.set_register(reg, val)`: Full register write (efficient/atomic).
+- `self.fields.set_field(field, val)`: Shadow register update (software only).
+-
 ## CONVENTIONS & CRITICAL INSTRUCTIONS
 - **Datasheet Revision**: The correct version of the TMC 4671 datasheet to use is **version 2.08**. Do not use older or newer versions unless explicitly instructed, as register addresses or features can vary.
 - **Firmware Context**: This repository is a plugin for the **Kalico** 3d printer firmware (and is structured to integrate with Kalico/Klipper).
