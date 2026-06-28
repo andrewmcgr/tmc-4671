@@ -125,7 +125,8 @@ DumpGroups = {
 # S-IMC PI controller design, "Improved Method"
 # See https://folk.ntnu.no/skoge/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf
 # and http://npcw17.imm.dtu.dk/Proceedings/Session%207%20Control%20Theory/The%20improved%20SIMC%20method%20for%20PI%20controller%20tuning.pdf
-def simc(k, theta, tau1, tauc):
+def simc(k: float, theta: float, tau1: float, tauc: float) -> tuple[float, float]:
+    """S-IMC PI controller design, 'Improved Method'."""
     Kc = (1.0/k) * ((tau1 + theta / 3.0) / (tauc + theta))
     taui = min((tau1 + theta / 3.0), 4*(tauc + theta))
     return Kc, taui
