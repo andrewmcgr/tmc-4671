@@ -724,7 +724,8 @@ def format_q3_29(val: int) -> str:
                                     byteorder='big',
                                     signed=True) * 2**-29)
 
-def to_q2_30(val):
+def to_q2_30(val: float) -> int:
+    """Convert a float to a Q2.30 fixed-point integer."""
     return round(val * 2**30) & 0xffffffff
 
 def from_q2_30(val):
