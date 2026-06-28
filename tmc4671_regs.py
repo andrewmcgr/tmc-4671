@@ -688,7 +688,8 @@ def format_phi(val: float) -> str:
         phi += 360
     return "%.3f" % (phi)
 
-def format_q4_12(val):
+def format_q4_12(val: int) -> str:
+    """Format a Q4.12 fixed-point value as a string."""
     return "%.4f" % (val * 2**-12)
 
 def to_q4_12(val):
