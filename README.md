@@ -406,7 +406,7 @@ DUMP_TMC6100 STEPPER=stepper_x [GROUP=<name>|REGISTER=<name>|FIELD=<name>]
 
 ### TMC_DEBUG_VOLTAGE
 
-Report the motor supply voltage (VM) and the FOC d/q axis voltages in both raw counts and volts.
+Report the motor supply voltage (VM), the FOC d/q axis voltages, and the brake chopper voltage thresholds in both raw counts and volts.
 
 ```
 TMC_DEBUG_VOLTAGE STEPPER=stepper_x
