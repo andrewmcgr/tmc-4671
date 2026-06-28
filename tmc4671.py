@@ -138,7 +138,8 @@ def simc(k: float, theta: float, tau1: float, tauc: float) -> tuple[float, float
 
 
 # Return the position of the first bit set in a mask
-def ffs(mask):
+def ffs(mask: int) -> int:
+    """Return the position of the first bit set in a mask."""
     return (mask & -mask).bit_length() - 1
 
 class FieldHelper:
