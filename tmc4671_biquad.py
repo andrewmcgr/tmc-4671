@@ -67,7 +67,8 @@ def biquad_notch(fs: float, f: float, Q: float) -> tuple[float, float, float, fl
     return b0, b1, b2, a0, a1, a2
 
 # Design a biquad allpass filter in canonical form
-def biquad_apf(fs, f, Q):
+def biquad_apf(fs: float, f: float, Q: float) -> tuple[float, float, float, float, float, float]:
+    """Design a biquad allpass filter in canonical form."""
     w0 = 2.0 * math.pi * f / fs
     cw0 = math.cos(w0)
     sw0 = math.sin(w0)
