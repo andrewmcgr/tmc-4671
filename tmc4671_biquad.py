@@ -100,7 +100,8 @@ def biquad_Z_tmc(T: float, b0: float, b1: float, b2: float, a0: float, a1: float
     return a1, a2, 0, b0, b1, b2
 
 # Normalise a biquad filter, according to TMC
-def biquad_tmc(b0, b1, b2, a0, a1, a2):
+def biquad_tmc(b0: float, b1: float, b2: float, a0: float, a1: float, a2: float) -> tuple[int, int, int, int, int, int]:
+    """Normalise a biquad filter, according to TMC."""
     e29 = 2**29
     b0 = round(b0/(a0) * e29)
     b1 = round(b1/(a0) * e29)
