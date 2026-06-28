@@ -728,7 +728,8 @@ def to_q2_30(val: float) -> int:
     """Convert a float to a Q2.30 fixed-point integer."""
     return round(val * 2**30) & 0xffffffff
 
-def from_q2_30(val):
+def from_q2_30(val: int) -> float:
+    """Convert a Q2.30 fixed-point integer to a float."""
     return val * 2**-30
 
 def format_q2_30(val):
