@@ -2346,7 +2346,7 @@ class TMC4671:
             # --- 2. Tracking Error Limit (Quality Ceiling) ---
             # Assuming position loop bandwidth is ~1/4 of velocity bandwidth 
             # (standard cascaded tuning stability rule of thumb).
-            if self.velocity_bandwidth <= 0:
+            if self.position_bandwidth <= 0:
                 error_limit = None
             else:
                 bw_p = self.position_bandwidth
