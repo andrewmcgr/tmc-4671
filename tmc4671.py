@@ -143,8 +143,9 @@ def ffs(mask: int) -> int:
     return (mask & -mask).bit_length() - 1
 
 class FieldHelper:
-    def __init__(self, all_fields, signed_fields=[], float_fields=[], field_formatters={}, field_setters={},
-                 registers=None, prefix="driver_"):
+    def __init__(self, all_fields: dict, signed_fields: list[str] = [], float_fields: list[str] = [], field_formatters: dict = {}, field_setters: dict = {},
+                 registers: dict = None, prefix: str = "driver_"):
+        """Initialize the FieldHelper with register and field information."""
         self.all_fields = all_fields
         self.signed_fields = {sf: 1 for sf in signed_fields}
         self.float_fields = {ff: 1 for ff in float_fields}
@@ -156,7 +157,8 @@ class FieldHelper:
         self.field_to_register = { f: r for r, fields in self.all_fields.items()
                                    for f in fields }
         self.prefix = prefix
-    def lookup_register(self, field_name, default=None):
+    def lookup_register(self, field_name: str, default: Optional[str] = None) -> Optional[str]:
+        """Lookup a register name from a field name."""
         if field_name in Registers:
             return field_name
         return self.field_to_register.get(field_name, default)
