@@ -681,7 +681,8 @@ SignedFields = {"ADC_I1_SCALE", "ADC_I0_SCALE", "AENC_0_SCALE", "AENC_1_SCALE",
                 "INTERIM_SINGLE_PIN_IF_POSITION_TARGET",
                 }
 
-def format_phi(val):
+def format_phi(val: float) -> str:
+    """Format a raw phi value as a string in degrees."""
     phi = (val * 360.0 / 65536.0)
     if phi < 0.0:
         phi += 360
