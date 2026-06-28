@@ -2136,65 +2136,60 @@ class TMC4671:
             return None
         return accel_rad * rot_dist / (2.0 * math.pi)
 
-    def get_scv_limits(self, entry_speed: float = 0.0,
-                       junction_deviation: float = 0.0) -> dict:
-        """Return Square Corner Velocity limits (kinematic and bandwidth-aware).
+    def get_scv_limits(self, junction_deviation_mm: float = 0.001,
+                           max_tracking_error_mm: float = 0.05) -> dict:
+            """Return Square Corner Velocity limits (Torque and Error boundaries).
 
-        Two limits are returned:
+            Two limits are returned:
 
-        * **kinematic** — the SCV ceiling imposed by ``junction_deviation``
-          (the same value Kalico's toolhead uses to compute virtual radius at
-          corners).  If ``junction_deviation`` is zero or not provided, returns
-          ``None`` for this key.
+            * **torque** — the absolute SCV physical ceiling before the motor
+              saturates its q-axis current (stalls/clips). Calculated using available
+              torque, system inertia, and a standard kinematic junction deviation.
 
-        * **bandwidth** — the SCV ceiling imposed by the velocity PI loop's
-          ability to track cornering force.  Based on the time constant
-          :math:`\\tau = 1/(2\\pi·BW_v)` and available torque.
+            * **tracking_error** — the SCV quality ceiling. The maximum cornering 
+              speed before the closed-loop following error exceeds the specified 
+              tolerance (e.g., 0.05mm), causing visible print artifacts.
 
-        Both limits are in m/s (linear) for a corner at *entry_speed*.
+            Both limits are in m/s (linear).
 
-        :param entry_speed: target speed through the corner (m/s).
-        :param junction_deviation: virtual radius deviation; uses toolhead's
-            current value if zero.
-        :returns: dict with keys ``kinematic`` and ``bandwidth`` (both in m/s).
-        """
-        # --- Kinematic limit ---
-        if junction_deviation <= 0 or self.max_accel_to_decel <= 0:
-            kinematic = None
-        else:
-            # SCV² = jd × accel / (√2 − 1)
-            scv_sq = junction_deviation * self.max_accel_to_decel / (
-                math.sqrt(2.0) - 1.0)
-            kinematic = math.sqrt(max(scv_sq, 0.0))
-
-        # --- Bandwidth limit ---
-        if self.velocity_bandwidth <= 0 or self.jmotor + self.jload <= 0:
-            bandwidth = None
-        else:
-            tau_v = 1.0 / (2.0 * math.pi * self.velocity_bandwidth)
+            :param junction_deviation_mm: Kinematic tolerance (default 1 micron).
+            :param max_tracking_error_mm: Acceptable physical deviation (default 50 microns).
+            :returns: dict with keys ``torque`` and ``tracking_error`` (in m/s).
+            """
+            # Calculate maximum available linear acceleration
             torque = self.get_available_torque()
-            if torque <= 0:
-                bandwidth = None
+            if torque <= 0 or (self.jmotor + self.jload) <= 0:
+                return {'torque': None, 'tracking_error': None}
+
+            accel_rad = torque / (self.jmotor + self.jload)
+            rot_dist = self._get_rotation_distance_mm()
+            pitch_m = rot_dist / 1000.0 if rot_dist > 0 else 0.0
+            
+            accel_linear = accel_rad * pitch_m / (2.0 * math.pi) if pitch_m > 0 else accel_rad
+
+            # --- 1. Torque Limit (Physical Ceiling) ---
+            # SCV² = d × a_max / (√2 − 1)
+            jd_m = junction_deviation_mm / 1000.0
+            scv_sq = jd_m * accel_linear / (math.sqrt(2.0) - 1.0)
+            torque_limit = math.sqrt(max(scv_sq, 0.0))
+
+            # --- 2. Tracking Error Limit (Quality Ceiling) ---
+            # Assuming position loop bandwidth is ~1/4 of velocity bandwidth 
+            # (standard cascaded tuning stability rule of thumb).
+            if self.velocity_bandwidth <= 0:
+                error_limit = None
             else:
-                accel_rad = torque / (self.jmotor + self.jload)
+                bw_p = self.velocity_bandwidth / 4.0
+                wp = 2.0 * math.pi * bw_p  # Position loop stiffness in rad/s
+                
+                # SCV = (Error * wp) / √2
+                error_m = max_tracking_error_mm / 1000.0
+                error_limit = (error_m * wp) / math.sqrt(2.0)
 
-                # Effective pitch for linear conversion
-                rot_dist = self._get_rotation_distance_mm()
-                pitch_m = rot_dist / (1000.0) if rot_dist > 0 else 0.0
-
-                accel_linear = accel_rad * pitch_m / (2.0 * math.pi) \
-                    if pitch_m > 0 else accel_rad
-
-                # SCV_bandwidth ≈ entry_speed × (1 − e^(−Δt/τ_v))
-                # Δt is the time spent traversing the corner arc
-                scv_bw = entry_speed * (1.0 - math.exp(
-                    -min(entry_speed, 2.0) / (accel_linear * tau_v + 1e-9)))
-                bandwidth = max(scv_bw, 0.0)
-
-        return {
-            'kinematic': kinematic,
-            'bandwidth': bandwidth,
-        }
+            return {
+                'torque': torque_limit,
+                'tracking_error': error_limit,
+            }
 
     def _get_rotation_distance_mm(self) -> float:
         """Return effective rotation distance in mm (with gear ratio applied).
@@ -3112,39 +3107,13 @@ class TMC4671:
             lines.append("  Kinematics data unavailable (motor not calibrated or current zero)")
 
         # Calculate and report SCV limits from toolhead state
-        try:
-            th = self.printer.lookup_object('toolhead')
-            jd = getattr(th, 'junction_deviation', 0.0)
-            scv_cfg = getattr(th, 'square_corner_velocity', 5.0)
-
-            if hasattr(self, 'max_accel_to_decel') and self.max_accel_to_decel > 0 and jd > 0:
-                # Kinematic limit from junction deviation: SCV² = jd × accel / (√2 − 1)
-                scv_kin_lim = math.sqrt(jd * self.max_accel_to_decel / (math.sqrt(2.0) - 1.0))
-                lines.append(f"  SCV kinematic limit: {scv_kin_lim:.3f} mm/s (from jd={jd:.3f})")
-
-            if self.velocity_bandwidth > 0 and torq > 0:
-                tau_v = 1.0 / (2.0 * math.pi * self.velocity_bandwidth)
-
-                # Get effective pitch for linear conversion (de-duplicated via helper)
-                rot_dist = self._get_rotation_distance_mm()
-                pitch_m = rot_dist / (1000.0) if rot_dist > 0 else 0.0
-
-                if pitch_m > 0:
-                    accel_lin_scv = torq / (self.jmotor + self.jload) * pitch_m / (2.0 * math.pi)
-                else:
-                    accel_lin_scv = torq / (self.jmotor + self.jload)
-
-                # Bandwidth-limited SCV: motor can only reach a fraction of config limit in the time available
-                # Using exponential response model: Δv = V_max × (1 − e^(−t/τ))
-                t_corner = 2.0 * scv_cfg / (accel_lin_scv + 1e-9)  # estimated cornering time
-                fraction_reached = 1.0 - math.exp(-t_corner / tau_v)
-                scv_bw_lim = min(scv_cfg, scv_cfg * fraction_reached)
-                lines.append(f"  SCV bandwidth limit: {scv_bw_lim:.3f} mm/s (BW_v={self.velocity_bandwidth:.1f} Hz, τ_v={tau_v*1000:.1f}ms)")
-            else:
-                lines.append("  SCV bandwidth limit: unavailable (velocity_bw=0 or torque=0)")
-
-        except Exception as e:
-            lines.append(f"  SCV limits: toolhead state unavailable ({e})")
+        # def get_scv_limits(self, junction_deviation_mm: float = 0.001,
+        #           max_tracking_error_mm: float = 0.05) -> dict:
+        # 'torque': torque_limit,
+        # 'tracking_error': error_limit,
+        scv_limits = self.get_scv_limits(junction_deviation_mm=0.001, max_tracking_error_mm=0.05)
+        lines.append(f"  SCV torque limit: {scv-limits['torque']:.3f} mm/s")
+        lines.append(f"  SCV tracking error limit: {scv-limits['tracking_error']:.3f} mm/s (BW_v={self.velocity_bandwidth:.1f} Hz)")
 
         gcmd.respond_info("\n".join(lines))
 
