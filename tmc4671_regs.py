@@ -712,7 +712,8 @@ def format_q8_8(val: int) -> str:
     """Format a Q8.8 fixed-point value as a string."""
     return "%.3f" % (from_q8_8(val))
 
-def to_q8_8(val):
+def to_q8_8(val: float) -> int:
+    """Convert a float to a Q8.8 fixed-point integer."""
     return round(val * 2**8) & 0xffff
 
 def format_q3_29(val):
