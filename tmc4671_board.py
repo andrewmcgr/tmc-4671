@@ -73,6 +73,7 @@ class FocBoard(FocProfile):
         ('adc_temp_t1',              'float'),  # °C reference temperature
         ('adc_temp_r1',              'float'),  # Ω thermistor resistance at t1
         ('adc_temp_beta',            'float'),  # thermistor beta coefficient
+        ('brake_enable',             'bool'),   # enable brake chopper
     ]
 
 

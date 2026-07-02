@@ -1395,8 +1395,8 @@ class TMC4671:
                              for n in self.fields.get_reg_fields(reg_name, 0)
                              }
 
+        self.brake_enable = config.getboolean('brake_enable', False)
         self.tune_current_pid = config.getboolean('tune_current_pid', False)
-        self.tune_motion_pid = config.getboolean('tune_motion_pid', False)
 
         self.biquad_filters = {}
         for target in BIQUAD_FILTER_TARGETS.keys():
@@ -1597,7 +1597,7 @@ class TMC4671:
         vmr = abs(vmh - vml)
         logging.info("TMC 4671 %s VM samples low=%d high=%d", self.name, vml, vmh)
         high = math.ceil(0.05 * vmr) + vmr // 2 + vmh
-        if high < 65536:
+        if self.brake_enable and high < 65536:
             self.fields.ADC_VM_LIMIT_HIGH.write(high)
             self.fields.ADC_VM_LIMIT_LOW.write(vmr//2 + vmh)
             logging.info("TMC 4671 %s brake thresholds low=%d(%g V) high=%d(%g V)", self.name,
@@ -1606,7 +1606,7 @@ class TMC4671:
         else:
             # What else can we do but turn the brake off?
             self.fields.ADC_VM_LIMIT_HIGH.write(0)
-            self.fields.ADC_VM_LIMIT_LOW.write(0)
+            self.fields.ADC_VM_LIMIT_LOW.write(0xffff)
         self.fields.PWM_CHOP.write(7)
 
     def _sample_adc(self, reg_name):
