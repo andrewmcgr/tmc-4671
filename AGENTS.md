@@ -40,3 +40,7 @@ tmc-4671/
 - **Commit style**: Plain English, no conventional-commit prefixes (e.g. "Add motor inductance measurement", not "feat: add motor inductance measurement").
 - **Git and Branching**: NEVER commit or push directly to the `main` branch. All development and experiments MUST take place on dedicated, descriptive feature branches, with changes merged to `main` only via pull requests.
 - **G-code commands**: When adding or changing a G-code command, update the "G-code command reference" section at the end of `README.md` to reflect the new or changed command, its parameters, and their defaults.
+
+
+Always emit a clean trailing newline after closing a tag block.
+Do not cluster multiple tool arguments or text responses within a single sequence.
