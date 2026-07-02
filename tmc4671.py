@@ -1397,6 +1397,7 @@ class TMC4671:
 
         self.brake_enable = config.getboolean('brake_enable', False)
         self.tune_current_pid = config.getboolean('tune_current_pid', False)
+        self.tune_motion_pid = config.getboolean('tune_motion_pid', False)
 
         self.biquad_filters = {}
         for target in BIQUAD_FILTER_TARGETS.keys():
