@@ -174,7 +174,7 @@ BUILTIN_MOTORS = {
 
 BUILTIN_BOARDS = {
     'OpenFFBoard': {
-        'voltage_scale_ratio':      40.875,
+        'voltage_scale_ratio':      48.667,
         'current_scale_ma_lsb':     1.155,
         'adc_i_ux_select':          0,
         'adc_i_v_select':           2,
@@ -189,7 +189,7 @@ BUILTIN_BOARDS = {
         'adc_temp_beta':            4300.0,
     },
     'Ouroboros': {
-        'voltage_scale_ratio':  40.875,
+        'voltage_scale_ratio':  48.667,
         'current_scale_ma_lsb': 1.272,
         'adc_i_ux_select':      0,
         'adc_i_v_select':       2,
