@@ -1583,23 +1583,22 @@ class TMC4671:
         self.fields.ADC_I0_OFFSET.write(i0_off)
         # Calibrate for VM measurement
         self.fields.CFG_ADC_VM.write(2)
-        vml, vmh = self._sample_vm()
+        vml, vmh, _ = self._sample_vm()
         logging.info("TMC 4671 %s ADC_VM mode 2 %d %d", self.name, vml, vmh)
         self.fields.CFG_ADC_VM.write(5)
-        vml, vmh = self._sample_vm()
+        vml, vmh, self.vm_offset = self._sample_vm()
         logging.info("TMC 4671 %s ADC_VM mode 5 %d %d", self.name, vml, vmh)
-        self.vm_offset = round(mean((vml, vmh)))
         self.fields.CFG_ADC_VM.write(3)
-        vml, vmh = self._sample_vm()
+        vml, vmh, vmm = self._sample_vm()
         logging.info("TMC 4671 %s ADC_VM mode 3 %d %d", self.name, vml, vmh)
-        self.vm_range = round(mean((vml, vmh))) - self.vm_offset
+        self.vm_range = vmm - self.vm_offset
         # logging.info("TMC 4671 %s VM offsets vm_offset=%d vm_range=%d", self.name, self.vm_offset, self.vm_range)
         self.fields.CFG_ADC_VM.write(4)
         logging.info("TMC 4671 %s ADC offsets I0=%d I1=%d", self.name, i0_off, i1_off)
         logging.info("TMC 4671 %s ADC VM offset=%d range=%s VM=%g", self.name,
                     self.vm_offset, self.vm_range, self._read_vm())
         # Now calibrate for brake chopper
-        vml, vmh = self._sample_vm()
+        vml, vmh, _ = self._sample_vm()
         vmr = abs(vmh - vml)
         logging.info("TMC 4671 %s VM samples low=%d high=%d", self.name, vml, vmh)
         high = math.ceil(0.05 * vmr) + vmr // 2 + vmh
@@ -1638,7 +1637,7 @@ class TMC4671:
         for i in range(n):
             vm.append(self.fields.ADC_VM_RAW.read())
             self.printer.lookup_object('toolhead').dwell(0.0005)
-        return min(vm), max(vm)
+        return min(vm), max(vm), mean(vm)
 
     def _convert_vm(self, val):
         # Multiply the ratio by 1.25V (the ADC reference voltage)
