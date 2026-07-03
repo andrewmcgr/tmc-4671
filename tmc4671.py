@@ -1594,7 +1594,7 @@ class TMC4671:
         vml, vmh = self._sample_vm()
         logging.info("TMC 4671 %s ADC_VM mode 7 %d %d", self.name, vml, vmh)
         #self.vm_range = self.vm_offset - round(mean((vml, vmh)))
-        #self.fields.CFG_ADC_VM.write(4)
+        self.fields.CFG_ADC_VM.write(4)
         logging.info("TMC 4671 %s ADC offsets I0=%d I1=%d", self.name, i0_off, i1_off)
         #logging.info("TMC 4671 %s ADC VM offset=%d range=%s VM=%g", self.name,
         #             self.vm_offset, self.vm_range, self._read_vm())
