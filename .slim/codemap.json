@@ -1,0 +1,28 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "last_run": "2026-07-03T11:44:23.571Z",
+    "root": ".",
+    "include_patterns": [
+      "*.py"
+    ],
+    "exclude_patterns": [
+      "node_modules/**",
+      "*.test.py"
+    ],
+    "exceptions": []
+  },
+  "file_hashes": {
+    "__init__.py": "d6159ba56e6f54457f4d3211d61c0e82",
+    "foc_motor.py": "93afe941daab00b3827e4f54a1a80a34",
+    "tmc4671.py": "6a215585ba2608180726960069ed59ce",
+    "tmc4671_biquad.py": "07fcd1568bf526b527e83be35507fede",
+    "tmc4671_board.py": "63f24beee247ee47c52ab4247eda6e1f",
+    "tmc4671_profiles.py": "63c5da6bcef770f5e477c882013e40ac",
+    "tmc4671_regs.py": "7da10c2de19e7b2be91253e9d4a92186",
+    "tmc4671_temperature_sensor.py": "7ea9f4a9073974023c9324b434de1d7d"
+  },
+  "folder_hashes": {
+    ".": "9360437ea9cdd30f56e2c2d5812d6f69"
+  }
+}

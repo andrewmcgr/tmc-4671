@@ -41,6 +41,17 @@ tmc-4671/
 - **Git and Branching**: NEVER commit or push directly to the `main` branch. All development and experiments MUST take place on dedicated, descriptive feature branches, with changes merged to `main` only via pull requests.
 - **G-code commands**: When adding or changing a G-code command, update the "G-code command reference" section at the end of `README.md` to reflect the new or changed command, its parameters, and their defaults.
 
+## Repository Map
+
+A full codemap is available at `codemap.md` in the project root.
+
+Before working on any task, read `codemap.md` to understand:
+- Project architecture and entry points
+- Directory responsibilities and design patterns
+- Data flow and integration points between modules
+
+For deep work on a specific file, also read that file's section in `codemap.md`.
+
 
 Always emit a clean trailing newline after closing a tag block.
 Do not cluster multiple tool arguments or text responses within a single sequence.
