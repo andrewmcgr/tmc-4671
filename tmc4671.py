@@ -1582,22 +1582,22 @@ class TMC4671:
         self.fields.ADC_I1_OFFSET.write(i1_off)
         self.fields.ADC_I0_OFFSET.write(i0_off)
         # Calibrate for VM measurement
-        # Chip errata? This doesn't work.
         self.fields.CFG_ADC_VM.write(2)
         vml, vmh = self._sample_vm()
         logging.info("TMC 4671 %s ADC_VM mode 2 %d %d", self.name, vml, vmh)
         self.fields.CFG_ADC_VM.write(5)
         vml, vmh = self._sample_vm()
         logging.info("TMC 4671 %s ADC_VM mode 5 %d %d", self.name, vml, vmh)
-        #self.vm_offset = round(mean((vml, vmh)))
-        self.fields.CFG_ADC_VM.write(7)
+        self.vm_offset = round(mean((vml, vmh)))
+        self.fields.CFG_ADC_VM.write(3)
         vml, vmh = self._sample_vm()
-        logging.info("TMC 4671 %s ADC_VM mode 7 %d %d", self.name, vml, vmh)
-        #self.vm_range = self.vm_offset - round(mean((vml, vmh)))
+        logging.info("TMC 4671 %s ADC_VM mode 3 %d %d", self.name, vml, vmh)
+        self.vm_range = round(mean((vml, vmh))) - self.vm_offset
+        # logging.info("TMC 4671 %s VM offsets vm_offset=%d vm_range=%d", self.name, self.vm_offset, self.vm_range)
         self.fields.CFG_ADC_VM.write(4)
         logging.info("TMC 4671 %s ADC offsets I0=%d I1=%d", self.name, i0_off, i1_off)
-        #logging.info("TMC 4671 %s ADC VM offset=%d range=%s VM=%g", self.name,
-        #             self.vm_offset, self.vm_range, self._read_vm())
+        logging.info("TMC 4671 %s ADC VM offset=%d range=%s VM=%g", self.name,
+                    self.vm_offset, self.vm_range, self._read_vm())
         # Now calibrate for brake chopper
         vml, vmh = self._sample_vm()
         vmr = abs(vmh - vml)
