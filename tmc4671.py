@@ -1640,8 +1640,10 @@ class TMC4671:
             self.printer.lookup_object('toolhead').dwell(0.0005)
         return min(vm), max(vm)
 
-    def _convert_vm(self, val):
-        return ((val - self.vm_offset) / float(self.vm_range)) * self.voltage_scale
+def _convert_vm(self, val):
+        # Multiply the ratio by 1.25V (the ADC reference voltage)
+        pin_voltage = ((val - self.vm_offset) / float(self.vm_range)) * 1.25
+        return pin_voltage * self.voltage_scale
 
     def _read_vm(self):
         return self._convert_vm(self.fields.ADC_VM_RAW.read())
