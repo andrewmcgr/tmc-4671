@@ -1611,7 +1611,7 @@ class TMC4671:
         else:
             # What else can we do but turn the brake off?
             self.fields.ADC_VM_LIMIT_HIGH.write(0)
-            self.fields.ADC_VM_LIMIT_LOW.write(0xffff)
+            self.fields.ADC_VM_LIMIT_LOW.write(0)
         self.fields.PWM_CHOP.write(7)
 
     def _sample_adc(self, reg_name):
