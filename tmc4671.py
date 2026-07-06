@@ -1985,43 +1985,9 @@ class TMC4671:
         I_DC_RAW_D = mean(id_dc_raw_samples)
         I_DC_RAW_Q = mean(iq_dc_raw_samples)
 
-        # Step 2: High-Frequency AC Injection
-        # We inject a sine wave from the open-loop generator. This is high enough that the rotor stays
-        # completely stationary.
-        # The register value is an angle added to phi_e every cycle, angle units are 2^16 counts/revolution.
-        # However, it's also a Q16.16 fixed-point value, so use 2^32.
-        f_test = 1000
-        dds_value = int(f_test * (2**32) / self.pwmfreq)
-
-        self.fields.PHI_E_SELECTION.write(2)  # Open Loop (DDS) — only needed for AC injection
-        self.fields.OPENLOOP_ACCELERATION.write(dds_value)  # We want snap acceleration for this test
-        self.fields.OPENLOOP_VELOCITY_TARGET.write(dds_value)
-        dwell(1.0)  # 1.0 s electrical settling delay (increased from 200 ms to ensure stability)
-
-        # Step 3: Read Currents
-        # --- Measure True AC Current Magnitude AND Raw Averages ---
-        ac_raw_qd_pairs = []
-        t_start = time.time()
-        for i in range(100):
-            t0 = time.time()
-            qd = self.current_helper.get_qd_current()
-            t1 = time.time()
-            ac_raw_qd_pairs.append((qd, t0, t1))
-            dwell(0.001)
-
-        ac_mag_samples = []
-        id_ac_raw_samples = []
-        iq_ac_raw_samples = []
-        ac_samples_with_time = []
-        for qd, t0, t1 in ac_raw_qd_pairs:
-            iq, id = qd
-            mag = math.sqrt(id**2 + iq**2)
-            ac_mag_samples.append(mag)
-            id_ac_raw_samples.append(id)
-            iq_ac_raw_samples.append(iq)
-            t_mid = (t0 + t1) / 2.0 - t_start
-            ac_samples_with_time.append((mag, t_mid))
-
+        f_test = gcmd.get_float('F_TEST', 1000.0, minval=1.0)
+        n_test = gcmd.get_int('N_TEST', 100, minval=10)
+        ac_samples_with_time, ac_mag_samples, id_ac_raw_samples, iq_ac_raw_samples = self._run_saturated_injection(f_test, n_test, ac_U, dwell)
         I_AC_MAG = mean(ac_mag_samples)
         I_AC_RAW_D = mean(id_ac_raw_samples)
         I_AC_RAW_Q = mean(iq_ac_raw_samples)
@@ -3359,6 +3325,55 @@ class TMC4671:
         self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
 
         return ac_samples
+
+    def _run_saturated_injection(self, f_inject, n_samples, ac_U, dwell):
+        """Switch to open-loop DDS, inject AC at the given frequency, sample, and return all measurement data.
+
+        Used for saturated inductance measurement: injects a sine wave from the
+        open-loop generator. The register value is an angle added to phi_e every
+        cycle — 2^16 counts/revolution, but as a Q16.16 fixed-point value, we
+        use 2^32. This frequency is high enough that the rotor remains stationary.
+
+        Returns: (samples_with_time, mag_samples, id_samples, iq_samples)
+        """
+        # Pre-config: reset DDS state to prevent residual injection from a prior run
+        self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
+        self.fields.OPENLOOP_ACCELERATION.write(0)
+        self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)
+        self.fields.PHI_E_SELECTION.write(2)
+
+        # Compute and write the injection frequency as a Q32 DDS value
+        dds_value = int(f_inject * (2**32) / self.pwmfreq)
+        self.fields.OPENLOOP_ACCELERATION.write(dds_value)
+        self.fields.OPENLOOP_VELOCITY_TARGET.write(dds_value)
+
+        # Electrical settling
+        dwell(1.0)
+
+        # Phase 1: Acquire QD current samples with jitter for equivalent-time sampling
+        raw_qd_pairs = []
+        t_start = time.time()
+        for _ in range(n_samples):
+            t0 = time.time()
+            qd = self.current_helper.get_qd_current()
+            t1 = time.time()
+            raw_qd_pairs.append((qd, t0, t1))
+            dwell(0.001)
+
+        # Phase 2: Decompose into magnitudes and per-axis raw samples
+        ac_samples_with_time = []
+        ac_mag_samples = []
+        id_ac_raw_samples = []
+        iq_ac_raw_samples = []
+        for iq, id in raw_qd_pairs:
+            mag = math.sqrt(id**2 + iq**2)
+            ac_mag_samples.append(mag)
+            id_ac_raw_samples.append(id)
+            iq_ac_raw_samples.append(iq)
+            t_mid = (t0 + t1) / 2.0 - t_start
+            ac_samples_with_time.append((mag, t_mid))
+
+        return ac_samples_with_time, ac_mag_samples, id_ac_raw_samples, iq_ac_raw_samples
 
     def _acquire_impedance_ac_samples(self, f_inject, n_samples, ac_U, dwell):
         # Configure and Start High-Frequency AC Injection
