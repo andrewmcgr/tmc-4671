@@ -1961,7 +1961,7 @@ class TMC4671:
         self.fields.PWM_CHOP.write(7) # Re-enable the gate driver (crucial to apply AC voltage)
 
         # Automated AC Voltage Calculation (parameterised by target current)
-        ac_U = self._calculate_ac_injection_voltage(target_current=0.4)[0]
+        ac_U = self._calculate_ac_injection_voltage(target_current=self.run_current / 5.0)[0]
 
         # Apply the exact same voltage for both tests to calibrate out dead-time
         self.fields.UD_EXT.write(ac_U)
@@ -1992,6 +1992,31 @@ class TMC4671:
         I_AC_MAG = mean(ac_mag_samples)
         I_AC_RAW_D = mean(id_ac_raw_samples)
         I_AC_RAW_Q = mean(iq_ac_raw_samples)
+
+        # --- Measure DC current for saturated phase ---
+        dc_raw_qd_pairs_sat = []
+        for i in range(10):
+            dc_raw_qd_pairs_sat.append(self.current_helper.get_qd_current())
+            dwell(0.001)
+
+        dc_mag_samples_sat = []
+        id_dc_raw_samples_sat = []
+        iq_dc_raw_samples_sat = []
+        for iq, id in dc_raw_qd_pairs_sat:
+            dc_mag_samples_sat.append(math.sqrt(id**2 + iq**2))
+            id_dc_raw_samples_sat.append(id)
+            iq_dc_raw_samples_sat.append(iq)
+
+        I_DC_MAG_sat = mean(dc_mag_samples_sat)
+        I_DC_RAW_D_sat = mean(id_dc_raw_samples_sat)
+        I_DC_RAW_Q_sat = mean(iq_dc_raw_samples_sat)
+
+        # --- Run saturated AC injection at full run_current ---
+        ac_U_sat = self._calculate_ac_injection_voltage(target_current=self.run_current)[0]
+        ac_samples_with_time_sat, ac_mag_samples_sat, id_ac_raw_samples_sat, iq_ac_raw_samples_sat = self._run_ac_inductance(f_test, n_test, ac_U_sat, dwell)
+        I_AC_MAG_sat = mean(ac_mag_samples_sat)
+        I_AC_RAW_D_sat = mean(id_ac_raw_samples_sat)
+        I_AC_RAW_Q_sat = mean(iq_ac_raw_samples_sat)
 
         # Step 4: Cleanup and Re-alignment
         self.fields.UQ_UD_EXT.write(0, 0)
@@ -2030,6 +2055,15 @@ class TMC4671:
         self.motor_lq = motor_lq
         self.motor_saliency = motor_saliency
 
+        # Compute saturated inductance values
+        motor_l_sat, motor_ld_sat, motor_lq_sat, motor_saliency_sat = self._calculate_ac_inductance(
+            I_DC_MAG_sat, I_AC_MAG_sat, ac_samples_with_time_sat, f_test, self.motor_r
+        )
+        self.motor_l_sat = motor_l_sat
+        self.motor_ld_sat = motor_ld_sat
+        self.motor_lq_sat = motor_lq_sat
+        self.motor_saliency_sat = motor_saliency_sat
+
         logging.info("TMC 4671 '%s' L=%g H (ac_U=%d, Vm=%.1f)",
                      self.stepper_name, self.motor_l, ac_U, vm)
         logging.info("TMC 4671 '%s' Method B startup: Ld=%g H, Lq=%g H, saliency=%g",
@@ -2038,6 +2072,12 @@ class TMC4671:
                      I_DC_MAG, I_DC_RAW_D, I_DC_RAW_Q)
         logging.info("   -> AC: Mag=%.3f A (Raw ID=%.3f, IQ=%.3f)",
                      I_AC_MAG, I_AC_RAW_D, I_AC_RAW_Q)
+        logging.info("TMC 4671 '%s' Saturated: L=%g H, Ld=%g H, Lq=%g H, saliency=%g",
+                     self.stepper_name, self.motor_l_sat, self.motor_ld_sat, self.motor_lq_sat, self.motor_saliency_sat)
+        logging.info("   -> DC_sat: Mag=%.3f A (Raw ID=%.3f, IQ=%.3f)",
+                     I_DC_MAG_sat, I_DC_RAW_D_sat, I_DC_RAW_Q_sat)
+        logging.info("   -> AC_sat: Mag=%.3f A (Raw ID=%.3f, IQ=%.3f)",
+                     I_AC_MAG_sat, I_AC_RAW_D_sat, I_AC_RAW_Q_sat)
 
     # Tune PID via a setpoint change experiment
     # See https://folk.ntnu.no/skoge/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf
