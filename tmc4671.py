@@ -3337,6 +3337,29 @@ class TMC4671:
         var_noise = calculate_variance(dc_mags)
         return I_dc_avg, var_noise
 
+    def _run_ac_injection(self, f_inject, n_samples, ac_U, dwell):
+        """Switch to open-loop DDS mode, acquire AC samples, then disable injection.
+
+        Pre-runs OPENLOOP_VELOCITY_TARGET=0 to prevent residual DDS state from a
+        prior run, then overrides with the injection frequency. The chip ignores
+        writes to OPENLOOP_VELOCITY_ACTUAL when ACCELERATION=0, so OPENLOOP_PHI
+        keeps spinning at the prior frequency; this two-step is immune.
+        """
+        # Pre-config: reset all DDS state to prevent residual injection from a prior run
+        self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
+        self.fields.OPENLOOP_ACCELERATION.write(0)
+        self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)
+        self.fields.PHI_E_SELECTION.write(2)
+
+        # Configure and Start High-Frequency AC Injection
+        ac_samples = self._acquire_impedance_ac_samples(f_inject, n_samples, ac_U, dwell)
+
+        # Disable injection immediately
+        self.fields.UD_EXT.write(0)
+        self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+
+        return ac_samples
+
     def _acquire_impedance_ac_samples(self, f_inject, n_samples, ac_U, dwell):
         # Configure and Start High-Frequency AC Injection
         dds_value = int(f_inject * (2**32) / self.pwmfreq)
@@ -3474,19 +3497,8 @@ class TMC4671:
                 # Sample baseline DC/Noise currents
                 I_dc_avg, var_noise = self._measure_impedance_dc_baseline(dwell, 100)
 
-                # 5. Switch to open-loop DDS mode for AC injection
-                self.fields.OPENLOOP_VELOCITY_TARGET.write(0)
-                self.fields.OPENLOOP_ACCELERATION.write(0)
-                self.fields.OPENLOOP_VELOCITY_ACTUAL.write(0)
-                self.fields.PHI_E_SELECTION.write(2)
-
-                # 6. Configure and Start High-Frequency AC Injection
-                # 7. Stochastic AC/Saliency Polling Loop
-                ac_samples = self._acquire_impedance_ac_samples(f_inject, n_samples, ac_U, dwell)
-                
-                # 7. Disable injection immediately
-                self.fields.UD_EXT.write(0)
-                self.fields.MODE_MOTION.write(MotionMode.stopped_mode)
+                # Configure and start high-frequency AC injection, collect samples, then disable
+                ac_samples = self._run_ac_injection(f_inject, n_samples, ac_U, dwell)
                 
                 # =================================================================
                 # 8. DSP & Extraction Algorithms
