@@ -1987,6 +1987,7 @@ class TMC4671:
 
         f_test = gcmd.get_float('F_TEST', 1000.0, minval=1.0)
         n_test = gcmd.get_int('N_TEST', 100, minval=10)
+        dwell(1.0)  # Full mechanical settle before injecting
         ac_samples_with_time, ac_mag_samples, id_ac_raw_samples, iq_ac_raw_samples = self._run_ac_inductance(f_test, n_test, ac_U, dwell)
         I_AC_MAG = mean(ac_mag_samples)
         I_AC_RAW_D = mean(id_ac_raw_samples)
@@ -3319,7 +3320,7 @@ class TMC4671:
         self.fields.OPENLOOP_VELOCITY_TARGET.write(dds_value)
 
         # Electrical settling
-        dwell(1.0)
+        dwell(0.1)
 
         # Phase 1: Acquire QD current samples with jitter for equivalent-time sampling
         raw_qd_pairs = []
