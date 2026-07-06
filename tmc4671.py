@@ -2021,42 +2021,13 @@ class TMC4671:
         # Re-enable the configured biquad filters
         self._setup_filters()
 
-        # =================================================================
-        # Step 4: Hardware-Agnostic Impedance Math
-        # =================================================================
-
-        # Calculate the true voltage passing through the MOSFETs using the DC pulse
-        # V_true = I * R
-        V_true = I_DC_MAG * self.motor_r
-
-        omega = 2.0 * math.pi * f_test
-
-        if I_AC_MAG > 0 and V_true > 0:
-            # Calculate total AC Impedance
-            Z = V_true / I_AC_MAG
-
-            # Isolate the Inductive Reactance (Z^2 = R^2 + X_L^2)
-            Z_sq = Z**2
-            R_sq = self.motor_r**2
-
-            if Z_sq > R_sq:
-                self.motor_l = math.sqrt(Z_sq - R_sq) / omega
-            else:
-                self.motor_l = 0.0
-        else:
-            self.motor_l = 0.0
-
-        if I_AC_MAG > 0 and V_true > 0 and self.motor_l > 0.0:
-            I_ripple_fit, Ld_fit, Lq_fit, sal_fit = self._calculate_impedance_method_b(
-                ac_samples_with_time, I_AC_MAG, f_test, V_true, omega, self.motor_r
-            )
-            self.motor_ld = Ld_fit
-            self.motor_lq = Lq_fit
-            self.motor_saliency = sal_fit
-        else:
-            self.motor_ld = 0.0
-            self.motor_lq = 0.0
-            self.motor_saliency = 1.0
+        motor_l, motor_ld, motor_lq, motor_saliency = self._compute_saturated_inductance(
+            I_DC_MAG, I_AC_MAG, ac_samples_with_time, f_test, self.motor_r
+        )
+        self.motor_l = motor_l
+        self.motor_ld = motor_ld
+        self.motor_lq = motor_lq
+        self.motor_saliency = motor_saliency
 
         logging.info("TMC 4671 '%s' L=%g H (ac_U=%d, Vm=%.1f)",
                      self.stepper_name, self.motor_l, ac_U, vm)
@@ -3374,6 +3345,33 @@ class TMC4671:
             ac_samples_with_time.append((mag, t_mid))
 
         return ac_samples_with_time, ac_mag_samples, id_ac_raw_samples, iq_ac_raw_samples
+
+    def _compute_saturated_inductance(self, I_DC_MAG, I_AC_MAG, ac_samples_with_time, f_test, motor_r):
+        """Compute motor_l, motor_ld, motor_lq, and motor_saliency from saturated injection data.
+
+        Uses the DC baseline voltage (V_true = I_DC_MAG * motor_r) as the nominal AC
+        driving voltage. Z = V_true / I_AC_MAG gives total impedance, and Z² = R² +
+        X_L² isolates inductive reactance. Method B is then applied to the per-axis
+        current samples for axis-inductance fitting.
+        """
+        V_true = I_DC_MAG * motor_r
+        omega = 2.0 * math.pi * f_test
+
+        motor_l = 0.0
+        if I_AC_MAG > 0.0 and V_true > 0.0:
+            Z = V_true / I_AC_MAG
+            Z_sq = Z**2
+            R_sq = motor_r**2
+            if Z_sq > R_sq:
+                motor_l = math.sqrt(Z_sq - R_sq) / omega
+
+        if I_AC_MAG > 0.0 and V_true > 0.0 and motor_l > 0.0:
+            I_ripple_fit, Ld_fit, Lq_fit, sal_fit = self._calculate_impedance_method_b(
+                ac_samples_with_time, I_AC_MAG, f_test, V_true, omega, motor_r
+            )
+            return motor_l, Ld_fit, Lq_fit, sal_fit
+        else:
+            return motor_l, 0.0, 0.0, 1.0
 
     def _acquire_impedance_ac_samples(self, f_inject, n_samples, ac_U, dwell):
         # Configure and Start High-Frequency AC Injection
