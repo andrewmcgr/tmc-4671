@@ -1987,7 +1987,7 @@ class TMC4671:
 
         f_test = gcmd.get_float('F_TEST', 1000.0, minval=1.0)
         n_test = gcmd.get_int('N_TEST', 100, minval=10)
-        ac_samples_with_time, ac_mag_samples, id_ac_raw_samples, iq_ac_raw_samples = self._run_saturated_injection(f_test, n_test, ac_U, dwell)
+        ac_samples_with_time, ac_mag_samples, id_ac_raw_samples, iq_ac_raw_samples = self._run_ac_inductance(f_test, n_test, ac_U, dwell)
         I_AC_MAG = mean(ac_mag_samples)
         I_AC_RAW_D = mean(id_ac_raw_samples)
         I_AC_RAW_Q = mean(iq_ac_raw_samples)
@@ -2021,7 +2021,7 @@ class TMC4671:
         # Re-enable the configured biquad filters
         self._setup_filters()
 
-        motor_l, motor_ld, motor_lq, motor_saliency = self._compute_saturated_inductance(
+        motor_l, motor_ld, motor_lq, motor_saliency = self._calculate_ac_inductance(
             I_DC_MAG, I_AC_MAG, ac_samples_with_time, f_test, self.motor_r
         )
         self.motor_l = motor_l
@@ -3297,7 +3297,7 @@ class TMC4671:
 
         return ac_samples
 
-    def _run_saturated_injection(self, f_inject, n_samples, ac_U, dwell):
+    def _run_ac_inductance(self, f_inject, n_samples, ac_U, dwell):
         """Switch to open-loop DDS, inject AC at the given frequency, sample, and return all measurement data.
 
         Used for saturated inductance measurement: injects a sine wave from the
@@ -3346,7 +3346,7 @@ class TMC4671:
 
         return ac_samples_with_time, ac_mag_samples, id_ac_raw_samples, iq_ac_raw_samples
 
-    def _compute_saturated_inductance(self, I_DC_MAG, I_AC_MAG, ac_samples_with_time, f_test, motor_r):
+    def _calculate_ac_inductance(self, I_DC_MAG, I_AC_MAG, ac_samples_with_time, f_test, motor_r):
         """Compute motor_l, motor_ld, motor_lq, and motor_saliency from saturated injection data.
 
         Uses the DC baseline voltage (V_true = I_DC_MAG * motor_r) as the nominal AC
