@@ -1176,6 +1176,16 @@ class TMC4671:
         self.dead_time_v = 0.0
         self.jmotor = config.getfloat('jmotor', 8.45e-6, above=0.)
         self.jload  = config.getfloat('jload',  5e-5,    above=0.)
+
+    def _calculate_effective_inductance(self, r_override, l_override):
+        """Calculate effective R and L values, choosing between overrides and geometric means of saturation measurements."""
+        eff_r = r_override if r_override is not None else self.motor_r
+        eff_l = l_override if l_override is not None else geometric_mean((self.motor_l, self.motor_l_sat))
+        eff_ld = l_override if l_override is not None else (
+            geometric_mean((self.motor_ld, self.motor_ld_sat)) if self.motor_ld_sat != 0.0 else eff_l)
+        eff_lq = l_override if l_override is not None else (
+            geometric_mean((self.motor_lq, self.motor_lq_sat)) if self.motor_lq_sat != 0.0 else eff_l)
+        return eff_r, eff_l, eff_ld, eff_lq
         # If load_mass is provided, compute the reflected inertia of a linear
         # load driven by a lead-screw or belt.  rotation_distance (mm/rev) is
         # read from the stepper section and converted to m/rev; gear_ratio
@@ -3065,17 +3075,7 @@ class TMC4671:
             Kt = T_h / I_h
 
         # Compute effective R and L values, choosing between overrides and geometric means of saturation measurements
-        eff_r, eff_l, eff_ld, eff_lq = self._compute_effective_parameters(r_override, l_override)
-
-        def _compute_effective_parameters(self, r_override, l_override):
-            """Compute effective R and L values, choosing between overrides and geometric means of saturation measurements."""
-            eff_r = r_override if r_override is not None else self.motor_r
-            eff_l = l_override if l_override is not None else geometric_mean((self.motor_l, self.motor_l_sat))
-            eff_ld = l_override if l_override is not None else (
-                geometric_mean((self.motor_ld, self.motor_ld_sat)) if self.motor_ld_sat != 0.0 else eff_l)
-            eff_lq = l_override if l_override is not None else (
-                geometric_mean((self.motor_lq, self.motor_lq_sat)) if self.motor_lq_sat != 0.0 else eff_l)
-            return eff_r, eff_l, eff_ld, eff_lq
+        eff_r, eff_l, eff_ld, eff_lq = self._calculate_effective_inductance(r_override, l_override)
 
         lines = ["TMC 4671 '%s' Tuning Debug Report" % self.name]
 
