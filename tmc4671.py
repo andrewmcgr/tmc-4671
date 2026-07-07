@@ -2011,6 +2011,7 @@ class TMC4671:
         I_DC_RAW_D_sat = mean(id_dc_raw_samples_sat)
         I_DC_RAW_Q_sat = mean(iq_dc_raw_samples_sat)
 
+        dwell(1.0)  # Full mechanical settle before injecting
         # --- Run saturated AC injection at full run_current ---
         ac_U_sat = self._calculate_ac_injection_voltage(target_current=self.current_helper.get_run_current())[0]
         ac_samples_with_time_sat, ac_mag_samples_sat, id_ac_raw_samples_sat, iq_ac_raw_samples_sat = self._run_ac_inductance(f_test, n_test, ac_U_sat, dwell)
