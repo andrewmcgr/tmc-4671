@@ -1985,8 +1985,8 @@ class TMC4671:
         I_DC_RAW_D = mean(id_dc_raw_samples)
         I_DC_RAW_Q = mean(iq_dc_raw_samples)
 
-        f_test = gcmd.get_float('F_TEST', 1000.0, minval=1.0)
-        n_test = gcmd.get_int('N_TEST', 100, minval=10)
+        f_test = 1000.0
+        n_test = 100
         dwell(1.0)  # Full mechanical settle before injecting
         ac_samples_with_time, ac_mag_samples, id_ac_raw_samples, iq_ac_raw_samples = self._run_ac_inductance(f_test, n_test, ac_U, dwell)
         I_AC_MAG = mean(ac_mag_samples)
