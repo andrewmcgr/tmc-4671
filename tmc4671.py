@@ -3377,7 +3377,8 @@ class TMC4671:
         ac_mag_samples = []
         id_ac_raw_samples = []
         iq_ac_raw_samples = []
-        for iq, id in raw_qd_pairs:
+        for qd_tuple in raw_qd_pairs:
+            iq, id = qd_tuple
             mag = math.sqrt(id**2 + iq**2)
             ac_mag_samples.append(mag)
             id_ac_raw_samples.append(id)
