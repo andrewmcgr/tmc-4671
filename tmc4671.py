@@ -1169,6 +1169,9 @@ class TMC4671:
         self.motor_l = 0.0
         self.motor_ld = 0.0
         self.motor_lq = 0.0
+        self.motor_l_sat = 0.0
+        self.motor_ld_sat = 0.0
+        self.motor_lq_sat = 0.0
         self.motor_saliency = 1.0
         self.dead_time_v = 0.0
         self.jmotor = config.getfloat('jmotor', 8.45e-6, above=0.)
@@ -1675,7 +1678,7 @@ class TMC4671:
         if motor_r is None:
             motor_r = self.motor_r
         if motor_l is None:
-            motor_l = self.motor_l
+            motor_l = self.motor_l_sat
         # 1. Calculate continuous physical gains
         omega_bw = 2.0 * math.pi * current_bandwidth
         Kp_physical = omega_bw * motor_l
@@ -1771,8 +1774,8 @@ class TMC4671:
         return position_p
 
     def _apply_current_pid(self, flux_bw, torque_bw):
-        flux_l = self.motor_ld if self.motor_ld != 0.0 else self.motor_l
-        torque_l = self.motor_lq if self.motor_lq != 0.0 else self.motor_l
+        flux_l = self.motor_ld_sat if self.motor_ld_sat != 0.0 else self.motor_l_sat
+        torque_l = self.motor_lq_sat if self.motor_lq_sat != 0.0 else self.motor_l_sat
         if flux_l == 0.0 or torque_l == 0.0:
             raise self.printer.command_error(
                 "Motor inductance not measured. Run "
@@ -2448,8 +2451,8 @@ class TMC4671:
             omega_m = math.sqrt(v_backemf_sq) / self.motor_kt
 
             # Apply acceleration term if non-zero target
-            if target_accel > 0 and hasattr(self, 'motor_lq'):
-                accel_term = target_accel * self.motor_lq * run_i
+            if target_accel > 0 and hasattr(self, 'motor_lq_sat'):
+                accel_term = target_accel * self.motor_lq_sat * run_i
                 omega_m = (math.sqrt(v_backemf_sq) - accel_term) / self.motor_kt
                 if omega_m <= 0:
                     return 0.0
@@ -3017,6 +3020,10 @@ class TMC4671:
         ld_str = f"{self.motor_ld:.6f} H ({self.motor_ld * 1000.0:.3f} mH)" if self.motor_ld != 0.0 else "Not yet calibrated / measured"
         lq_str = f"{self.motor_lq:.6f} H ({self.motor_lq * 1000.0:.3f} mH)" if self.motor_lq != 0.0 else "Not yet calibrated / measured"
         sal_str = f"{self.motor_saliency:.4f}" if self.motor_saliency != 1.0 else "Not yet calibrated / measured"
+        ind_str_sat = f"{self.motor_l_sat:.6f} H ({self.motor_l_sat * 1000.0:.3f} mH)" if self.motor_l_sat != 0.0 else "Not yet calibrated"
+        ld_str_sat = f"{self.motor_ld_sat:.6f} H ({self.motor_ld_sat * 1000.0:.3f} mH)" if self.motor_ld_sat != 0.0 else "Not yet calibrated / measured"
+        lq_str_sat = f"{self.motor_lq_sat:.6f} H ({self.motor_lq_sat * 1000.0:.3f} mH)" if self.motor_lq_sat != 0.0 else "Not yet calibrated / measured"
+        sal_str_sat = f"{self.motor_saliency_sat:.4f}" if self.motor_saliency_sat != 1.0 else "Not yet calibrated / measured"
 
         def _biquad_str(target):
             bf = self.biquad_filters[target]
@@ -3031,6 +3038,10 @@ class TMC4671:
             f"  Estimated Ld Inductance (motor_ld): {ld_str}\n"
             f"  Estimated Lq Inductance (motor_lq): {lq_str}\n"
             f"  Saliency Ratio (motor_saliency): {sal_str}\n"
+            f"  Estimated Inductance (motor_l_sat): {ind_str_sat}\n"
+            f"  Estimated Ld Inductance (motor_ld_sat): {ld_str_sat}\n"
+            f"  Estimated Lq Inductance (motor_lq_sat): {lq_str_sat}\n"
+            f"  Saliency Ratio (motor_saliency): {sal_str_sat}\n"
             f"  Current Loop Filters:\n"
             f"    Flux:   {_biquad_str('flux')}\n"
             f"    Torque: {_biquad_str('torque')}"
@@ -3054,11 +3065,11 @@ class TMC4671:
             Kt = T_h / I_h
 
         eff_r = r_override if r_override is not None else self.motor_r
-        eff_l = l_override if l_override is not None else self.motor_l
+        eff_l = l_override if l_override is not None else self.motor_l_sat
         eff_ld = l_override if l_override is not None else (
-            self.motor_ld if self.motor_ld != 0.0 else self.motor_l)
+            self.motor_ld_sat if self.motor_ld_sat != 0.0 else self.motor_l_sat)
         eff_lq = l_override if l_override is not None else (
-            self.motor_lq if self.motor_lq != 0.0 else self.motor_l)
+            self.motor_lq_sat if self.motor_lq_sat != 0.0 else self.motor_l_sat)
 
         lines = ["TMC 4671 '%s' Tuning Debug Report" % self.name]
 
