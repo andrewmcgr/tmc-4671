@@ -14,7 +14,7 @@ import math
 import time
 from time import monotonic_ns
 from enum import IntEnum
-from statistics import mean, fmean
+from statistics import mean, fmean, geometric_mean
 from extras import bus, thermistor
 from .tmc4671_regs import (
     Registers6100, Fields6100, Registers,
@@ -3065,11 +3065,11 @@ class TMC4671:
             Kt = T_h / I_h
 
         eff_r = r_override if r_override is not None else self.motor_r
-        eff_l = l_override if l_override is not None else self.motor_l_sat
+        eff_l = l_override if l_override is not None else geometric_mean((self.motor_l, self.motor_l_sat))
         eff_ld = l_override if l_override is not None else (
-            self.motor_ld_sat if self.motor_ld_sat != 0.0 else self.motor_l_sat)
+            geometric_mean((self.motor_ld, self.motor_ld_sat)) if self.motor_ld_sat != 0.0 else eff_l)
         eff_lq = l_override if l_override is not None else (
-            self.motor_lq_sat if self.motor_lq_sat != 0.0 else self.motor_l_sat)
+            geometric_mean((self.motor_lq, self.motor_lq_sat)) if self.motor_lq_sat != 0.0 else eff_l)
 
         lines = ["TMC 4671 '%s' Tuning Debug Report" % self.name]
 
