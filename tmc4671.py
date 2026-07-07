@@ -513,8 +513,10 @@ class CurrentHelper:
                                                maxval=MAX_CURRENT,
                                                default=self.run_current)
         self.flux_current = config.getfloat('flux_current',
-                                               maxval=MAX_CURRENT,
-                                               default=0.)
+                                                maxval=MAX_CURRENT,
+                                                default=0.)
+        self.impedance_current_fraction = config.getfloat(
+            'impedance_current_fraction', 0.2, above=0., maxval=1.)
         self.current_scale = config.getfloat('current_scale_ma_lsb', 1.272,
                                         above=0., maxval=10)
         self.flux_limit = self._calc_flux_limit(self.run_current)
@@ -1961,7 +1963,8 @@ class TMC4671:
         self.fields.PWM_CHOP.write(7) # Re-enable the gate driver (crucial to apply AC voltage)
 
         # Automated AC Voltage Calculation
-        I_target_A = 0.4
+        I_target_A = self.current_helper.get_run_current() * \
+                     self.current_helper.impedance_current_fraction
         V_req = (I_target_A * self.motor_r * 2.0) + 1.2
         vm = self._read_vm()
         # Per-phase voltage budget from helper (FOC mode-aware + pidout scaling)
