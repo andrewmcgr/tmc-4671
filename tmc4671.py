@@ -1684,11 +1684,12 @@ class TMC4671:
     def _tune_torque_pid(self, test_existing, derate, print_time):
         return self._tune_pid("TORQUE", 1.0, derate, test_existing, print_time)
 
-    def _tune_current_pid(self, current_bandwidth, motor_r=None, motor_l=None):
+    def _tune_current_pid(self, current_bandwidth, motor_r=None, motor_l=None, l_override=None):
+        eff_r, eff_l, eff_ld, eff_lq = self._calculate_effective_inductance(motor_r, l_override)
         if motor_r is None:
-            motor_r = self.motor_r
+            motor_r = eff_r
         if motor_l is None:
-            motor_l = self.motor_l_sat
+            motor_l = eff_l
         # 1. Calculate continuous physical gains
         omega_bw = 2.0 * math.pi * current_bandwidth
         Kp_physical = omega_bw * motor_l
@@ -1784,14 +1785,13 @@ class TMC4671:
         return position_p
 
     def _apply_current_pid(self, flux_bw, torque_bw):
-        flux_l = self.motor_ld_sat if self.motor_ld_sat != 0.0 else self.motor_l_sat
-        torque_l = self.motor_lq_sat if self.motor_lq_sat != 0.0 else self.motor_l_sat
-        if flux_l == 0.0 or torque_l == 0.0:
+        eff_r, eff_l, eff_ld, eff_lq = self._calculate_effective_inductance(None, None)
+        if eff_l == 0.0 or eff_ld == 0.0 or eff_lq == 0.0:
             raise self.printer.command_error(
                 "Motor inductance not measured. Run "
                 "FIRMWARE_RESTART to trigger startup calibration first.")
-        P_flux, I_flux = self._tune_current_pid(flux_bw, motor_l=flux_l)
-        P_torque, I_torque = self._tune_current_pid(torque_bw, motor_l=torque_l)
+        P_flux, I_flux = self._tune_current_pid(flux_bw, motor_r=eff_r, motor_l=eff_ld)
+        P_torque, I_torque = self._tune_current_pid(torque_bw, motor_r=eff_r, motor_l=eff_lq)
         for target, bw in (('flux', flux_bw), ('torque', torque_bw)):
             bf = BiquadFilter(
                 type='lpf', freq=round(bw),
@@ -2462,7 +2462,8 @@ class TMC4671:
 
             # Apply acceleration term if non-zero target
             if target_accel > 0 and hasattr(self, 'motor_lq_sat'):
-                accel_term = target_accel * self.motor_lq_sat * run_i
+                _, _, _, eff_lq = self._calculate_effective_inductance(None, None)
+                accel_term = target_accel * eff_lq * run_i
                 omega_m = (math.sqrt(v_backemf_sq) - accel_term) / self.motor_kt
                 if omega_m <= 0:
                     return 0.0
