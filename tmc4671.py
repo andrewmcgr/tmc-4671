@@ -1961,7 +1961,7 @@ class TMC4671:
         self.fields.PWM_CHOP.write(7) # Re-enable the gate driver (crucial to apply AC voltage)
 
         # Automated AC Voltage Calculation (parameterised by target current)
-        ac_U = self._calculate_ac_injection_voltage(target_current=self.run_current / 5.0)[0]
+        ac_U = self._calculate_ac_injection_voltage(target_current=self.current_helper.get_run_current() / 5.0)[0]
 
         # Apply the exact same voltage for both tests to calibrate out dead-time
         self.fields.UD_EXT.write(ac_U)
@@ -2012,7 +2012,7 @@ class TMC4671:
         I_DC_RAW_Q_sat = mean(iq_dc_raw_samples_sat)
 
         # --- Run saturated AC injection at full run_current ---
-        ac_U_sat = self._calculate_ac_injection_voltage(target_current=self.run_current)[0]
+        ac_U_sat = self._calculate_ac_injection_voltage(target_current=self.current_helper.get_run_current())[0]
         ac_samples_with_time_sat, ac_mag_samples_sat, id_ac_raw_samples_sat, iq_ac_raw_samples_sat = self._run_ac_inductance(f_test, n_test, ac_U_sat, dwell)
         I_AC_MAG_sat = mean(ac_mag_samples_sat)
         I_AC_RAW_D_sat = mean(id_ac_raw_samples_sat)
