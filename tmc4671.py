@@ -3064,12 +3064,18 @@ class TMC4671:
         if Kt is None and I_h is not None and T_h is not None:
             Kt = T_h / I_h
 
-        eff_r = r_override if r_override is not None else self.motor_r
-        eff_l = l_override if l_override is not None else geometric_mean((self.motor_l, self.motor_l_sat))
-        eff_ld = l_override if l_override is not None else (
-            geometric_mean((self.motor_ld, self.motor_ld_sat)) if self.motor_ld_sat != 0.0 else eff_l)
-        eff_lq = l_override if l_override is not None else (
-            geometric_mean((self.motor_lq, self.motor_lq_sat)) if self.motor_lq_sat != 0.0 else eff_l)
+        # Compute effective R and L values, choosing between overrides and geometric means of saturation measurements
+        eff_r, eff_l, eff_ld, eff_lq = self._compute_effective_parameters(r_override, l_override)
+
+        def _compute_effective_parameters(self, r_override, l_override):
+            """Compute effective R and L values, choosing between overrides and geometric means of saturation measurements."""
+            eff_r = r_override if r_override is not None else self.motor_r
+            eff_l = l_override if l_override is not None else geometric_mean((self.motor_l, self.motor_l_sat))
+            eff_ld = l_override if l_override is not None else (
+                geometric_mean((self.motor_ld, self.motor_ld_sat)) if self.motor_ld_sat != 0.0 else eff_l)
+            eff_lq = l_override if l_override is not None else (
+                geometric_mean((self.motor_lq, self.motor_lq_sat)) if self.motor_lq_sat != 0.0 else eff_l)
+            return eff_r, eff_l, eff_ld, eff_lq
 
         lines = ["TMC 4671 '%s' Tuning Debug Report" % self.name]
 
