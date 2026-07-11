@@ -1215,7 +1215,14 @@ class TMC4671:
         self.velocity_bandwidth = config.getfloat('velocity_bandwidth', 450.0,
                                                    above=0.)
         self.position_bandwidth = config.getfloat('position_bandwidth', 100.0,
-                                                   above=0.)
+                                                    above=0.)
+        self.bandwidth_filter_ratio = config.getfloat('bandwidth_filter_ratio',
+                                                      3.0, above=2.0)
+        self.current_filter_ratio = config.getfloat('current_filter_ratio',
+                                                    0.4, above=0.0)
+        if self.current_filter_ratio > 0.5:
+            raise self.printer.config_error(
+                'current_filter_ratio must not exceed 0.5')
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, field_meta,
                                    TMC_FREQUENCY, pin_option="cs_pin")
         self.fields = FieldProxy(field_meta, self.mcu_tmc)
@@ -1357,7 +1364,7 @@ class TMC4671:
         set_config_field(config, "PHI_E_SELECTION", 3)
         # 0: phi_e, 3: ABN_e 5: Hall_e 9: ABN_m 12: Hall_m
         set_config_field(config, "POSITION_SELECTION", 9)
-        set_config_field(config, "VELOCITY_SELECTION", 3)
+        set_config_field(config, "VELOCITY_SELECTION", 9)
         #set_config_field(config, "VELOCITY_METER_SELECTION", 0) # Default velocity meter
         set_config_field(config, "VELOCITY_METER_SELECTION", 1) # PWM frequency velocity meter
         set_config_field(config, "MODE_PID_SMPL", 0) # Advanced PID samples position at fPWM
@@ -1374,7 +1381,7 @@ class TMC4671:
             ("FLUX_I", 0.087, "CURRENT_I_n", 1),
             ("TORQUE_P", 9.4, "CURRENT_P_n", 0),
             ("TORQUE_I", 0.087, "CURRENT_I_n", 1),
-            ("VELOCITY_P", 4.5, "VELOCITY_P_n", 0),
+            ("VELOCITY_P", 4.5, "VELOCITY_P_n", 1),
             ("VELOCITY_I", 0.0, "VELOCITY_I_n", 1),
             ("POSITION_P", 2.5, "POSITION_P_n", 0),
             ("POSITION_I", 0.0, "POSITION_I_n", 1)
@@ -1764,12 +1771,14 @@ class TMC4671:
         #   phi_e sources (POSITION_SELECTION 0-8):  65536 = one electrical rev
         #                                             = 1/N_POLE_PAIRS mech rev
         #
-        # Switching from phi_m to phi_e multiplies ERROR_POSITION by N_POLE_PAIRS
-        # for the same physical error, so position_p must be divided by ppoles()
-        # to keep the same closed-loop bandwidth.  Similarly vpoles() accounts for
-        # whether the velocity controller uses mechanical or electrical RPM.
+        # Each revolution of the selected position source carries 65536 angle
+        # counts; each second carries 60 minutes of velocity command.  The
+        # original formula computes a per-revolution value; multiply by 60/65536
+        # to convert that to RPM per count.  vpoles()/ppoles() still account
+        # for mechanical vs. electrical angle sources.
         position_p = (2.0 * math.pi * position_bandwidth
                       / (self.vpoles() * self.ppoles()))
+        position_p *= 60.0 / 65536.0
         return position_p
 
     def _apply_current_pid(self, flux_bw, torque_bw):
@@ -1783,7 +1792,7 @@ class TMC4671:
         P_torque, I_torque = self._tune_current_pid(torque_bw, motor_l=torque_l)
         for target, bw in (('flux', flux_bw), ('torque', torque_bw)):
             bf = BiquadFilter(
-                type='lpf', freq=round(bw),
+                type='lpf', freq=round(self.pwmfreq * self.current_filter_ratio),
                 slope=self.biquad_filters[target].slope)
             self.biquad_filters[target] = bf
             self._setup_filter(BIQUAD_FILTER_TARGETS[target], bf)
@@ -1810,6 +1819,7 @@ class TMC4671:
         p_v, i_v = self._calc_velocity_pid(v_bw)
         p_p = self._calc_position_pid(p_bw)
         i_p = 0.0
+        v_bw = v_bw * self.bandwidth_filter_ratio
         vel_filter = BiquadFilter(
             type='lpf', freq=round(v_bw),
             slope=self.biquad_filters['velocity'].slope)

@@ -207,8 +207,10 @@ section in `printer.cfg` that references them.
 | `current_bandwidth` | float | `1200.0` | Hz | Target bandwidth for flux and torque current loops. Used as default for `flux_bandwidth` and `torque_bandwidth`. |
 | `flux_bandwidth` | float | `current_bandwidth` | Hz | Flux (D-axis) current loop bandwidth. |
 | `torque_bandwidth` | float | `current_bandwidth` | Hz | Torque (Q-axis) current loop bandwidth. |
+| `current_filter_ratio` | float | `0.4` | — | Fraction of PWM frequency used for flux/torque current loop low-pass filter frequency. Range: 0 to 0.5. |
 | `velocity_bandwidth` | float | `450.0` | Hz | Velocity loop bandwidth. |
 | `position_bandwidth` | float | `100.0` | Hz | Position loop bandwidth. |
+| `bandwidth_filter_ratio` | float | `3.0` | — | Multiplier applied to the velocity bandwidth before constructing the velocity low-pass filter. Effective filter frequency = `velocity_bandwidth × bandwidth_filter_ratio`. |
 | `velocity_alpha` | float | `0.35` | — | Velocity low-pass filter coefficient (0 = no filtering, 1 = maximum). |
 
 ### PID gains
