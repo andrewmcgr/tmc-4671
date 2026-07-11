@@ -1217,10 +1217,12 @@ class TMC4671:
         self.position_bandwidth = config.getfloat('position_bandwidth', 100.0,
                                                     above=0.)
         self.bandwidth_filter_ratio = config.getfloat('bandwidth_filter_ratio',
-                                                       3.0, min_val=2.0)
+                                                      3.0, above=2.0)
         self.current_filter_ratio = config.getfloat('current_filter_ratio',
-                                                    0.4, min_val=0.0,
-                                                    max_val=0.5)
+                                                    0.4, above=0.0)
+        if self.current_filter_ratio > 0.5:
+            raise self.printer.config_error(
+                'current_filter_ratio must not exceed 0.5')
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, field_meta,
                                    TMC_FREQUENCY, pin_option="cs_pin")
         self.fields = FieldProxy(field_meta, self.mcu_tmc)
