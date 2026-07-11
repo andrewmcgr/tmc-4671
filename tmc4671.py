@@ -1771,12 +1771,14 @@ class TMC4671:
         #   phi_e sources (POSITION_SELECTION 0-8):  65536 = one electrical rev
         #                                             = 1/N_POLE_PAIRS mech rev
         #
-        # Switching from phi_m to phi_e multiplies ERROR_POSITION by N_POLE_PAIRS
-        # for the same physical error, so position_p must be divided by ppoles()
-        # to keep the same closed-loop bandwidth.  Similarly vpoles() accounts for
-        # whether the velocity controller uses mechanical or electrical RPM.
+        # Each revolution of the selected position source carries 65536 angle
+        # counts; each second carries 60 minutes of velocity command.  The
+        # original formula computes a per-radian value; multiply by 65536/60
+        # to convert that to RPM per count.  vpoles()/ppoles() still account
+        # for mechanical vs. electrical angle sources.
         position_p = (2.0 * math.pi * position_bandwidth
                       / (self.vpoles() * self.ppoles()))
+        position_p *= 65536.0 / 60.0
         return position_p
 
     def _apply_current_pid(self, flux_bw, torque_bw):
