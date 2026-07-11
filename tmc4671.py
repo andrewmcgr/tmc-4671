@@ -1218,6 +1218,9 @@ class TMC4671:
                                                     above=0.)
         self.bandwidth_filter_ratio = config.getfloat('bandwidth_filter_ratio',
                                                        3.0, min_val=2.0)
+        self.current_filter_ratio = config.getfloat('current_filter_ratio',
+                                                    0.4, min_val=0.0,
+                                                    max_val=0.5)
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, field_meta,
                                    TMC_FREQUENCY, pin_option="cs_pin")
         self.fields = FieldProxy(field_meta, self.mcu_tmc)
@@ -1785,7 +1788,7 @@ class TMC4671:
         P_torque, I_torque = self._tune_current_pid(torque_bw, motor_l=torque_l)
         for target, bw in (('flux', flux_bw), ('torque', torque_bw)):
             bf = BiquadFilter(
-                type='lpf', freq=round(bw),
+                type='lpf', freq=round(self.pwmfreq * self.current_filter_ratio),
                 slope=self.biquad_filters[target].slope)
             self.biquad_filters[target] = bf
             self._setup_filter(BIQUAD_FILTER_TARGETS[target], bf)
