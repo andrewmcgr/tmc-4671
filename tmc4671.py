@@ -1215,7 +1215,9 @@ class TMC4671:
         self.velocity_bandwidth = config.getfloat('velocity_bandwidth', 450.0,
                                                    above=0.)
         self.position_bandwidth = config.getfloat('position_bandwidth', 100.0,
-                                                   above=0.)
+                                                    above=0.)
+        self.bandwidth_filter_ratio = config.getfloat('bandwidth_filter_ratio',
+                                                       3.0, min_val=2.0)
         self.mcu_tmc = MCU_TMC_SPI(config, Registers, field_meta,
                                    TMC_FREQUENCY, pin_option="cs_pin")
         self.fields = FieldProxy(field_meta, self.mcu_tmc)
@@ -1810,6 +1812,7 @@ class TMC4671:
         p_v, i_v = self._calc_velocity_pid(v_bw)
         p_p = self._calc_position_pid(p_bw)
         i_p = 0.0
+        v_bw = v_bw * self.bandwidth_filter_ratio
         vel_filter = BiquadFilter(
             type='lpf', freq=round(v_bw),
             slope=self.biquad_filters['velocity'].slope)

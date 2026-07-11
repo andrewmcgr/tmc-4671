@@ -209,6 +209,7 @@ section in `printer.cfg` that references them.
 | `torque_bandwidth` | float | `current_bandwidth` | Hz | Torque (Q-axis) current loop bandwidth. |
 | `velocity_bandwidth` | float | `450.0` | Hz | Velocity loop bandwidth. |
 | `position_bandwidth` | float | `100.0` | Hz | Position loop bandwidth. |
+| `bandwidth_filter_ratio` | float | `3.0` | — | Multiplier applied to the velocity bandwidth before constructing the velocity low-pass filter. Effective filter frequency = `velocity_bandwidth × bandwidth_filter_ratio`. |
 | `velocity_alpha` | float | `0.35` | — | Velocity low-pass filter coefficient (0 = no filtering, 1 = maximum). |
 
 ### PID gains
