@@ -1381,7 +1381,7 @@ class TMC4671:
             ("FLUX_I", 0.087, "CURRENT_I_n", 1),
             ("TORQUE_P", 9.4, "CURRENT_P_n", 0),
             ("TORQUE_I", 0.087, "CURRENT_I_n", 1),
-            ("VELOCITY_P", 4.5, "VELOCITY_P_n", 0),
+            ("VELOCITY_P", 4.5, "VELOCITY_P_n", 1),
             ("VELOCITY_I", 0.0, "VELOCITY_I_n", 1),
             ("POSITION_P", 2.5, "POSITION_P_n", 0),
             ("POSITION_I", 0.0, "POSITION_I_n", 1)

@@ -782,7 +782,7 @@ FieldFormatters = {
     "PID_FLUX_I": format_q4_12,
     "PID_TORQUE_P": format_q4_12,
     "PID_TORQUE_I": format_q4_12,
-    "PID_VELOCITY_P": format_q8_8,
+    "PID_VELOCITY_P": format_q4_12,
     "PID_VELOCITY_I": format_q4_12,
     "PID_POSITION_P": format_q8_8,
     "PID_POSITION_I": format_q4_12,
