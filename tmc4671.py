@@ -1612,15 +1612,16 @@ class TMC4671:
         logging.info("TMC 4671 %s VM samples low=%d high=%d", self.name, vml, vmh)
         high = math.ceil(0.05 * vmr) + vmr // 2 + vmh
         if self.brake_enable and high < 65536:
-            self.fields.ADC_VM_LIMIT_HIGH.write(high)
             self.fields.ADC_VM_LIMIT_LOW.write(vmr//2 + vmh)
+            self.fields.ADC_VM_LIMIT_HIGH.write(high)
             logging.info("TMC 4671 %s brake thresholds low=%d(%g V) high=%d(%g V)", self.name,
                          vmr//2+vmh, self._convert_vm(vmr//2+vmh),
                          high, self._convert_vm(high))
         else:
             # What else can we do but turn the brake off?
-            self.fields.ADC_VM_LIMIT_HIGH.write(0)
-            self.fields.ADC_VM_LIMIT_LOW.write(0)
+            # This is not what the datasheet says, but it is how to do this safely.
+            self.fields.ADC_VM_LIMIT_LOW.write(0xffff)
+            self.fields.ADC_VM_LIMIT_HIGH.write(0xffff)
         self.fields.PWM_CHOP.write(7)
 
     def _sample_adc(self, reg_name):
