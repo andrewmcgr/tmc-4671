@@ -573,6 +573,11 @@ Fields["INTERIM_PWM_WY_UX"] = {
     "INTERIM_PWM_WY": 0xffff << 16
 }
 
+Fields["INTERIM_FOC_IQ_ID"] = {
+    "INTERIM_FOC_ID": 0xffff,
+    "INTERIM_FOC_IQ": 0xffff << 16
+}
+
 
 Fields["ADC_VM_LIMITS"] = {
     "ADC_VM_LIMIT_LOW": 0xffff,
@@ -654,6 +659,8 @@ SignedFields = {"ADC_I1_SCALE", "ADC_I0_SCALE", "AENC_0_SCALE", "AENC_1_SCALE",
                 "INTERIM_FOC_IV",
                 "INTERIM_FOC_IB_IA",
                 "INTERIM_FOC_IQ_ID",
+                "INTERIM_FOC_ID",
+                "INTERIM_FOC_IQ",
                 "INTERIM_FOC_UQ_UD",
                 "INTERIM_FOC_UQ_UD_LIMITED",
                 "INTERIM_FOC_UB_UA",
@@ -692,9 +699,32 @@ def format_q4_12(val: int) -> str:
     """Format a Q4.12 fixed-point value as a string."""
     return "%.4f" % (val * 2**-12)
 
-def to_q4_12(val: float) -> int:
-    """Convert a float to a Q4.12 fixed-point integer."""
-    return round(val * 2**12) & 0xffff
+def to_q4_12(value: float | int) -> int:
+    """
+    Converts a real-number input into a signed Q4.12 fixed-point integer (16-bit representation).
+
+    Range: [-8.0, 7.999755859375]
+    Resolution: 1 / 4096 (~0.00024414)
+
+    Handles saturation on overflow/underflow to avoid wraparound sign errors.
+    """
+    if math.isnan(value):
+        raise ValueError("Cannot convert NaN to Q4.12 fixed point.")
+
+    # Q4.12 scaling factor: 2^12 = 4096
+    scale = 1 << 12
+
+    # Range clamping (saturation arithmetic) for signed 16-bit bounds
+    min_val = -8.0
+    max_val = 32767 / 4096  # 7.999755859375
+
+    clamped_val = max(min_val, min(max_val, float(value)))
+
+    # Scale and round to nearest integer
+    scaled_int = round(clamped_val * scale)
+
+    # Map to 16-bit bitfield via two's complement mask
+    return scaled_int & 0xFFFF
 
 def from_q4_12(val: int) -> float:
     """Convert a Q4.12 fixed-point integer to a float."""
@@ -712,9 +742,32 @@ def format_q8_8(val: int) -> str:
     """Format a Q8.8 fixed-point value as a string."""
     return "%.3f" % (from_q8_8(val))
 
-def to_q8_8(val: float) -> int:
-    """Convert a float to a Q8.8 fixed-point integer."""
-    return round(val * 2**8) & 0xffff
+def to_q8_8(value: float | int) -> int:
+    """
+    Converts a real-number input into a signed Q8.8 fixed-point integer (16-bit representation).
+
+    Range: [-128.0, 127.99609375]
+    Resolution: 1 / 256 (~0.00390625)
+
+    Handles saturation on overflow/underflow to avoid wraparound sign errors.
+    """
+    if math.isnan(value):
+        raise ValueError("Cannot convert NaN to Q8.8 fixed point.")
+
+    # Q8.8 scaling factor: 2^8 = 256
+    scale = 1 << 8
+
+    # Range clamping (saturation arithmetic) to prevent sign flips on overflow
+    min_val = -128.0
+    max_val = 127.99609375  # (32767 / 256)
+
+    clamped_val = max(min_val, min(max_val, float(value)))
+
+    # Scale and round to nearest integer (round-half-to-even)
+    scaled_int = round(clamped_val * scale)
+
+    # Convert to unsigned 16-bit integer (two's complement bit mask)
+    return scaled_int & 0xFFFF
 
 def format_q3_29(val: int) -> str:
     """Format a Q3.29 fixed-point value as a string."""

@@ -172,9 +172,19 @@ class FieldHelper:
             mask = 0xffffffff
         else:
             mask = self.all_fields[reg_name][field_name]
-        field_value = (reg_value & mask) >> ffs(mask)
-        if field_name in self.signed_fields and ((reg_value & mask)<<1) > mask:
-            field_value -= (1 << field_value.bit_length())
+            
+        shift = ffs(mask)
+        field_value = (reg_value & mask) >> shift
+        
+        if field_name in self.signed_fields:
+            # Determine bit-width of the field from mask
+            field_width = (mask >> shift).bit_length()
+            sign_bit = 1 << (field_width - 1)
+            
+            # If sign bit is set, subtract 2^field_width
+            if field_value & sign_bit:
+                field_value -= (1 << field_width)
+                
         return field_value
     def set_field(self, field_name: str, field_value: int, reg_value: Optional[int] = None, reg_name: Optional[str] = None) -> int:
         """Returns register value with field bits filled with supplied value."""
@@ -182,11 +192,24 @@ class FieldHelper:
             reg_name = self.lookup_register(field_name)
         if reg_value is None:
             reg_value = self.registers.get(reg_name, 0)
-        if reg_name == field_name:
+
+        if reg_name not in self.all_fields:
             mask = 0xffffffff
         else:
             mask = self.all_fields[reg_name][field_name]
-        new_value = (reg_value & ~mask) | ((field_value << ffs(mask)) & mask)
+
+        shift = ffs(mask)
+
+        # Calculate the bit-width of the target field
+        field_width = (mask >> shift).bit_length()
+
+        # Truncate field_value to field_width bits (handles negative integers & overflow safely)
+        field_mask = (1 << field_width) - 1
+        sanitized_value = field_value & field_mask
+
+        # Clear target bits and merge sanitized value
+        new_value = (reg_value & ~mask) | ((sanitized_value << shift) & mask)
+
         self.registers[reg_name] = new_value
         return new_value
     def set_config_field(self, config: Any, field_name: str, default: Any, convert: Callable[[Any], Any] = lambda x: x) -> int:
@@ -3019,23 +3042,16 @@ class TMC4671:
         iwy = ch.convert_adc_current(self.fields.ADC_IWY.read())
         
         # Read FOC Target Currents (d/q axis)
-        flux_target_raw, torque_target_raw = self.fields.PID_TORQUE_FLUX_TARGET.read()
-        flux_target = ch.convert_adc_current(flux_target_raw)
-        torque_target = ch.convert_adc_current(torque_target_raw)
+        flux_target = ch.convert_adc_current(self.fields.PID_FLUX_TARGET.read())
+        torque_target = ch.convert_adc_current(self.fields.PID_TORQUE_TARGET.read())
         
         # Read FOC Actual Currents (d/q axis)
-        flux_actual_raw, torque_actual_raw = self.fields.PID_TORQUE_FLUX_ACTUAL.read()
-        flux_actual = ch.convert_adc_current(flux_actual_raw)
-        torque_actual = ch.convert_adc_current(torque_actual_raw)
+        flux_actual = ch.convert_adc_current(self.fields.PID_FLUX_ACTUAL.read())
+        torque_actual = ch.convert_adc_current(self.fields.PID_TORQUE_ACTUAL.read())
         
         # Read FOC Interim Currents
-        reg_foc_val = self.mcu_tmc.get_register("INTERIM_FOC_IQ_ID")
-        id_raw = reg_foc_val & 0xFFFF
-        iq_raw = (reg_foc_val >> 16) & 0xFFFF
-        id_foc = id_raw if id_raw < 32768 else id_raw - 65536
-        iq_foc = iq_raw if iq_raw < 32768 else iq_raw - 65536
-        id_foc_a = ch.convert_adc_current(id_foc)
-        iq_foc_a = ch.convert_adc_current(iq_foc)
+        id_foc = ch.convert_adc_current(self.fields.INTERIM_FOC_ID.read())
+        iq_foc = ch.convert_adc_current(self.fields.INTERIM_FOC_IQ.read())
 
         gcmd.respond_info(
             f"TMC 4671 '{self.name}' Current Debug Report:\n"
@@ -3053,8 +3069,8 @@ class TMC4671:
             f"    Id (Flux Actual):   {flux_actual: .3f} A\n"
             f"    Iq (Torque Actual): {torque_actual: .3f} A\n"
             f"  FOC Interim (ID/IQ):\n"
-            f"    Id (Interim Flux):  {id_foc_a: .3f} A (raw: {id_foc:6d})\n"
-            f"    Iq (Interim Torque): {iq_foc_a: .3f} A (raw: {iq_foc:6d})"
+            f"    Id (Interim Flux):  {id_foc: .3f} A\n"
+            f"    Iq (Interim Torque): {iq_foc: .3f} A"
         )
 
     cmd_TMC_DEBUG_MOTOR_help = "Report estimated motor parameters (resistance and inductance)"
