@@ -1342,7 +1342,7 @@ class TMC4671:
             set_config6100_field(config, "DRVSTRENGTH", 0)
             set_config6100_field(config, "BBMCLKS", 10)
         self.pwm_freq_target = config.getfloat('pwm_freq_target',
-                                               default=142857,
+                                               default=24414,
                                                minval=10e3, maxval=150e3)
         maxcnt = int((4.0 * TMC_FREQUENCY / self.pwm_freq_target) - 1)
         set_config_field(config, "PWM_MAXCNT", maxcnt)
