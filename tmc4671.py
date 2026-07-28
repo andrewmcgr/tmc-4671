@@ -7,6 +7,7 @@
 # Copyright (C) 2018-2020  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
+from __future__ import annotations
 from typing import Optional, Any, Callable
 import dataclasses
 import logging, collections
