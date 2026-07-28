@@ -1,4 +1,5 @@
 # TMC4671 motor profile config section
+from __future__ import annotations
 #
 # Copyright (C) 2024  Andrew McGregor <andrewmcgr@gmail.com>
 #

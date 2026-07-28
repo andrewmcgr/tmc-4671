@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Any
 
 # TMC4671 AGPI temperature sensor integration for Kalico/Klipper

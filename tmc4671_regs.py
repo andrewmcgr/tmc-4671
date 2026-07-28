@@ -1,4 +1,6 @@
+from __future__ import annotations
 import math
+from typing import Union
 
 ######################################################################
 # Register map for the 6100 companion chip
@@ -699,7 +701,7 @@ def format_q4_12(val: int) -> str:
     """Format a Q4.12 fixed-point value as a string."""
     return "%.4f" % (val * 2**-12)
 
-def to_q4_12(value: float | int) -> int:
+def to_q4_12(value: Union[float, int]) -> int:
     """
     Converts a real-number input into a signed Q4.12 fixed-point integer (16-bit representation).
 
@@ -742,7 +744,7 @@ def format_q8_8(val: int) -> str:
     """Format a Q8.8 fixed-point value as a string."""
     return "%.3f" % (from_q8_8(val))
 
-def to_q8_8(value: float | int) -> int:
+def to_q8_8(value: Union[float, int]) -> int:
     """
     Converts a real-number input into a signed Q8.8 fixed-point integer (16-bit representation).
 

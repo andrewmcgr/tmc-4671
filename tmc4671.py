@@ -7,6 +7,7 @@
 # Copyright (C) 2018-2020  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
+from __future__ import annotations
 from typing import Optional, Any, Callable
 import dataclasses
 import logging, collections
@@ -1387,7 +1388,7 @@ class TMC4671:
         set_config_field(config, "PHI_E_SELECTION", 3)
         # 0: phi_e, 3: ABN_e 5: Hall_e 9: ABN_m 12: Hall_m
         set_config_field(config, "POSITION_SELECTION", 9)
-        set_config_field(config, "VELOCITY_SELECTION", 9)
+        set_config_field(config, "VELOCITY_SELECTION", 3)
         #set_config_field(config, "VELOCITY_METER_SELECTION", 0) # Default velocity meter
         set_config_field(config, "VELOCITY_METER_SELECTION", 1) # PWM frequency velocity meter
         set_config_field(config, "MODE_PID_SMPL", 0) # Advanced PID samples position at fPWM
@@ -1801,7 +1802,7 @@ class TMC4671:
         # to convert that to RPM per count.  vpoles()/ppoles() still account
         # for mechanical vs. electrical angle sources.
         position_p = (2.0 * math.pi * position_bandwidth
-                      / (self.vpoles() * self.ppoles()))
+                      * self.vpoles() / self.ppoles())
         position_p *= 60.0 / 65536.0
         return position_p
 
